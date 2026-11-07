@@ -824,20 +824,10 @@ function SideScreen({
         <meshStandardMaterial color={BRASS} metalness={0.8} roughness={0.25} />
       </mesh>
       {onOpen && (
-        <Html position={[0, -1.0, 0.1]} center distanceFactor={14} style={{ pointerEvents: 'none' }}>
-          <div
-            style={{
-              fontFamily: 'Share Tech Mono, monospace',
-              fontSize: '10px',
-              color: accent,
-              letterSpacing: '0.08em',
-              whiteSpace: 'nowrap',
-              opacity: 0.85,
-            }}
-          >
-            click · desk ops
-          </div>
-        </Html>
+        <mesh position={[0, -1.0, 0.1]}>
+          <planeGeometry args={[1.4, 0.18]} />
+          <meshBasicMaterial color={accent} transparent opacity={0.75} toneMapped={false} />
+        </mesh>
       )}
     </group>
   )
@@ -862,19 +852,26 @@ function BankEnclosure() {
 
   return (
     <group>
-      {/* Solid floor — marble-dark bank slab + aisle carpet */}
-      <mesh position={[0, -0.1, midZ]} receiveShadow>
+      {/* Solid floor — marble-dark bank slab + aisle carpet (no shadow recv; lights don't cast) */}
+      <mesh position={[0, -0.1, midZ]}>
         <boxGeometry args={[width + 0.6, 0.22, depth + 0.6]} />
         <meshStandardMaterial color={FLOOR} roughness={0.55} metalness={0.28} />
       </mesh>
-      <mesh position={[0, 0.01, midZ]} receiveShadow>
+      <mesh position={[0, 0.01, midZ]}>
         <boxGeometry args={[width - 0.2, 0.04, depth - 0.25]} />
         <meshStandardMaterial color="#1a1230" roughness={0.42} metalness={0.32} />
       </mesh>
-      {/* Subtle tile grid — bank floor, not floating void */}
-      <gridHelper args={[width - 1.2, 20, '#2a1860', '#1a0e38']} position={[0, 0.03, midZ]} />
+      {/* Tile read via sparse glow dots instead of a 20×20 gridHelper (huge line cost) */}
+      {([-4, -2, 0, 2, 4] as const).map((gx) =>
+        ([-8, -4, 0, 4] as const).map((gz) => (
+          <mesh key={`${gx}-${gz}`} position={[gx, 0.032, midZ + gz]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[0.08, 0.08]} />
+            <meshBasicMaterial color="#2a1860" transparent opacity={0.55} depthWrite={false} toneMapped={false} />
+          </mesh>
+        )),
+      )}
       {/* Center aisle carpet runner */}
-      <mesh position={[0, 0.025, midZ]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+      <mesh position={[0, 0.025, midZ]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[2.4, depth - 1.2]} />
         <meshStandardMaterial color="#2a1040" roughness={0.85} metalness={0.08} />
       </mesh>
@@ -954,13 +951,13 @@ function BankEnclosure() {
                 <sphereGeometry args={[0.07, 8, 8]} />
                 <meshBasicMaterial color={i % 2 === 0 ? '#7ef9ff' : '#f9c80e'} toneMapped={false} />
               </mesh>
-              {/* Real lights only on every other sconce — bulbs still glow via meshBasic */}
-              {i % 2 === 0 && (
+              {/* Two real sconce lights total (one per wall mid) — all bulbs still glow via meshBasic */}
+              {i === 1 && (
                 <pointLight
                   position={[side * -0.35, 0, 0]}
-                  intensity={0.48}
-                  color={i % 2 === 0 ? '#7ef9ff' : '#ffe0a0'}
-                  distance={5.5}
+                  intensity={0.55}
+                  color="#ffe0a0"
+                  distance={6}
                 />
               )}
             </group>
@@ -1098,40 +1095,9 @@ function BankEnclosure() {
         </group>
       ))}
 
-      {/* Safe-deposit box wall flanking the vault door */}
+      {/* Safe-deposit box walls — painted face (same look, 1 draw vs 24 meshes each) */}
       {([-1, 1] as const).map((side) => (
-        <group key={`boxes-${side}`} position={[side * 3.35, 1.55, zBack + 0.35]}>
-          <mesh>
-            <boxGeometry args={[1.8, 2.4, 0.28]} />
-            <meshStandardMaterial color="#16101c" metalness={0.55} roughness={0.4} />
-          </mesh>
-          {Array.from({ length: 4 }).map((_, row) =>
-            Array.from({ length: 3 }).map((_, col) => (
-              <mesh
-                key={`${row}-${col}`}
-                position={[(col - 1) * 0.5, 0.85 - row * 0.52, 0.16]}
-              >
-                <boxGeometry args={[0.42, 0.4, 0.04]} />
-                <meshStandardMaterial color="#2a2438" metalness={0.65} roughness={0.32} />
-              </mesh>
-            )),
-          )}
-          {Array.from({ length: 4 }).map((_, row) =>
-            Array.from({ length: 3 }).map((_, col) => (
-              <mesh
-                key={`knob-${row}-${col}`}
-                position={[(col - 1) * 0.5 + 0.12, 0.85 - row * 0.52, 0.2]}
-              >
-                <cylinderGeometry args={[0.025, 0.025, 0.03, 8]} />
-                <meshStandardMaterial color={BRASS} metalness={0.9} roughness={0.2} />
-              </mesh>
-            )),
-          )}
-          <mesh position={[0, 1.28, 0.16]}>
-            <boxGeometry args={[1.7, 0.04, 0.05]} />
-            <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
-          </mesh>
-        </group>
+        <SafeDepositFace key={`boxes-${side}`} side={side} z={zBack + 0.35} />
       ))}
 
       <WallClock position={[0, ceilY - 1.15, zBack + 0.2]} />
@@ -1146,6 +1112,55 @@ function BankEnclosure() {
       {([-1, 1] as const).map((side) => (
         <Planter key={`plant-${side}`} x={side * (portalW / 2 + 1.1)} z={zFront - 1.1} />
       ))}
+    </group>
+  )
+}
+
+/** One painted deposit-box face — same vault look, one textured plane. */
+function SafeDepositFace({ side, z }: { side: -1 | 1; z: number }) {
+  const map = useMemo(() => {
+    const c = document.createElement('canvas')
+    c.width = 384
+    c.height = 512
+    const ctx = c.getContext('2d')!
+    ctx.fillStyle = '#16101c'
+    ctx.fillRect(0, 0, 384, 512)
+    ctx.fillStyle = '#c9a227'
+    ctx.fillRect(24, 28, 336, 10)
+    for (let row = 0; row < 4; row++) {
+      for (let col = 0; col < 3; col++) {
+        const x = 36 + col * 112
+        const y = 56 + row * 110
+        ctx.fillStyle = '#2a2438'
+        ctx.fillRect(x, y, 96, 92)
+        ctx.strokeStyle = '#3a3450'
+        ctx.lineWidth = 2
+        ctx.strokeRect(x + 1, y + 1, 94, 90)
+        ctx.fillStyle = '#c9a227'
+        ctx.beginPath()
+        ctx.arc(x + 72, y + 46, 8, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+    const tex = new CanvasTexture(c)
+    tex.needsUpdate = true
+    return tex
+  }, [])
+  useEffect(() => () => map.dispose(), [map])
+  return (
+    <group position={[side * 3.35, 1.55, z]}>
+      <mesh>
+        <boxGeometry args={[1.8, 2.4, 0.28]} />
+        <meshStandardMaterial color="#16101c" metalness={0.55} roughness={0.4} />
+      </mesh>
+      <mesh position={[0, 0, 0.15]}>
+        <planeGeometry args={[1.7, 2.25]} />
+        <meshBasicMaterial map={map} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, 1.28, 0.16]}>
+        <boxGeometry args={[1.7, 0.04, 0.05]} />
+        <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} />
+      </mesh>
     </group>
   )
 }
@@ -1238,15 +1253,46 @@ function SecurityCam({ side, x, y, z }: { side: -1 | 1; x: number; y: number; z:
 
 function ServingSign({ side, x, z }: { side: -1 | 1; x: number; z: number }) {
   const glow = useRef<Mesh>(null)
-  const [ticket, setTicket] = useState(() => 100 + side * 12)
+  const ticket = useRef(100 + side * 12)
+  const map = useMemo(() => {
+    const c = document.createElement('canvas')
+    c.width = 256
+    c.height = 128
+    const tex = new CanvasTexture(c)
+    tex.needsUpdate = true
+    return tex
+  }, [])
+  const paint = (n: number) => {
+    const c = map.image as HTMLCanvasElement
+    const ctx = c.getContext('2d')!
+    ctx.clearRect(0, 0, 256, 128)
+    ctx.fillStyle = '#050812'
+    ctx.fillRect(0, 0, 256, 128)
+    ctx.fillStyle = '#39ff14'
+    ctx.font = 'bold 22px Share Tech Mono, monospace'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('NOW SERVING', 128, 42)
+    ctx.fillStyle = '#f9c80e'
+    ctx.font = 'bold 36px Share Tech Mono, monospace'
+    ctx.fillText(String(n % 1000).padStart(3, '0'), 128, 88)
+    map.needsUpdate = true
+  }
   useEffect(() => {
+    paint(ticket.current)
     const id = window.setInterval(() => {
-      setTicket((n) => n + 1 + (Math.random() > 0.7 ? 1 : 0))
+      ticket.current += 1 + (Math.random() > 0.7 ? 1 : 0)
+      paint(ticket.current)
     }, 5200 + side * 900)
-    return () => window.clearInterval(id)
-  }, [side])
+    return () => {
+      window.clearInterval(id)
+      map.dispose()
+    }
+  }, [side, map])
   useFrame(({ clock }) => {
     if (!glow.current) return
+    // Half-rate pulse
+    if (((clock.getElapsedTime() * 30) | 0) % 2) return
     const mat = glow.current.material as { emissiveIntensity?: number }
     if (mat.emissiveIntensity != null) {
       mat.emissiveIntensity = 0.25 + Math.sin(clock.getElapsedTime() * 2.8 + side) * 0.12
@@ -1256,29 +1302,16 @@ function ServingSign({ side, x, z }: { side: -1 | 1; x: number; z: number }) {
     <group position={[x, 0, z]}>
       <mesh position={[0, 1.05, 0]}>
         <boxGeometry args={[0.06, 2.0, 0.06]} />
-        <meshStandardMaterial color="#2a2438" metalness={0.4} roughness={0.45} />
+        <meshBasicMaterial color="#2a2438" />
       </mesh>
       <mesh ref={glow} position={[0, 2.05, 0.04]}>
         <boxGeometry args={[0.62, 0.36, 0.04]} />
         <meshStandardMaterial color={INK} emissive="#2de2e6" emissiveIntensity={0.28} />
       </mesh>
-      <Html position={[0, 2.05, 0.08]} center distanceFactor={10} style={{ pointerEvents: 'none' }}>
-        <div
-          style={{
-            fontFamily: 'Share Tech Mono, monospace',
-            fontSize: '11px',
-            color: '#39ff14',
-            letterSpacing: '0.1em',
-            textAlign: 'center',
-            lineHeight: 1.25,
-            textShadow: '0 0 8px rgba(57,255,20,0.45)',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          NOW SERVING
-          <div style={{ fontSize: '15px', color: '#f9c80e', marginTop: 2 }}>{String(ticket % 1000).padStart(3, '0')}</div>
-        </div>
-      </Html>
+      <mesh position={[0, 2.05, 0.07]}>
+        <planeGeometry args={[0.56, 0.3]} />
+        <meshBasicMaterial map={map} toneMapped={false} />
+      </mesh>
     </group>
   )
 }
@@ -1349,7 +1382,7 @@ function DataMotes() {
   const ref = useRef<Group>(null)
   const motes = useMemo(
     () =>
-      Array.from({ length: 14 }, (_, i) => ({
+      Array.from({ length: 8 }, (_, i) => ({
         x: ((i * 47) % 100) / 100 * 8 - 4,
         z: ((i * 31) % 100) / 100 * 12 - 6,
         phase: i * 0.73,
@@ -1362,6 +1395,8 @@ function DataMotes() {
   )
   useFrame(({ clock }) => {
     if (!ref.current) return
+    // Half-rate mote updates
+    if (((clock.getElapsedTime() * 30) | 0) % 2) return
     const t = clock.getElapsedTime()
     ref.current.children.forEach((child, i) => {
       const m = motes[i]
@@ -1405,7 +1440,7 @@ function Warden() {
   })
   return (
     <group ref={root} position={[1.85, 0.05, Z_BACK + 1.85]} rotation={[0, Math.PI * 0.92, 0]} scale={0.88}>
-      <CityBotFigure context="bank" pose="waiting" seated={false} unitMark="00" seed={21} />
+      <CityBotFigure context="bank" pose="waiting" seated={false} unitMark="00" seed={21} lite />
       <group ref={label}>
         <mesh position={[0, 2.15, 0.05]}>
           <boxGeometry args={[0.9, 0.14, 0.04]} />
@@ -1509,7 +1544,7 @@ function LaneFloorGuide({ color }: { color: string }) {
         <meshBasicMaterial color={color} transparent opacity={0.5} depthWrite={false} toneMapped={false} />
       </mesh>
       <mesh position={[0, 0.018, LANE_Z_MOUTH + 0.06]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.3, 0.44, 24]} />
+        <ringGeometry args={[0.3, 0.44, 16]} />
         <meshBasicMaterial color={color} transparent opacity={0.65} depthWrite={false} toneMapped={false} />
       </mesh>
     </group>
@@ -1519,22 +1554,16 @@ function LaneFloorGuide({ color }: { color: string }) {
 function RopeSpan({ x, z0, z1, color }: { x: number; z0: number; z1: number; color: string }) {
   const len = Math.abs(z1 - z0)
   const midZ = (z0 + z1) / 2
-  const rope = useRef<Group>(null)
-  useFrame(({ clock }) => {
-    if (!rope.current) return
-    const sag = Math.sin(clock.getElapsedTime() * 1.4 + x * 3 + midZ) * 0.012
-    rope.current.position.y = sag
-    rope.current.rotation.z = sag * 0.8
-  })
+  // Static rope — per-span useFrame sag was ~48 callbacks/frame across the hall.
   return (
-    <group ref={rope}>
+    <group>
       <mesh position={[x, ROPE_Y - 0.02, midZ]} rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[0.016, 0.016, len, 6]} />
+        <cylinderGeometry args={[0.016, 0.016, len, 5]} />
         <meshBasicMaterial color={color} toneMapped={false} />
       </mesh>
-      <mesh position={[x, ROPE_Y - 0.02, midZ]} rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[0.028, 0.028, len * 0.98, 6]} />
-        <meshBasicMaterial color={color} transparent opacity={0.22} depthWrite={false} toneMapped={false} />
+      <mesh position={[x, ROPE_Y - 0.025, midZ]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.026, 0.026, len * 0.98, 5]} />
+        <meshBasicMaterial color={color} transparent opacity={0.2} depthWrite={false} toneMapped={false} />
       </mesh>
     </group>
   )
@@ -1561,6 +1590,24 @@ function QueueLane({ color }: { color: string }) {
 }
 
 function CompliancePillar() {
+  const map = useMemo(() => {
+    const c = document.createElement('canvas')
+    c.width = 256
+    c.height = 384
+    const ctx = c.getContext('2d')!
+    ctx.fillStyle = '#050812'
+    ctx.fillRect(0, 0, 256, 384)
+    ctx.fillStyle = '#f9c80e'
+    ctx.font = 'bold 42px Orbitron, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('PAPER', 128, 160)
+    ctx.fillText('ONLY', 128, 230)
+    const tex = new CanvasTexture(c)
+    tex.needsUpdate = true
+    return tex
+  }, [])
+  useEffect(() => () => map.dispose(), [map])
   // Portal corners — clear of the T aisle.
   return (
     <group position={[-HALL_W / 2 + 0.95, 0, Z_FRONT - 1.15]}>
@@ -1574,24 +1621,8 @@ function CompliancePillar() {
       </mesh>
       <mesh position={[0, 1.15, 0.29]}>
         <planeGeometry args={[0.4, 0.7]} />
-        <meshBasicMaterial color={INK} />
+        <meshBasicMaterial map={map} toneMapped={false} />
       </mesh>
-      <Html position={[0, 1.15, 0.32]} center distanceFactor={7.5} style={{ pointerEvents: 'none' }}>
-        <div
-          style={{
-            fontFamily: 'Orbitron, sans-serif',
-            fontSize: '10px',
-            color: '#f9c80e',
-            textAlign: 'center',
-            letterSpacing: '0.1em',
-            lineHeight: 1.35,
-          }}
-        >
-          PAPER
-          <br />
-          ONLY
-        </div>
-      </Html>
     </group>
   )
 }
@@ -1642,23 +1673,16 @@ function WaitingBench({ x }: { x: number }) {
 }
 
 function Stanchion({ position, color }: { position: [number, number, number]; color: string }) {
+  // 2 meshes (was 4× meshStandard) — ×72 posts across the hall.
   return (
     <group position={position}>
-      <mesh position={[0, 0.42, 0]}>
-        <cylinderGeometry args={[0.034, 0.04, 0.84, 8]} />
-        <meshStandardMaterial color="#1a1424" metalness={0.45} roughness={0.4} />
-      </mesh>
-      <mesh position={[0, 0.78, 0]}>
-        <cylinderGeometry args={[0.042, 0.038, 0.07, 8]} />
-        <meshBasicMaterial color={color} toneMapped={false} />
+      <mesh position={[0, 0.4, 0]}>
+        <cylinderGeometry args={[0.036, 0.042, 0.8, 6]} />
+        <meshBasicMaterial color="#1a1424" />
       </mesh>
       <mesh position={[0, ROPE_Y + 0.05, 0]}>
-        <sphereGeometry args={[0.058, 10, 10]} />
-        <meshStandardMaterial color={BRASS} metalness={0.85} roughness={0.22} emissive={color} emissiveIntensity={0.35} />
-      </mesh>
-      <mesh position={[0, 0.04, 0]}>
-        <cylinderGeometry args={[0.1, 0.12, 0.05, 8]} />
-        <meshStandardMaterial color="#121018" roughness={0.55} />
+        <sphereGeometry args={[0.055, 8, 8]} />
+        <meshBasicMaterial color={color} toneMapped={false} />
       </mesh>
     </group>
   )
@@ -1764,8 +1788,8 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps, onWalkHin
   return (
     <>
       <color attach="background" args={['#1a1030']} />
-      <fog attach="fog" args={['#2a1a48', 28, 70]} />
-      <PerspectiveCamera makeDefault fov={58} near={0.05} far={120} position={HOME_POS} />
+      <fog attach="fog" args={['#2a1a48', 18, 42]} />
+      <PerspectiveCamera makeDefault fov={58} near={0.08} far={70} position={HOME_POS} />
 
       <PlayerBot
         active

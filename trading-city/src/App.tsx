@@ -331,7 +331,7 @@ export default function App() {
     <div className={`app ${view !== 'city' ? 'office' : 'city'}${guest ? ' guest' : ''}`}>
       <div className="stage">
         <Canvas
-          dpr={view === 'bank' ? [1, 1.25] : view === 'office' ? [1, 1.1] : [1, 1.25]}
+          dpr={view === 'bank' ? [1, 1.1] : view === 'office' ? [1, 1.1] : [1, 1.25]}
           gl={{
             antialias: view !== 'bank' && view !== 'office',
             alpha: false,
@@ -340,7 +340,7 @@ export default function App() {
             depth: true,
           }}
           camera={{ position: [0, 12, 14], fov: 46 }}
-          performance={{ min: view === 'office' ? 0.55 : view === 'bank' ? 0.5 : 0.45 }}
+          performance={{ min: view === 'office' ? 0.55 : view === 'bank' ? 0.55 : 0.45 }}
         >
           <AdaptiveDpr pixelated />
           <AdaptiveEvents />
