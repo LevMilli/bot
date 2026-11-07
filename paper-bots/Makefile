@@ -1,5 +1,5 @@
 # Living Trading Upgrade — staff smoke (paper only; floors locked; never auto-post).
-.PHONY: living-status living-selfcheck living-floors living-floors-discord living-seed living-test living-doctor living-doctor-discord living-ritual living-ritual-discord living-ritual-observe living-ritual-observe-json living-ritual-live living-ritual-live-discord living-gaps-discord living-ruin-discord living-l7 living-l7-discord living-sunday living-sunday-discord living-export living-teller living-priority living-priority-discord living-hud living-hud-discord living-help living-money living-rules living-rules-discord living-surfaces living-surfaces-discord living-smoke living-smoke-discord living-paste living-paste-discord living-paper living-paper-discord living-makefile living-makefile-discord living-venues living-venues-discord living-chicago living-chicago-discord
+.PHONY: living-status living-selfcheck living-floors living-floors-discord living-seed living-test living-doctor living-doctor-discord living-ritual living-ritual-discord living-ritual-observe living-ritual-observe-json living-ritual-live living-ritual-live-discord living-gaps-discord living-ruin-discord living-l7 living-l7-discord living-sunday living-sunday-discord living-export living-teller living-priority living-priority-discord living-hud living-hud-discord living-help living-money living-rules living-rules-discord living-surfaces living-surfaces-discord living-smoke living-smoke-discord living-paste living-paste-discord living-paper living-paper-discord living-makefile living-makefile-discord living-venues living-venues-discord living-chicago living-chicago-discord living-starve living-starve-discord living-hard-rules living-hard-rules-discord
 
 living-help:
 	@echo "Living Trading Upgrade — paper only · floors locked · Discord never auto-posts"
@@ -11,6 +11,7 @@ living-help:
 	@echo "  make living-rules / living-rules-discord / living-surfaces / living-surfaces-discord"
 	@echo "  make living-paste / living-paste-discord / living-paper / living-makefile"
 	@echo "  make living-venues / living-venues-discord / living-chicago / living-chicago-discord"
+	@echo "  make living-starve / living-starve-discord / living-hard-rules / living-hard-rules-discord"
 	@echo "  make living-l7 / living-sunday / living-gaps-discord / living-ruin-discord"
 	@echo "Staff map: LIVING_UPGRADE.md · plan: POSITIVE_ROI_PLAN.md"
 
@@ -144,3 +145,15 @@ living-chicago:
 
 living-chicago-discord:
 	python3 tools/staff_living_status.py chicago --discord
+
+living-starve:
+	python3 tools/staff_living_status.py starve
+
+living-starve-discord:
+	python3 tools/staff_living_status.py starve --discord
+
+living-hard-rules:
+	python3 tools/staff_living_status.py hard-rules
+
+living-hard-rules-discord:
+	python3 tools/staff_living_status.py hard-rules --discord

@@ -1306,6 +1306,14 @@ def living_compact_card(
             f"{living_chicago_tip(src).get('label') or 'chicago observe'} "
             f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "starve_sunday_quiet": (
+            f"{living_starve_tip(src).get('label') or 'starve observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
+        "hard_rules_sunday_quiet": (
+            f"{living_hard_rules_tip(src).get('label') or 'hard-rules observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2462,6 +2470,16 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
             f"{chicago.get('label') or 'chicago observe'} · sunday quiet {quiet_bit} "
             "(observe · never softens floors)"
         )
+        starve = living_starve_tip(board)
+        compact["starve_sunday_quiet"] = (
+            f"{starve.get('label') or 'starve observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        hard_rules = living_hard_rules_tip(board)
+        compact["hard_rules_sunday_quiet"] = (
+            f"{hard_rules.get('label') or 'hard-rules observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
         board["compact"] = compact
     return board
 
@@ -2643,6 +2661,12 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     slim["chicago"] = chicago
     slim["chicago_label"] = chicago.get("label")
     slim["chicago_today"] = chicago.get("chicago_today") or slim.get("chicago_today")
+    starve = living_starve_tip(board)
+    slim["starve"] = starve
+    slim["starve_label"] = starve.get("label")
+    hard_rules = living_hard_rules_tip(board)
+    slim["hard_rules"] = hard_rules
+    slim["hard_rules_label"] = hard_rules.get("label")
     teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     slim["living_memory_line"] = teller.get("memory_line") or teller.get("label")
     compact_src = board.get("compact") if isinstance(board.get("compact"), dict) else {}
@@ -3092,6 +3116,16 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{chicago_export.get('label') or 'chicago observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    starve_export = living_starve_tip(board)
+    slim["starve_sunday_quiet"] = (
+        f"{starve_export.get('label') or 'starve observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
+    hard_rules_export = living_hard_rules_tip(board)
+    slim["hard_rules_sunday_quiet"] = (
+        f"{hard_rules_export.get('label') or 'hard-rules observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     # Lightweight selfcheck flags after ritual_live_ok is known.
     slim["selfcheck_ok"] = bool(
         slim.get("fee_floors_locked")
@@ -3329,6 +3363,12 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_chicago_sunday_quiet"] = (
             compact.get("chicago_sunday_quiet") or slim.get("chicago_sunday_quiet")
+        )
+        slim["compact_starve_sunday_quiet"] = (
+            compact.get("starve_sunday_quiet") or slim.get("starve_sunday_quiet")
+        )
+        slim["compact_hard_rules_sunday_quiet"] = (
+            compact.get("hard_rules_sunday_quiet") or slim.get("hard_rules_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -4587,6 +4627,8 @@ _DISCORD_PASTE_TARGETS = (
     "makefile",
     "venues",
     "chicago",
+    "starve",
+    "hard-rules",
     "gaps",
     "ruin",
     "expand",
@@ -4726,6 +4768,50 @@ def living_chicago_tip(board: dict | None = None, root: str | None = None) -> di
         "chicago_today": day,
         "label": label,
         "note": "Chicago day tip — observe-only staff calendar; not a board chip.",
+    }
+
+
+def living_starve_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Starve-rule observe tip (n≥4, factor 0.15) — not a board chip."""
+    _ = board if isinstance(board, dict) else (living_upgrade_board(root) if root else None)
+    n_min = 4
+    factor = 0.15
+    label = (
+        f"starve n≥{n_min} factor={factor} "
+        "(observe · hard rule · never softens floors · never enables live)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "n_min": n_min,
+        "factor": factor,
+        "label": label,
+        "note": "Starve rule tip — observe-only; never rewrites starve policy.",
+    }
+
+
+def living_hard_rules_tip(board: dict | None = None, root: str | None = None) -> dict:
+    """Hard-rules observe tip (meme red lock / INX halt / kill) — not a board chip."""
+    _ = board if isinstance(board, dict) else (living_upgrade_board(root) if root else None)
+    rules = {
+        "meme_red_lock_usd": -8,
+        "inx_halt_usd": 460,
+        "kill": "M3↑ with M1↓ for 2 Chicago weeks → revert lever",
+        "venues": "sports 0.06 / BTC+commodity 0.05 / INX+DEX 0.02",
+    }
+    label = (
+        f"hard-rules meme_red={rules['meme_red_lock_usd']} inx_halt={rules['inx_halt_usd']} "
+        "kill=M3↑/M1↓×2w "
+        "(observe · never softens floors · never enables live)"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "rules": rules,
+        "label": label,
+        "note": "Hard rules tip — observe-only staff reminder; never rewrites policy.",
     }
 
 

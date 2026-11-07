@@ -1531,11 +1531,23 @@ Interactive: Positive ROI Master Plan canvas.
 | Vault venues + chicago rows | App vault |
 | README index | README.md |
 
+### Living upgrade — starve / hard-rules batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `living_starve_tip` + `starve_sunday_quiet` | desk_living / compact / export |
+| `living_hard_rules_tip` + `hard_rules_sunday_quiet` | desk_living / compact / export |
+| Status CLI `starve` / `hard-rules` (+ discord) | staff_living_status |
+| Makefile `living-starve` / `living-hard-rules` | Makefile |
+| Ritual observe/Discord starve+hard-rules | staff_living_ritual |
+| Vault starve + hard-rules rows | App vault |
+| README index | README.md |
+
 ### Surface backlog (soft-max — no new board chips until catalog headroom)
 
 | Optional later surface | Notes |
 | --- | --- |
-| *(cleared — venues/chicago shipped; soft-max 52/64)* | — |
+| *(cleared — starve/hard-rules shipped; soft-max 52/64)* | — |
 
 Raising chip soft-max / inventing new board chips is out of scope until staff opens catalog headroom (52/64).
 
@@ -1543,7 +1555,7 @@ Raising chip soft-max / inventing new board chips is out of scope until staff op
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — venues/chicago shipped; soft-max 52/64)* | — |
+| *(empty — starve/hard-rules shipped; soft-max 52/64)* | — |
 
 ## Hard rules unchanged
 

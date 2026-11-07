@@ -95,6 +95,8 @@ make living-paper            # paper_only + live=False assert
 make living-makefile         # living-* Makefile target index
 make living-venues           # sports 0.06 / BTC+commodity 0.05 / INX+DEX 0.02
 make living-chicago          # Chicago CT calendar day
+make living-starve           # starve n≥4 factor 0.15
+make living-hard-rules       # meme red / INX halt / kill reminder
 make living-export
 make living-test
 ```
