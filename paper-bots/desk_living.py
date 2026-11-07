@@ -1266,6 +1266,10 @@ def living_compact_card(
             f"{living_priority_snapshot(src).get('label') or 'priority observe'} "
             f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
         ),
+        "hud_sunday_quiet": (
+            f"{living_hud_summary(src).get('label') or 'hud observe'} "
+            f"· sunday quiet {quiet_age_part} (observe · never softens floors)"
+        ),
         "ritual_label": ritual_part,
         "ritual_ok": ritual.get("ritual_ok"),
         "doctor_label": doctor_part,
@@ -2373,6 +2377,16 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
             teller["memory_line"] = base
             teller["label"] = base
         board["teller_living"] = teller
+    # Refresh hud twin now that compact exists (accurate twins_n).
+    compact = board.get("compact") if isinstance(board.get("compact"), dict) else None
+    if compact is not None:
+        hud = living_hud_summary(board)
+        quiet_bit = compact.get("sunday_quiet_age_label") or compact.get("quiet_age_label") or "quiet_age=n/a"
+        compact["hud_sunday_quiet"] = (
+            f"{hud.get('label') or 'hud observe'} · sunday quiet {quiet_bit} "
+            "(observe · never softens floors)"
+        )
+        board["compact"] = compact
     return board
 
 
@@ -2517,6 +2531,9 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
     slim["priority"] = prio
     slim["priority_lines"] = list(prio.get("priority") or [])
     slim["priority_label"] = prio.get("label")
+    hud = living_hud_summary(board)
+    slim["hud"] = hud
+    slim["hud_label"] = hud.get("label")
     teller = board.get("teller_living") if isinstance(board.get("teller_living"), dict) else {}
     slim["living_memory_line"] = teller.get("memory_line") or teller.get("label")
     compact_src = board.get("compact") if isinstance(board.get("compact"), dict) else {}
@@ -2916,6 +2933,11 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         f"{prio_export.get('label') or 'priority observe'} · sunday quiet "
         f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
     )
+    hud_export = living_hud_summary(board)
+    slim["hud_sunday_quiet"] = (
+        f"{hud_export.get('label') or 'hud observe'} · sunday quiet "
+        f"{slim['sunday_quiet_age_label']} (observe · never softens floors)"
+    )
     if compact:
         slim["compact_sunday_quiet_age"] = (
             compact.get("sunday_quiet_age") or slim["sunday_quiet_age"]
@@ -3112,6 +3134,9 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         )
         slim["compact_priority_sunday_quiet"] = (
             compact.get("priority_sunday_quiet") or slim.get("priority_sunday_quiet")
+        )
+        slim["compact_hud_sunday_quiet"] = (
+            compact.get("hud_sunday_quiet") or slim.get("hud_sunday_quiet")
         )
     slim["quiet_doctor"] = (
         "quiet="
@@ -4209,6 +4234,49 @@ def living_priority_snapshot(board: dict | None = None, root: str | None = None)
     }
 
 
+def living_hud_summary(board: dict | None = None, root: str | None = None) -> dict:
+    """One-line staff HUD of living surfaces (not a board chip)."""
+    src = board if isinstance(board, dict) else living_upgrade_board(root)
+    live = ritual_live_labels(src)
+    live_n = sum(1 for k, v in live.items() if str(k).endswith("_label") and v)
+    # Avoid compact rebuild recursion when called while building living_compact_card.
+    compact = src.get("compact") if isinstance(src.get("compact"), dict) else None
+    if compact is not None:
+        twins_n = sum(1 for k in compact if str(k).endswith("_sunday_quiet"))
+    else:
+        twins_n = None
+    prio = living_priority_snapshot(src)
+    l7 = l7_observe_summary(src)
+    floors = src.get("fee_floors_assert") if isinstance(src.get("fee_floors_assert"), dict) else {}
+    teller = src.get("teller_living") if isinstance(src.get("teller_living"), dict) else {}
+    ritual = src.get("ritual_observe") if isinstance(src.get("ritual_observe"), dict) else {}
+    twins_bit = twins_n if twins_n is not None else "?"
+    label = (
+        f"hud ritual_live={live_n} twins={twins_bit} "
+        f"prio={len(prio.get('priority') or [])} "
+        f"l7={'ok' if l7.get('ok') else 'thin'} "
+        f"floors={'ok' if floors.get('all_ok') is not False else 'soft'} "
+        f"teller_live={teller.get('ritual_live_n') if teller.get('ritual_live_n') is not None else 'n/a'} "
+        f"ritual_ok={ritual.get('ritual_ok')}"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "board_chip": False,
+        "ritual_live_n": live_n,
+        "ritual_live_ok": live_n >= 40,
+        "sunday_twins_n": twins_n,
+        "priority_n": len(prio.get("priority") or []),
+        "priority_label": prio.get("label"),
+        "l7_observe_ok": bool(l7.get("ok")),
+        "floors_ok": floors.get("all_ok"),
+        "teller_ritual_live_n": teller.get("ritual_live_n"),
+        "ritual_ok": ritual.get("ritual_ok"),
+        "label": label,
+        "note": "Living HUD summary — observe-only; never softens floors; not a board chip.",
+    }
+
+
 def sunday_twin_coverage(board: dict | None = None, root: str | None = None) -> dict:
     """Count compact sunday quiet twins vs fee-locked board fields (surface audit)."""
     src = board if isinstance(board, dict) else living_upgrade_board(root)
@@ -4265,6 +4333,7 @@ def living_self_check(root: str | None = None) -> dict:
         if str(k).endswith("_label") and isinstance(v, str) and v
     )
     prio = living_priority_snapshot(board)
+    hud = living_hud_summary(board)
     return {
         "paper_only": True,
         "fee_floors_locked": floors,
@@ -4306,6 +4375,8 @@ def living_self_check(root: str | None = None) -> dict:
         ),
         "priority": prio,
         "priority_label": str(prio.get("label") or "priority observe"),
+        "hud": hud,
+        "hud_label": str(hud.get("label") or "hud observe"),
         "chips_n": _count_living_chips(board),
         "chip_catalog": sorted(
             k for k, v in board.items()

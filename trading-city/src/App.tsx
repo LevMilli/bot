@@ -1232,6 +1232,34 @@ export default function App() {
                   </span>
                 </div>
                 <div className="vault-board-row">
+                  <span className="vb-label">hud</span>
+                  <span className="vault-ritual-hint">
+                    {(() => {
+                      const desk = snap?.desk as
+                        | {
+                            hud_sunday_quiet?: string
+                            compact_hud_sunday_quiet?: string
+                            hud_label?: string
+                            hud?: { label?: string }
+                          }
+                        | undefined
+                      const twin =
+                        desk?.hud_sunday_quiet || desk?.compact_hud_sunday_quiet
+                      if (twin) return twin
+                      const label = desk?.hud_label || desk?.hud?.label || 'hud observe'
+                      const s =
+                        snap?.desk?.sunday_packet || snap?.desk?.master?.sunday_packet
+                      const sundayBit =
+                        s?.quiet_age_label ||
+                        (s?.quiet_age ? `quiet_age=${s.quiet_age}` : 'quiet_age=n/a')
+                      return (
+                        `${label} · sunday quiet ${sundayBit} ` +
+                        '(observe · never softens floors) · make living-hud'
+                      )
+                    })()}
+                  </span>
+                </div>
+                <div className="vault-board-row">
                   <span className="vb-label">ritual</span>
                   <span
                     style={{

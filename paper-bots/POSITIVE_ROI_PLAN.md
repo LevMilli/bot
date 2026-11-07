@@ -1450,11 +1450,35 @@ Interactive: Positive ROI Master Plan canvas.
 | Ritual payload priority snapshot | staff_living_ritual |
 | Pulse JSON priority + ritual_live_n | staff_living_status pulse |
 
+### Living upgrade — HUD surfaces batch (auto-roll, no new chips)
+
+| Ticket | Where |
+| --- | --- |
+| `living_hud_summary` surface helper | desk_living |
+| Compact/export `hud_sunday_quiet` | compact / export |
+| Status CLI `hud` (+ discord) | staff_living_status |
+| Makefile `living-hud` / `living-hud-discord` | Makefile |
+| Vault hud row | App vault |
+| Observe/Discord HUD sunday | ritual observe / format_discord |
+| Selfcheck/export hud fields | living_self_check / export |
+
+### Surface backlog (soft-max — no new board chips until catalog headroom)
+
+| Optional later surface | Notes |
+| --- | --- |
+| README living Makefile index | docs-only staff pointer |
+| `living-help` Makefile target | list smoke cmds |
+| Vault selfcheck row from export.ok | if snap carries selfcheck |
+| Money-path observe tips (fee/ledger) | only if existing digests already expose labels |
+| Trading-city dist sync after vault-only | already rebuilt with HUD |
+
+Raising chip soft-max / inventing new board chips is out of scope until staff opens catalog headroom (52/64).
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| *(empty — priority observe/pulse shipped; chip catalog 52/64 soft-max; useful surfaces covered)* | — |
+| *(empty — HUD surfaces shipped; soft-max surfaces exhausted; backlog parked above)* | — |
 
 ## Hard rules unchanged
 

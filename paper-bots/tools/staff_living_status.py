@@ -77,6 +77,11 @@ def _text(board: dict) -> str:
         if hasattr(desk_living, "living_priority_snapshot")
         else {}
     )
+    hud = (
+        desk_living.living_hud_summary(board)
+        if hasattr(desk_living, "living_hud_summary")
+        else {}
+    )
     sunday_bit = str(
         sunday.get("quiet_age_label")
         or compact.get("quiet_age_label")
@@ -960,6 +965,20 @@ def _text(board: dict) -> str:
             )
         ),
         (
+            "hud: "
+            + str(hud.get("label") or "hud observe")
+        ),
+        (
+            "hud sunday: "
+            + str(
+                compact.get("hud_sunday_quiet")
+                or (
+                    str(hud.get("label") or "hud observe")
+                    + f" · sunday quiet {sunday_bit} (observe · never softens floors)"
+                )
+            )
+        ),
+        (
             f"expand: {expand.get('soft_copy') or expand.get('label') or '—'}"
         ),
         (
@@ -1061,14 +1080,14 @@ def main() -> int:
         choices=(
             "text", "json", "pager", "priority", "selfcheck",
             "gaps", "inventory", "hillclimb", "ruin", "export", "seed", "pulse",
-            "floors", "teller", "expand", "doctor", "l7", "sunday", "ritual-live",
+            "floors", "teller", "expand", "doctor", "l7", "sunday", "ritual-live", "hud",
         ),
     )
     parser.add_argument("--root", default=ROOT)
     parser.add_argument(
         "--discord",
         action="store_true",
-        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor/l7/ritual-live); never auto-posts.",
+        help="Paste-ready Discord markdown (gaps/ruin/expand/floors/doctor/l7/ritual-live/hud); never auto-posts.",
     )
     args = parser.parse_args()
     root = args.root
@@ -1184,6 +1203,7 @@ def main() -> int:
             1 for k, v in live_j.items() if str(k).endswith("_label") and v
         )
         prio_j = desk_living.living_priority_snapshot(board)
+        hud_j = desk_living.living_hud_summary(board)
         ritual_j = (
             board.get("ritual_observe")
             if isinstance(board.get("ritual_observe"), dict)
@@ -1571,6 +1591,10 @@ def main() -> int:
             "priority_lines": list(prio_j.get("priority") or []),
             "priority_sunday_quiet": compact_j.get("priority_sunday_quiet"),
             "compact_priority_sunday_quiet": compact_j.get("priority_sunday_quiet"),
+            "hud": hud_j,
+            "hud_label": hud_j.get("label"),
+            "hud_sunday_quiet": compact_j.get("hud_sunday_quiet"),
+            "compact_hud_sunday_quiet": compact_j.get("hud_sunday_quiet"),
             "living_memory_line": (
                 (board.get("teller_living") or {}).get("memory_line")
                 if isinstance(board.get("teller_living"), dict)
@@ -1743,6 +1767,30 @@ def main() -> int:
         else:
             print(json.dumps(payload, indent=2, sort_keys=True, default=str))
         return 0 if live_n >= 40 else 2
+
+    if args.action == "hud":
+        hud = desk_living.living_hud_summary(board)
+        compact = board.get("compact") if isinstance(board.get("compact"), dict) else {}
+        twin = compact.get("hud_sunday_quiet") or (
+            f"{hud.get('label') or 'hud observe'} · sunday quiet "
+            f"{(board.get('sunday_packet') or {}).get('quiet_age_label') if isinstance(board.get('sunday_packet'), dict) else compact.get('quiet_age_label') or 'quiet_age=n/a'} "
+            "(observe · never softens floors)"
+        )
+        if args.discord:
+            print(
+                "**Living HUD** (paper · floors locked · live=False)\n"
+                f"{twin}\n"
+                f"ritual_live_n={hud.get('ritual_live_n')} twins={hud.get('sunday_twins_n')} "
+                f"prio_n={hud.get('priority_n')} l7_ok={hud.get('l7_observe_ok')}\n"
+                "cmds: make living-hud · living-ritual-live · living-priority "
+                "(staff paste · never auto-posts)\n"
+                "_never softens floors · never enables live_"
+            )
+        else:
+            out = dict(hud)
+            out["hud_sunday_quiet"] = twin
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if hud.get("ritual_live_ok") and hud.get("l7_observe_ok") else 2
 
     if args.action == "l7":
         summary = desk_living.l7_observe_summary(board)

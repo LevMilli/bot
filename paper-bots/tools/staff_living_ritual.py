@@ -373,6 +373,15 @@ def format_discord(payload: dict) -> str:
             f"• Priority sunday: {prio_lab} · sunday quiet {tip_age} "
             f"(observe · never softens floors)"
         )
+    hud_twin = payload.get("hud_sunday_quiet")
+    if hud_twin:
+        lines.append(f"• HUD sunday: {hud_twin}")
+    else:
+        hud_lab = payload.get("hud_label") or "hud observe"
+        lines.append(
+            f"• HUD sunday: {hud_lab} · sunday quiet {tip_age} "
+            f"(observe · never softens floors)"
+        )
     lines.append("")
     for name in ("gaps", "ruin", "floors", "expand", "doctor"):
         row = steps.get(name) if isinstance(steps.get(name), dict) else {}
@@ -939,6 +948,16 @@ def main() -> int:
                 )
             )
             print(
+                "hud sunday: "
+                + str(
+                    compact_obs.get("hud_sunday_quiet")
+                    or (
+                        f"{desk_living.living_hud_summary(board_obs).get('label') or 'hud observe'} "
+                        f"· sunday quiet {sunday_label} (observe · never softens floors)"
+                    )
+                )
+            )
+            print(
                 "doctor soft: make living-doctor · draft: make living-ritual-discord "
                 "(staff paste · never auto-posts)"
             )
@@ -1060,6 +1079,13 @@ def main() -> int:
     payload["priority_lines"] = list(prio.get("priority") or [])
     payload["priority_sunday_quiet"] = compact.get("priority_sunday_quiet") or (
         f"{prio.get('label') or 'priority observe'} · sunday quiet "
+        f"{sunday_quiet_age_label} (observe · never softens floors)"
+    )
+    hud = desk_living.living_hud_summary(board)
+    payload["hud"] = hud
+    payload["hud_label"] = hud.get("label")
+    payload["hud_sunday_quiet"] = compact.get("hud_sunday_quiet") or (
+        f"{hud.get('label') or 'hud observe'} · sunday quiet "
         f"{sunday_quiet_age_label} (observe · never softens floors)"
     )
     if args.discord:
