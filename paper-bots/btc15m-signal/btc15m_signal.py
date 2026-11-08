@@ -1242,8 +1242,35 @@ def main():
     spots = spot_prices()
     spot_secs = time.perf_counter() - t_spot
     if not spots and not eth_markets:
-        print("SKIP: no BTC spot and no ETH windows.")
-        return _card("Checked all open BTC 15-minute markets. No paper buy.")
+        # Prefer-1/2: all BTC venue spots down + no ETH fallback must not invent a
+        # clean "Checked… No paper buy" CARD with empty skip_board (commodity #434
+        # sibling). Spot feed-down ≠ fee-aware no-edge after a real check.
+        spot_reason = "spot failed"
+        print(f"SKIP densify: {spot_reason} (no BTC spot and no ETH windows)")
+        _densify_skip_brain(reasons=[spot_reason], note="btc spot densify")
+        if not IS_SHADOW:
+            try:
+                import desk_roi_plan
+                desk_roi_plan.record_latency(
+                    DESK_ROOT, bot="btc15m", seconds=spot_secs,
+                    note="btc15m spot failed", stage="spot",
+                )
+                desk_roi_plan.record_latency(
+                    DESK_ROOT, bot="btc15m", seconds=time.perf_counter() - t0,
+                    note="spot failed card", stage="evaluate",
+                )
+                for series in ("KXBTC15M", "KXETH15M"):
+                    desk_roi_plan.record_empty_card(
+                        DESK_ROOT,
+                        bot="btc15m",
+                        seconds=time.perf_counter() - t0,
+                        markets_n=len(markets) if series == "KXBTC15M" else 0,
+                        series=series,
+                        note=spot_reason,
+                    )
+            except Exception:
+                pass
+        return _card(spot_reason)
     price = statistics.mean(spots.values()) if spots else None
     if price is not None:
         print("BTC spot: " + ", ".join(f"{k} ${v:,.2f}" for k, v in spots.items()) + f"  -> avg ${price:,.2f}")

@@ -98,6 +98,39 @@ class BtcCardSkipDensify(unittest.TestCase):
         self.assertIn("commodity desk-block densify", cmd_src)
         self.assertIn("skip_reasons.append(block_note)", cmd_src)
 
+    def test_early_no_spot_densifies_not_generic_no_buy(self):
+        """Prefer-1/2: all BTC spots down + no ETH windows densifies spot failed (#434 sibling)."""
+        src = BTC.read_text(encoding="utf-8")
+        early_idx = src.find("if not spots and not eth_markets:")
+        self.assertGreater(early_idx, 0)
+        chunk = src[early_idx:early_idx + 2200]
+        self.assertIn('spot_reason = "spot failed"', chunk)
+        self.assertIn("_densify_skip_brain", chunk)
+        self.assertIn("btc spot densify", chunk)
+        self.assertIn("return _card(spot_reason)", chunk)
+        self.assertNotIn(
+            'return _card("Checked all open BTC 15-minute markets. No paper buy.")',
+            chunk,
+        )
+        import desk_brain
+        import desk_more
+
+        btc = _load(BTC, "btc15m_spot_fail_under_test")
+        with tempfile.TemporaryDirectory() as tmp:
+            btc.DESK_ROOT = tmp
+            btc.IS_SHADOW = False
+            btc._densify_skip_brain(
+                reasons=["spot failed"],
+                note="btc spot densify",
+            )
+            board = desk_more.skip_leaderboard(tmp)
+            by_bot = board.get("by_bot") or {}
+            self.assertIn("btc15m", by_bot)
+            journal = desk_brain.load_journal(tmp)
+            last = (journal.get("decisions") or [])[-1]
+            self.assertEqual(last.get("action"), "skip")
+            self.assertIn("spot failed", " ".join(last.get("reasons") or []))
+
     def test_eth_skip_paths_densify_brain(self):
         """ETH desk-block/delay/volatile must densify skip_board (#409 sibling)."""
         btc = _load(BTC, "btc15m_eth_brain_under_test")
