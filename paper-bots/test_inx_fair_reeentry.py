@@ -77,6 +77,26 @@ class InxFairReentryTests(unittest.TestCase):
         self.assertGreaterEqual(int(chosen["n_ok"]), 1)
         self.assertGreaterEqual(float(chosen["fair"]["edge"]), 0.02)
 
+    def test_rank_by_fair_orders_siblings_for_ob_retry(self):
+        now = datetime(2026, 11, 10, 13, 0, tzinfo=CT)
+        # Two fee-clear YES sides: deeper ITM should rank first; both stay available
+        # so OB miss on top does not day-skip the sibling.
+        board = [
+            {"ticker": "MID", "side": "yes", "ask": 0.84, "strike": 7300},
+            {"ticker": "DEEP", "side": "yes", "ask": 0.82, "strike": 7200},
+            {"ticker": "RICH", "side": "yes", "ask": 0.90, "strike": 7480},
+        ]
+        ranked = desk_inx.rank_by_fair(
+            board, venue_edge=0.02, spot=7500.0, now=now,
+        )
+        self.assertTrue(ranked["ok"])
+        tickers = [row["pick"]["ticker"] for row in ranked["picks"]]
+        self.assertIn("DEEP", tickers)
+        self.assertIn("MID", tickers)
+        self.assertNotIn("RICH", tickers)
+        self.assertEqual(tickers[0], "DEEP")
+        self.assertGreaterEqual(int(ranked["n_ok"]), 2)
+
     def test_self_check(self):
         desk_inx.self_check()
 

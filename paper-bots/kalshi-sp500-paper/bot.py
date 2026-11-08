@@ -190,7 +190,7 @@ def step_scan(args, state, day):
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_inx
-        chosen = desk_inx.pick_by_fair(
+        chosen = desk_inx.rank_by_fair(
             cands,
             venue_edge=venue_edge,
             now=now,
@@ -198,16 +198,87 @@ def step_scan(args, state, day):
         )
     except Exception as exc:
         chosen = {"ok": False, "reason": f"inx fair pick unavailable ({type(exc).__name__})"}
-    if not chosen.get("ok") or not chosen.get("pick"):
+    if not chosen.get("ok") or not (chosen.get("picks") or chosen.get("pick")):
         reason = str(chosen.get("reason") or "no candidate cleared inx fair venue edge")
         print(alerts.format_skip_note(day, reason))
         if not args.dry_run:
             logger.learn(f"{day}: no trade - {reason}", "skip")
         return
-    pick = chosen["pick"]
-    pick, ob = confirm_with_orderbook(pick)
-    if not pick:
-        print(alerts.format_skip_note(day, "chosen contract moved out of the band on the order-book re-check"))
+    # Walk fair-ranked siblings: OB move / post-OB fair fail must not day-skip
+    # while another fee-clear band contract still clears.
+    ranked = list(chosen.get("picks") or [])
+    if not ranked and chosen.get("pick"):
+        ranked = [{"pick": chosen["pick"], "fair": chosen.get("fair")}]
+    pick = None
+    ob = None
+    fair = None
+    fee_one = 0.0
+    edge_proxy = 0.0
+    fair_p = None
+    last_ob_miss = False
+    last_fair_reason = ""
+    spot_px = chosen.get("spot")
+    try:
+        desk = _desk()
+        cfg = desk.load_settings(DESK_ROOT)
+        venue_edge = float(desk.venue_min_edge("kalshi_inx", cfg))
+    except Exception:
+        cfg = {}
+    if DESK_ROOT not in sys.path:
+        sys.path.insert(0, DESK_ROOT)
+    import desk_inx
+    for row in ranked:
+        cand = row.get("pick") if isinstance(row, dict) else None
+        if not isinstance(cand, dict):
+            continue
+        confirmed, ob_try = confirm_with_orderbook(cand)
+        if not confirmed:
+            last_ob_miss = True
+            continue
+        fee_try = paper_sim.taker_fee(1, confirmed["ask"])
+        try:
+            fair_try = desk_inx.fair_evaluate(
+                confirmed,
+                venue_edge=venue_edge,
+                spot=spot_px,
+                now=now,
+                settle_time_ct=str(CFG.get("settle_time_ct") or "15:00"),
+            )
+        except Exception as exc:
+            last_fair_reason = f"inx fair unavailable ({type(exc).__name__})"
+            continue
+        if not fair_try.get("ok"):
+            last_fair_reason = str(
+                fair_try.get("reason") or desk_inx.refuse_residual_as_edge()
+            )
+            continue
+        pick = confirmed
+        ob = ob_try
+        fair = fair_try
+        fee_one = float(fair_try.get("fee") if fair_try.get("fee") is not None else fee_try)
+        edge_proxy = float(fair_try.get("edge") or 0.0)
+        fair_p = fair_try.get("p")
+        break
+    if not pick or not fair:
+        reason = last_fair_reason or (
+            "chosen contract moved out of the band on the order-book re-check"
+            if last_ob_miss
+            else "no candidate cleared inx fair venue edge"
+        )
+        print(alerts.format_skip_note(day, reason))
+        if not args.dry_run:
+            logger.learn(f"{day}: no trade - {reason}", "skip")
+        try:
+            import desk_living
+            desk_living.record_eval_features(
+                DESK_ROOT, bot="kalshi-sp", action="skip",
+                series=CFG.get("series") or "KXINXU",
+                ticker="",
+                ev={"venue_edge": venue_edge, "spot": spot_px},
+                reasons=[reason], note=reason[:160],
+            )
+        except Exception:
+            pass
         return
     try:
         desk = _desk()
@@ -230,57 +301,6 @@ def step_scan(args, state, day):
             )
         except Exception:
             pass
-        return
-    # Independent Φ fair vs ^GSPC — residual (1−ask−fee) is never venue clearance.
-    fee_one = paper_sim.taker_fee(1, pick["ask"])
-    venue_edge = 0.02
-    edge_proxy = 0.0
-    fair_p = None
-    try:
-        desk = _desk()
-        cfg = desk.load_settings(DESK_ROOT)
-        venue_edge = float(desk.venue_min_edge("kalshi_inx", cfg))
-    except Exception:
-        cfg = {}
-    try:
-        if DESK_ROOT not in sys.path:
-            sys.path.insert(0, DESK_ROOT)
-        import desk_inx
-        fair = desk_inx.fair_evaluate(
-            pick,
-            venue_edge=venue_edge,
-            now=now,
-            settle_time_ct=str(CFG.get("settle_time_ct") or "15:00"),
-        )
-        if not fair.get("ok"):
-            reason = str(fair.get("reason") or desk_inx.refuse_residual_as_edge())
-            print(alerts.format_skip_note(day, reason))
-            try:
-                import desk_living
-                desk_living.record_eval_features(
-                    DESK_ROOT, bot="kalshi-sp", action="skip",
-                    series=CFG.get("series") or "KXINXU",
-                    ticker=str(pick.get("ticker") or ""),
-                    ev={"side": pick.get("side"), "ask": pick.get("ask"),
-                        "edge": fair.get("edge"), "fee": fee_one,
-                        "confidence": fair.get("p") or pick.get("ask"),
-                        "venue_edge": venue_edge, "spot": fair.get("spot"),
-                        "z": fair.get("z")},
-                    reasons=[reason], note=reason[:160],
-                )
-            except Exception:
-                pass
-            if not args.dry_run:
-                logger.learn(f"{day}: no trade - {reason}", "skip")
-            return
-        edge_proxy = float(fair.get("edge") or 0.0)
-        fair_p = fair.get("p")
-        fee_one = float(fair.get("fee") if fair.get("fee") is not None else fee_one)
-    except Exception as exc:
-        reason = f"inx fair unavailable ({type(exc).__name__})"
-        print(alerts.format_skip_note(day, reason))
-        if not args.dry_run:
-            logger.learn(f"{day}: no trade - {reason}", "skip")
         return
     try:
         desk = _desk()

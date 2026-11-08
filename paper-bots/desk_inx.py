@@ -206,6 +206,89 @@ def fair_evaluate(
     return out
 
 
+def rank_by_fair(
+    candidates: list | None,
+    *,
+    venue_edge: float = 0.02,
+    spot: float | None = None,
+    now: datetime | None = None,
+    settle_time_ct: str = "15:00",
+    fee_rate: float = 0.07,
+    min_p: float = MIN_FAIR_P,
+    min_z: float = MIN_FAIR_Z,
+) -> dict:
+    """Rank band candidates by Φ fair edge (desc) among those that clear venue.
+
+    Callers should walk `picks` after order-book re-check — a rich ask can leave
+    the band or fail post-OB fair while a fee-clear sibling still fills.
+    Missing spot → refuse (residual never clears).
+    """
+    empty = {
+        "ok": False,
+        "pick": None,
+        "fair": None,
+        "picks": [],
+        "n_candidates": 0,
+        "n_ok": 0,
+        "reason": "no band candidates",
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "spot": None,
+    }
+    cands = [c for c in (candidates or []) if isinstance(c, dict)]
+    empty["n_candidates"] = len(cands)
+    if not cands:
+        return empty
+    # One spot fetch for the whole board (or fail-closed once).
+    px = _finite(spot) if spot is not None else spx_spot()
+    if px is None or px <= 0:
+        empty["reason"] = refuse_residual_as_edge() + " (no ^GSPC spot)"
+        return empty
+    ranked: list[dict] = []
+    last_fail = ""
+    for c in cands:
+        fair = fair_evaluate(
+            c,
+            venue_edge=venue_edge,
+            spot=px,
+            now=now,
+            settle_time_ct=settle_time_ct,
+            fee_rate=fee_rate,
+            min_p=min_p,
+            min_z=min_z,
+        )
+        if not fair.get("ok"):
+            last_fail = str(fair.get("reason") or "")
+            continue
+        edge = _finite(fair.get("edge"))
+        if edge is None:
+            continue
+        ranked.append({
+            "pick": {**c, "fair_edge": edge, "fair_p": fair.get("p"), "fair_z": fair.get("z")},
+            "fair": fair,
+            "edge": edge,
+        })
+    ranked.sort(key=lambda row: float(row["edge"]), reverse=True)
+    if not ranked:
+        empty["n_ok"] = 0
+        empty["spot"] = px
+        empty["reason"] = last_fail or "no candidate cleared inx fair venue edge"
+        return empty
+    top = ranked[0]
+    return {
+        "ok": True,
+        "pick": top["pick"],
+        "fair": top["fair"],
+        "picks": ranked,
+        "n_candidates": len(cands),
+        "n_ok": len(ranked),
+        "reason": "",
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "spot": px,
+    }
+
+
 def pick_by_fair(
     candidates: list | None,
     *,
@@ -221,68 +304,18 @@ def pick_by_fair(
 
     Highest-ask pick often fails fair while a cheaper ITM side clears — use this
     instead of signal_engine.pick_trade for fee-aware fills. Missing spot → refuse.
+    Prefer `rank_by_fair` when the caller retries after order-book confirmation.
     """
-    empty = {
-        "ok": False,
-        "pick": None,
-        "fair": None,
-        "n_candidates": 0,
-        "n_ok": 0,
-        "reason": "no band candidates",
-        "paper_only": True,
-        "fee_floors_locked": True,
-    }
-    cands = [c for c in (candidates or []) if isinstance(c, dict)]
-    empty["n_candidates"] = len(cands)
-    if not cands:
-        return empty
-    # One spot fetch for the whole board (or fail-closed once).
-    px = _finite(spot) if spot is not None else spx_spot()
-    if px is None or px <= 0:
-        empty["reason"] = refuse_residual_as_edge() + " (no ^GSPC spot)"
-        return empty
-    best = None
-    best_fair = None
-    best_edge = None
-    last_fail = ""
-    n_ok = 0
-    for c in cands:
-        fair = fair_evaluate(
-            c,
-            venue_edge=venue_edge,
-            spot=px,
-            now=now,
-            settle_time_ct=settle_time_ct,
-            fee_rate=fee_rate,
-            min_p=min_p,
-            min_z=min_z,
-        )
-        if not fair.get("ok"):
-            last_fail = str(fair.get("reason") or "")
-            continue
-        n_ok += 1
-        edge = _finite(fair.get("edge"))
-        if edge is None:
-            continue
-        if best_edge is None or edge > best_edge + 1e-12:
-            best_edge = edge
-            best = {**c, "fair_edge": edge, "fair_p": fair.get("p"), "fair_z": fair.get("z")}
-            best_fair = fair
-    if best is None:
-        empty["n_ok"] = 0
-        empty["reason"] = last_fail or "no candidate cleared inx fair venue edge"
-        return empty
-    return {
-        "ok": True,
-        "pick": best,
-        "fair": best_fair,
-        "n_candidates": len(cands),
-        "n_ok": n_ok,
-        "reason": "",
-        "paper_only": True,
-        "fee_floors_locked": True,
-        "spot": px,
-    }
+    return rank_by_fair(
+        candidates,
+        venue_edge=venue_edge,
+        spot=spot,
+        now=now,
+        settle_time_ct=settle_time_ct,
+        fee_rate=fee_rate,
+        min_p=min_p,
+        min_z=min_z,
+    )
 
 
 def dual_side_pick(candidates: list, *, band_lo: float, band_hi: float) -> dict | None:
@@ -345,14 +378,14 @@ def twin_edge_blocks(
     venue_edge: float = 0.02,
     extra: float = TWIN_EDGE_EXTRA,
 ) -> str:
-    """Sized residual edge must clear venue floor + 1¢."""
+    """Sized Φ fair edge must clear venue floor + 1¢ (never residual payout)."""
     e = _finite(sized_edge)
     if e is None:
-        return "twin edge: sized residual edge unknown"
+        return "twin edge: sized fair edge unknown"
     need = float(venue_edge) + float(extra)
     if e + 1e-12 < need:
         return (
-            f"twin edge: sized residual {e:.3f} < venue {float(venue_edge):.2f} "
+            f"twin edge: sized fair {e:.3f} < venue {float(venue_edge):.2f} "
             f"+ {float(extra):.2f} (= {need:.3f})"
         )
     return ""
