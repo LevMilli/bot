@@ -218,6 +218,71 @@ class CommodityTimeStop(unittest.TestCase):
             self.assertIn("commodity_tstop", catch)
             self.assertEqual(int(catch.get("commodity_tstop_shadow") or 0), 0)
 
+    def test_catchup_past_bell_clamps_to_close_time(self):
+        """Sell 2s after close_time still densifies; >min_left overshoot does not."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cmd_dir = os.path.join(tmp, "commodity-15m-paper")
+            os.makedirs(cmd_dir, exist_ok=True)
+            close_iso = "2026-11-08T12:15:00Z"
+            # Paper_sell stamp slightly past bell — old catchup DROPped rem<0.
+            past_bell = {
+                "ticker": "KXWTI-PAST-BELL",
+                "side": "YES",
+                "series": "KXWTI15M",
+                "close_time": close_iso,
+                "entry": 0.60,
+                "cost": 6.0,
+                "contracts": 10,
+                "exit_price": 0.40,
+                "pnl": -2.0,
+                "exit": "model-flip fair Δ≥0.08",
+                "closed": "2026-11-08 12:15:02 UTC",
+            }
+            # Overshoot beyond min_left (3m) — must not invent rem=0.
+            late_flip = {
+                "ticker": "KXWTI-LATE-OVERSHOOT",
+                "side": "YES",
+                "series": "KXWTI15M",
+                "close_time": close_iso,
+                "entry": 0.60,
+                "cost": 6.0,
+                "contracts": 10,
+                "exit_price": 0.40,
+                "pnl": -2.0,
+                "exit": "model-flip fair Δ≥0.08",
+                "closed": "2026-11-08 12:19:00 UTC",
+            }
+            with open(os.path.join(cmd_dir, "paper_account.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "cash": 100.0,
+                    "open": [],
+                    "closed": [past_bell, late_flip],
+                    "paper_only": True,
+                }, fh)
+            # Probe: raw hit with closed_at past bell fails; clamp path records.
+            raw = desk_roi_plan.commodity_time_stop_hit(
+                close_iso,
+                bid=0.40,
+                entry_price=0.60,
+                cost=6.0,
+                contracts=10,
+                now=desk_roi_plan._parse_commodity_closed_at("2026-11-08 12:15:02 UTC"),
+            )
+            self.assertFalse(raw["hit"], raw)
+            self.assertFalse(raw["near_close"])
+            out = desk_roi_plan.backfill_commodity_time_stop_from_closed(tmp)
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out["recorded"], 1, out)
+            self.assertFalse(out.get("live"))
+            self.assertFalse(out.get("auto_promote"))
+            summ = desk_roi_plan.commodity_time_stop_shadow_summary(tmp)
+            self.assertEqual(summ["n"], 1)
+            rows = desk_roi_plan._load(
+                desk_roi_plan._path(desk_roi_plan.COMMODITY_TIME_STOP_SHADOW, tmp),
+                {"rows": []},
+            ).get("rows") or []
+            self.assertEqual(rows[0].get("ticker"), "KXWTI-PAST-BELL")
+
     def test_bot_densify_before_model_flip(self):
         bot_src = os.path.join(HERE, "commodity-15m-paper", "bot.py")
         with open(bot_src, encoding="utf-8") as fh:
