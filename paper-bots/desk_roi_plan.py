@@ -3011,8 +3011,14 @@ def label_near_miss_outcome(
     side: str | None = None,
     note: str = "",
     only_unlabeled: bool = False,
+    row_at: str | None = None,
+    stamp_ask=None,
 ) -> dict:
-    """Attach settle / would-have PnL to shadow near-miss rows (staff or settle hook)."""
+    """Attach settle / would-have PnL to shadow near-miss rows (staff or settle hook).
+
+    When ``row_at`` is set, only that row is labeled (per-row ask densify).
+    ``stamp_ask`` copies an organic sibling ask onto ask-less rows (never invent).
+    """
     tick = str(ticker or "").strip()
     pnl = _finite(would_pnl)
     if not tick or pnl is None:
@@ -3026,6 +3032,10 @@ def label_near_miss_outcome(
     n = 0
     bot_id = str(bot or "").strip()
     side_id = str(side or "").strip().upper()
+    at_id = str(row_at or "").strip()
+    stamp = _finite(stamp_ask)
+    if stamp is not None and not (0.0 < float(stamp) < 1.0):
+        stamp = None
     out_rows = []
     for row in rows:
         if not isinstance(row, dict):
@@ -3037,6 +3047,8 @@ def label_near_miss_outcome(
         )
         if side_id:
             match = match and str(item.get("side") or "").strip().upper() == side_id
+        if at_id:
+            match = match and str(item.get("at") or "") == at_id
         if match:
             if only_unlabeled and _finite(item.get("would_pnl")) is not None:
                 out_rows.append(item)
@@ -3045,6 +3057,13 @@ def label_near_miss_outcome(
             item["labeled_at"] = _now()
             if note:
                 item["label_note"] = str(note)[:120]
+            if stamp is not None:
+                own = _finite(item.get("ask"))
+                if own is None:
+                    own = _finite(item.get("entry_price"))
+                if own is None or not (0.0 < float(own) < 1.0):
+                    item["ask"] = round(float(stamp), 4)
+                    item["entry_price"] = round(float(stamp), 4)
             n += 1
         out_rows.append(item)
     if n:
@@ -3084,64 +3103,114 @@ def label_near_miss_from_result(
     bot: str | None = None,
     note: str = "",
 ) -> dict:
-    """Label unlabeled near-miss rows for ticker using Kalshi yes/no result."""
+    """Label unlabeled near-miss rows for ticker using Kalshi yes/no result.
+
+    Each unlabeled row keeps its own ask when present; ask-less siblings copy an
+    organic sibling ask∈(0,1) before defaulting to 0.5. One-pass save.
+    """
     tick = str(ticker or "").strip()
     res = str(result or "").strip().lower()
     if not tick or res not in ("yes", "no"):
         return {"labeled": 0, "reason": "need ticker + yes/no result"}
-    rows = [
-        r for r in _near_miss_rows(root)
-        if str(r.get("ticker") or "") == tick
-        and (not bot or str(r.get("bot") or "") == str(bot))
-        and _finite(r.get("would_pnl")) is None
-    ]
-    if not rows:
-        return {"labeled": 0, "ticker": tick, "reason": "no unlabeled near-miss"}
-    # Prefer organic ask∈(0,1) from any unlabeled sibling before defaulting to 0.5.
-    # Pre-#402 ask-less rows often precede post-#402 siblings for the same ticker;
-    # first-row-only entry wiped honest settle labels.
+    try:
+        import desk_more
+        state = desk_more.load_more(root)
+        all_rows = list(state.get("near_miss") or [])
+    except Exception:
+        return {"labeled": 0, "ticker": tick, "reason": "no near_miss store"}
+    bot_filter = str(bot or "").strip()
+    # Sibling organic ask per (side, bot) for ask-less legacy densify.
     organic_ask: dict[tuple, float] = {}
-    for row in rows:
+    for row in all_rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("ticker") or "") != tick:
+            continue
+        if bot_filter and str(row.get("bot") or "") != bot_filter:
+            continue
+        if _finite(row.get("would_pnl")) is not None:
+            continue
         side = str(row.get("side") or "YES").strip().upper() or "YES"
         bot_id = str(row.get("bot") or "")
         key = (tick, side, bot_id)
-        if key in organic_ask:
-            continue
         for field in ("ask", "entry_price"):
             a = _finite(row.get(field))
             if a is not None and 0.0 < float(a) < 1.0:
                 organic_ask[key] = float(a)
                 break
     labeled = 0
-    done: set[tuple] = set()
-    for row in rows:
-        side = str(row.get("side") or "YES").strip().upper() or "YES"
-        bot_id = str(row.get("bot") or "")
-        key = (tick, side, bot_id)
-        if key in done:
+    note_s = str(note or f"settle result={res}")[:120]
+    out_rows: list = []
+    for row in all_rows:
+        if not isinstance(row, dict):
+            out_rows.append(row)
             continue
-        done.add(key)
-        entry = organic_ask.get(key)
-        if entry is None:
-            entry = row.get("ask") or row.get("entry_price")
-        pnl = near_miss_would_pnl(
-            side=side,
-            result=res,
-            stake=row.get("stake"),
-            entry_price=entry,
+        item = dict(row)
+        match = str(item.get("ticker") or "") == tick and (
+            not bot_filter or str(item.get("bot") or "") == bot_filter
         )
-        if pnl is None:
-            continue
-        out = label_near_miss_outcome(
-            root,
-            ticker=tick,
-            would_pnl=pnl,
-            bot=bot_id or None,
-            side=side,
-            note=note or f"settle result={res}",
-            only_unlabeled=True,
-        )
-        labeled += int(out.get("labeled") or 0)
+        if match and _finite(item.get("would_pnl")) is None:
+            side = str(item.get("side") or "YES").strip().upper() or "YES"
+            bot_id = str(item.get("bot") or "")
+            key = (tick, side, bot_id)
+            entry = None
+            for field in ("ask", "entry_price"):
+                a = _finite(item.get(field))
+                if a is not None and 0.0 < float(a) < 1.0:
+                    entry = float(a)
+                    break
+            stamp = None
+            if entry is None:
+                entry = organic_ask.get(key)
+                stamp = entry
+            pnl = near_miss_would_pnl(
+                side=side,
+                result=res,
+                stake=item.get("stake"),
+                entry_price=entry,
+            )
+            if pnl is not None:
+                item["would_pnl"] = round(float(pnl), 4)
+                item["labeled_at"] = _now()
+                item["label_note"] = note_s
+                if stamp is not None:
+                    item["ask"] = round(float(stamp), 4)
+                    item["entry_price"] = round(float(stamp), 4)
+                labeled += 1
+        out_rows.append(item)
+    if labeled:
+        try:
+            import desk_more
+            state["near_miss"] = out_rows
+            state["last_at"] = _now()
+            desk_more.save_more(state, root)
+        except Exception:
+            return {"labeled": 0, "ticker": tick, "reason": "save failed"}
+        # Observe twin join once per settle label batch (same as prior path).
+        try:
+            import desk_living
+            twin_pnl = None
+            twin_soft = None
+            for row in out_rows:
+                if (
+                    isinstance(row, dict)
+                    and str(row.get("ticker") or "") == tick
+                    and _finite(row.get("would_pnl")) is not None
+                ):
+                    twin_pnl = row.get("would_pnl")
+                    twin_soft = row.get("soft")
+                    break
+            if twin_pnl is not None:
+                desk_living.record_skip_twin_features(
+                    root,
+                    bot=bot_filter or "unknown",
+                    ticker=tick,
+                    would_pnl=twin_pnl,
+                    soft=twin_soft,
+                    note=note_s,
+                )
+        except Exception:
+            pass
     return {
         "labeled": labeled,
         "ticker": tick,

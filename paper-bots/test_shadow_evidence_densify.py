@@ -148,6 +148,40 @@ class ShadowEvidenceDensify(unittest.TestCase):
             for row in labeled:
                 self.assertAlmostEqual(float(row["would_pnl"]), 0.5316, places=3)
                 self.assertNotAlmostEqual(float(row["would_pnl"]), 2.0, places=2)
+                self.assertAlmostEqual(float(row.get("ask") or 0), 0.79, places=4)
+
+    def test_label_near_miss_keeps_per_row_organic_asks(self):
+        """Mixed asks 0.75 then 0.79 must not collapse to first organic price."""
+        with tempfile.TemporaryDirectory() as tmp:
+            for ask in (0.75, 0.79):
+                desk_more.record_near_miss(
+                    tmp,
+                    {
+                        "bot": "sports-gap",
+                        "ticker": "KXNFLGAME-26NOV08DETMIA-DET",
+                        "side": "YES",
+                        "soft": ["p"],
+                        "p": 0.76,
+                        "edge": 0.01,
+                        "ask": ask,
+                        "league": "NFL",
+                        "note": f"ask {ask}",
+                    },
+                )
+            out = desk_roi_plan.label_near_miss_from_result(
+                tmp,
+                ticker="KXNFLGAME-26NOV08DETMIA-DET",
+                result="yes",
+                bot="sports-gap",
+            )
+            self.assertEqual(out["labeled"], 2)
+            by_ask = {
+                round(float(r["ask"]), 4): float(r["would_pnl"])
+                for r in (desk_more.load_more(tmp).get("near_miss") or [])
+                if r.get("would_pnl") is not None
+            }
+            self.assertAlmostEqual(by_ask[0.75], 0.6667, places=3)
+            self.assertAlmostEqual(by_ask[0.79], 0.5316, places=3)
 
     def test_near_miss_catchup_cli_labels_pending(self):
         with tempfile.TemporaryDirectory() as tmp:

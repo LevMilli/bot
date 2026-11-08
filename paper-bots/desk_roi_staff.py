@@ -692,6 +692,7 @@ def export_near_miss_shadow_csv(
     summary = plan.near_miss_promote_status(root)
     fields = (
         "at", "ticker", "bot", "side", "soft", "z", "p", "edge",
+        "ask", "entry_price", "league", "series",
         "would_pnl", "labeled_at", "note", "label_note",
     )
     buf = io.StringIO()
