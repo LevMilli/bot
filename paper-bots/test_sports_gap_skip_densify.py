@@ -80,6 +80,33 @@ class SportsGapSkipDensify(unittest.TestCase):
             self.assertEqual(row.get("action"), "skip")
             self.assertIn("gap < 6", str(row.get("skip_codes") or row.get("note") or ""))
 
+    def test_match_miss_path_calls_early_densify(self):
+        """Match-miss CARD densify must also hit brain (honest empty ticker)."""
+        src = GAP.read_text(encoding="utf-8")
+        miss_idx = src.find('miss = "no Kalshi match - skip"')
+        self.assertGreater(miss_idx, 0)
+        chunk = src[miss_idx:miss_idx + 700]
+        self.assertIn("_densify_early_eval_skip", chunk)
+        self.assertIn("ticker=\"\"", chunk)
+        gap = _load_gap()
+        with tempfile.TemporaryDirectory() as tmp:
+            gap.DESK_ROOT = tmp
+            gap._densify_early_eval_skip(
+                reason="no Kalshi match - skip",
+                ticker="",
+                series="KXNHLGAME",
+                league="NHL",
+            )
+            import desk_brain
+            import desk_more
+            last = (desk_brain.load_journal(tmp).get("decisions") or [])[-1]
+            self.assertEqual(last.get("bot"), "sports-gap")
+            self.assertEqual(last.get("action"), "skip")
+            self.assertEqual(last.get("ticker"), "")
+            self.assertIn("no Kalshi match", str((last.get("reasons") or [""])[0]))
+            board = desk_more.skip_leaderboard(tmp)
+            self.assertIn("sports-gap", board.get("by_bot") or {})
+
 
 if __name__ == "__main__":
     unittest.main()
