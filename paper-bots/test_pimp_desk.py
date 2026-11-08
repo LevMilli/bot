@@ -1072,6 +1072,24 @@ class PimpDeskTests(unittest.TestCase):
         )
         self.assertIn("SIGNAL: SKIP", pimp_desk._btc_skip(btc))
 
+    def test_sports_skip_prefers_densified_card(self):
+        sports = (
+            "## Check …\n"
+            "CARD: gap < 6 (accurate) - no trade\n"
+        )
+        self.assertEqual(
+            pimp_desk._sports_skip(sports),
+            "gap < 6 (accurate) - no trade",
+        )
+        self.assertEqual(
+            pimp_desk._sports_skip("CARD: No paper buy (lanes clear, no fee-aware edge).\n"),
+            "The last run did not include a skip line.",
+        )
+        self.assertIn(
+            "no Kalshi match",
+            pimp_desk._sports_skip("CARD: no Kalshi match - skip\n"),
+        )
+
     def test_card_copy_is_plain_and_accounts_keep_cash(self):
         raw = (
             "No news calendar on this bot.\n"
