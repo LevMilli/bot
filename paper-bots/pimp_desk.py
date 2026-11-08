@@ -1352,7 +1352,30 @@ def _meme_paper(root: str) -> bool:
     return re.search(r"(?m)^PAPER\s*=\s*True\b", text) is not None
 
 
-def _kalshi_skip(root: str, state: dict | None) -> str:
+def _kalshi_skip_run_body(summary: str) -> str:
+    """Prefer densified CARD / NO TRADE from the last INX scan (sports #414 sibling)."""
+    if not summary:
+        return ""
+    for line in str(summary).splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("CARD: "):
+            body = _clean(stripped[6:], 220)
+            if body:
+                return body[:400]
+        upper = stripped.upper()
+        if upper.startswith("NO TRADE"):
+            parts = stripped.split(":", 1)
+            if len(parts) == 2 and parts[1].strip():
+                return _clean(parts[1].strip(), 400)
+    return ""
+
+
+def _kalshi_skip(root: str, state: dict | None, summary: str = "") -> str:
+    run_skip = _kalshi_skip_run_body(summary)
+    if run_skip:
+        return run_skip
     day = _today()
     reasons = []
     if day.weekday() >= 5:
@@ -1820,13 +1843,15 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
     view["has_state"] = True
     view["empty"] = ""
     view["warning"] = _calendar_warning(root, spec["id"])
+    summary = str(run.get("summary") or "")
     if spec["kind"] == "sports":
         positions, trades, realized, today, risk, count, history = _sports_positions(state, day)
         view["cash"] = _num(state.get("cash"))
     elif spec["kind"] == "kalshi":
         positions, trades, realized, today, risk, count, history = _kalshi_positions(state, day)
         view["cash"] = _num(state.get("bankroll"))
-        view["skip"] = _kalshi_skip(root, state)
+        # Prefer densified CARD/NO TRADE from last scan over calendar-only (#414 sibling).
+        view["skip"] = _kalshi_skip(root, state, summary=summary)
     else:
         trades_path = _under(root, spec["folder"], "trades.csv")
         cap_log(trades_path)
@@ -1841,7 +1866,6 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
     view["today"] = today
     view["open_risk"] = risk
     view["open_count"] = count
-    summary = str(run.get("summary") or "")
     view["why"] = card_copy(summary) if summary.strip() else ""
     # Sports: why already densifies CARD; skip stayed "" forever (#400 sibling).
     if spec["kind"] == "sports" and not view.get("skip"):

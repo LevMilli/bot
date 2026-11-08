@@ -1090,6 +1090,21 @@ class PimpDeskTests(unittest.TestCase):
             pimp_desk._sports_skip("CARD: no Kalshi match - skip\n"),
         )
 
+    def test_kalshi_skip_prefers_densified_card_over_calendar(self):
+        summary = (
+            "Event KXINXU-26NOV10: 8 active contracts\n"
+            "NO TRADE 2026-11-10: post-CPI blackout 30m\n"
+            "CARD: post-CPI blackout 30m\n"
+        )
+        self.assertEqual(
+            pimp_desk._kalshi_skip(".", None, summary=summary),
+            "post-CPI blackout 30m",
+        )
+        self.assertEqual(
+            pimp_desk.card_copy(summary),
+            "post-CPI blackout 30m",
+        )
+
     def test_card_copy_is_plain_and_accounts_keep_cash(self):
         raw = (
             "No news calendar on this bot.\n"

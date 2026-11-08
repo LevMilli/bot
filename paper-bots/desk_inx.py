@@ -559,6 +559,67 @@ def inx_entry_blocks(
     return ""
 
 
+def densify_skip(
+    root: str | None,
+    *,
+    bot: str,
+    reason: str,
+    ticker: str = "",
+    side: str = "",
+    edge=None,
+    confidence=None,
+    series: str = "KXINXU",
+    note: str = "inx scan skip densify",
+    features: bool = True,
+) -> None:
+    """Mirror fee-clear skip densify into desk_brain / skip_board (+ features).
+
+    Learning.md already gets logger.learn on most INX skips; without this,
+    hologram skip_board by_bot stays empty for kalshi-sp / kalshi-sized while
+    the run printed a real NO TRADE reason. Observe only — never LIVE / arm.
+    """
+    why = str(reason or "").strip()
+    if not why or not root:
+        return
+    bot_id = str(bot or "").strip() or "kalshi-sp"
+    try:
+        import desk_brain
+        desk_brain.record_decision(
+            root,
+            bot=bot_id,
+            action="skip",
+            ticker=str(ticker or ""),
+            side=str(side or ""),
+            edge=edge,
+            confidence=confidence,
+            reasons=[why],
+            note=str(note or "")[:160],
+        )
+    except Exception:
+        pass
+    if not features:
+        return
+    try:
+        import desk_living
+        desk_living.record_eval_features(
+            root,
+            bot=bot_id,
+            action="skip",
+            series=str(series or "KXINXU"),
+            ticker=str(ticker or ""),
+            ev={
+                "side": side or None,
+                "edge": edge,
+                "confidence": confidence,
+                "ticker": ticker or None,
+            },
+            reasons=[why],
+            note=why[:160],
+        )
+    except Exception:
+        pass
+
+
 def self_check() -> None:
     from datetime import date as d
 

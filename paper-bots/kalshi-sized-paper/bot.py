@@ -52,6 +52,36 @@ def _ask_band():
         return float(CFG["band_min_ask"]), float(CFG["band_max_ask"])
 
 
+def _densify_scan_skip(
+    reason: str,
+    *,
+    ticker: str = "",
+    side: str = "",
+    edge=None,
+    confidence=None,
+    features: bool = True,
+) -> None:
+    """Feed desk_brain / skip_board (+ features) for sized INX scan skips."""
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_inx
+        desk_inx.densify_skip(
+            DESK_ROOT,
+            bot="kalshi-sized",
+            reason=reason,
+            ticker=ticker,
+            side=side,
+            edge=edge,
+            confidence=confidence,
+            series=str(CFG.get("series") or "KXINXU"),
+            note="kalshi-sized scan skip densify",
+            features=features,
+        )
+    except Exception:
+        pass
+
+
 def live_quotes(event_ticker):
     out = []
     for m in feed.get_event_markets(event_ticker):
@@ -160,10 +190,14 @@ def step_scan(args, state, day):
         print(alerts.format_skip_note(day, why))
         if not args.dry_run:
             logger.learn(f"{day}: no trade - {why}", "skip")
+            _densify_scan_skip(why)
         return
     ev = feed.find_event_for(CFG["series"], day, CFG["settle_time_ct"])
     if not ev:
-        print(alerts.format_skip_note(day, "no KXINXU 3 PM CT event listed (holiday/half day?)"))
+        reason = "no KXINXU 3 PM CT event listed (holiday/half day?)"
+        print(alerts.format_skip_note(day, reason))
+        if not args.dry_run:
+            _densify_scan_skip(reason, features=False)
         return
     # Positive-ROI: post-print / pre-FOMC calm gates (fee floors unchanged).
     try:
@@ -177,6 +211,7 @@ def step_scan(args, state, day):
             print(alerts.format_skip_note(day, macro))
             if not args.dry_run:
                 logger.learn(f"{day}: no trade - {macro}", "skip")
+                _densify_scan_skip(macro)
             return
     except Exception:
         pass
@@ -185,9 +220,11 @@ def step_scan(args, state, day):
     lo, hi = _ask_band()
     cands = signal_engine.candidate_sides(quotes, lo, hi)
     if not cands:
-        print(alerts.format_skip_note(day, "no contract with ask in the 84-92c band"))
+        reason = "no contract with ask in the 84-92c band"
+        print(alerts.format_skip_note(day, reason))
         if not args.dry_run:
             logger.learn(f"{day}: no trade - nothing in 84-92c band at scan time", "skip")
+            _densify_scan_skip(reason)
         return
     venue_edge = 0.02
     try:
@@ -212,6 +249,7 @@ def step_scan(args, state, day):
         print(alerts.format_skip_note(day, reason))
         if not args.dry_run:
             logger.learn(f"{day}: no trade - {reason}", "skip")
+            _densify_scan_skip(reason)
         return
     ranked = list(chosen.get("picks") or [])
     if not ranked and chosen.get("pick"):
@@ -308,6 +346,7 @@ def step_scan(args, state, day):
         print(alerts.format_skip_note(day, reason))
         if not args.dry_run:
             logger.learn(f"{day}: no trade - {reason}", "skip")
+            _densify_scan_skip(reason, edge=edge_proxy if edge_proxy else None)
         return
     try:
         desk = _desk()
@@ -315,7 +354,16 @@ def step_scan(args, state, day):
         # Desk-wide entry_gate — sibling retry cannot clear it.
         gate = desk.entry_gate(DESK_ROOT)
         if gate:
-            print(gate)
+            print(alerts.format_skip_note(day, str(gate)))
+            if not args.dry_run:
+                logger.learn(f"{day}: no trade - {gate}", "skip")
+                _densify_scan_skip(
+                    str(gate),
+                    ticker=str(pick.get("ticker") or ""),
+                    side=str(pick.get("side") or ""),
+                    edge=edge_proxy,
+                    confidence=fair_p,
+                )
             return
         open_risk = _desk_open_risk(desk)
         dollars = desk.stake_dollars_for(
@@ -334,9 +382,11 @@ def step_scan(args, state, day):
         print(f"Desk sizing / fair unavailable ({exc}); falling back to local max stake.")
         n = risk_manager.stake_contracts(pick["ask"], bankroll=state["bankroll"])
     if n < 1:
-        print(alerts.format_skip_note(day, "not enough paper bankroll / stake for 1 contract after fee"))
+        reason = "not enough paper bankroll / stake for 1 contract after fee"
+        print(alerts.format_skip_note(day, reason))
         if not args.dry_run:
             logger.learn(f"{day}: no trade - bankroll/stake too small after fee", "skip")
+            _densify_scan_skip(reason)
         return
     fee = paper_sim.taker_fee(n, pick["ask"])
     preview = {
