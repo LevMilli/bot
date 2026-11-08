@@ -56,6 +56,40 @@ class BtcCardSkipDensify(unittest.TestCase):
         )
         self.assertEqual(card, "edge < 0.05 after fees")
 
+    def test_sticky_skip_path_densifies_brain_like_firm(self):
+        """Sticky buy-block must call record_decision (parity with firm + #403)."""
+        src = BTC.read_text(encoding="utf-8")
+        sticky_idx = src.find("if sticky_block:")
+        firm_idx = src.find("if firm_block:")
+        self.assertGreater(sticky_idx, 0)
+        self.assertGreater(firm_idx, 0)
+        sticky_chunk = src[sticky_idx:sticky_idx + 900]
+        firm_chunk = src[firm_idx:firm_idx + 900]
+        self.assertIn("desk_brain.record_decision", firm_chunk)
+        self.assertIn("desk_brain.record_decision", sticky_chunk)
+        self.assertIn("reasons=[sticky_block]", sticky_chunk)
+        # Consumer path: sticky reason → skip_board by_bot btc15m.
+        import desk_brain
+        import desk_more
+
+        with tempfile.TemporaryDirectory() as tmp:
+            desk_brain.record_decision(
+                tmp,
+                bot="btc15m",
+                action="skip",
+                ticker="KXBTC-STICKY",
+                side="YES",
+                edge=0.08,
+                confidence=0.7,
+                reasons=["sticky-open: exit first on red day"],
+                note="sticky densify test",
+            )
+            board = desk_more.skip_leaderboard(tmp)
+            by_bot = board.get("by_bot") or {}
+            self.assertIn("btc15m", by_bot)
+            codes = by_bot.get("btc15m") or {}
+            self.assertGreaterEqual(sum(int(v) for v in codes.values()), 1)
+
 
 class CommodityCardSkipDensify(unittest.TestCase):
     def test_card_prefers_evaluate_skip_over_generic_no_buy(self):
