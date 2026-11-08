@@ -174,6 +174,7 @@ class SettleRetroDensify(unittest.TestCase):
             self.assertIn("hard_stop_journal_missing", got)
             self.assertIn("commodity_tstop_journal_missing", got)
             self.assertIn("sports_tfinal_journal_missing", got)
+            self.assertIn("fee_ledger_missing", got)
             self.assertTrue(alerts["observe_only"])
             self.assertFalse(alerts["live_orders_enabled"])
             self.assertFalse(alerts["auto_promote"])
@@ -181,16 +182,19 @@ class SettleRetroDensify(unittest.TestCase):
             for name in ("desk_shadow_catchup_at.txt", "desk_shadow_tick_at.txt"):
                 with open(os.path.join(tmp, name), "w", encoding="utf-8") as fh:
                     fh.write("fresh\n")
-            # Catch-up materializes empty journals + edge08 → missing clears; thin may fire.
+            # Catch-up materializes journals + edge08 + fee ledger → missing clears.
             ensured = desk_roi_plan.ensure_shadow_densify_journals(tmp)
             self.assertTrue(ensured["ok"], ensured)
-            self.assertEqual(ensured["created_n"], 4)  # HS + commodity + t-final + edge08
+            # HS + commodity + t-final + fee ledger + helper fills + edge08
+            self.assertEqual(ensured["created_n"], 6, ensured)
             self.assertTrue(
                 any("shadow_edge08" in str(x) for x in (ensured.get("created") or [])),
                 ensured,
             )
+            self.assertIn("desk_fee_ledger.json", ensured.get("created") or [])
             edge = pimp_desk.shadow_account_path(tmp, "btc15m", "edge08")
             self.assertTrue(os.path.isfile(edge), edge)
+            self.assertTrue(os.path.isfile(os.path.join(tmp, "desk_fee_ledger.json")))
             pimp_desk.touch_heartbeat(tmp)
             alerts2 = desk_roi_plan.shadow_ops_alerts(tmp)
             got2 = set(alerts2.get("alerts") or [])
@@ -200,6 +204,7 @@ class SettleRetroDensify(unittest.TestCase):
             self.assertNotIn("commodity_tstop_journal_missing", got2)
             self.assertNotIn("sports_tfinal_journal_missing", got2)
             self.assertNotIn("shadow_edge08_missing", got2)
+            self.assertNotIn("fee_ledger_missing", got2)
             # Thin boards still observe when n_with_pnl==0.
             self.assertTrue(
                 {"hard_stop_promote_thin", "commodity_tstop_promote_thin", "sports_tfinal_promote_thin"}

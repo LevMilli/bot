@@ -1070,6 +1070,41 @@ def promote_gate_sla(
                 armed = plan.commodity_time_stop_is_live(root)
             elif gate == "sports_time_final":
                 armed = plan.sports_time_final_is_live(root)
+            elif gate == "helper_gate_a":
+                # Any helper with staff autonomy already armed.
+                try:
+                    board = plan.helper_promote_status(root)
+                    helpers = board.get("helpers") or board.get("board") or []
+                    if isinstance(helpers, list):
+                        armed = any(bool(h.get("armed")) for h in helpers if isinstance(h, dict))
+                    elif isinstance(helpers, dict):
+                        armed = any(
+                            bool(h.get("armed"))
+                            for h in helpers.values()
+                            if isinstance(h, dict)
+                        )
+                except Exception:
+                    armed = False
+            elif gate == "inx_band":
+                try:
+                    armed = bool(plan.inx_band_promote_status(root).get("staff_approved"))
+                except Exception:
+                    armed = False
+            elif gate == "edge08":
+                # Staff promote stamps pimp-bot-params.json overlay.
+                try:
+                    import pimp_desk
+                    path = pimp_desk._under(pimp_desk._root(root), "pimp-bot-params.json")
+                    overlay = pimp_desk._read_json(path) or {}
+                    if not isinstance(overlay, dict):
+                        overlay = {}
+                    bot = overlay.get("btc15m") if isinstance(overlay.get("btc15m"), dict) else {}
+                    armed = (
+                        str(bot.get("promoted_from_shadow") or "") == "edge08"
+                        or float(bot.get("venue_edge") or 0) + 1e-12 >= 0.08
+                    )
+                except Exception:
+                    armed = False
             first_ready = prev.get("first_seen_ready_at")
             thin_since = prev.get("thin_since")
             if ready and not first_ready:

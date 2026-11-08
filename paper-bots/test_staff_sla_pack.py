@@ -1,6 +1,7 @@
 """Staff SLA unblock pack — observe / no-force safety locks."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -168,6 +169,47 @@ class StaffSlaPack(unittest.TestCase):
                 self.assertIn("gate", g)
                 self.assertIn("ready_age_days", g)
                 self.assertIn("thin_age_days", g)
+
+    def test_sla_armed_flags_helper_inx_edge08(self):
+        """Staff-armed helper / INX / edge08 must not look ready_but_unarmed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            # Helper autonomy already staff-armed.
+            with open(os.path.join(tmp, "desk_helper_promote.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "paper_only": True,
+                    "helpers": {
+                        "line_shopper": {
+                            "staff_approved": True,
+                            "autonomy": True,
+                            "note": "test arm",
+                        }
+                    },
+                }, fh)
+            # INX band staff-approved.
+            with open(os.path.join(tmp, "desk_inx_band_promote.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "paper_only": True,
+                    "staff_approved": True,
+                    "live": True,
+                    "band_id": "80_90",
+                    "lo": 0.80,
+                    "hi": 0.90,
+                }, fh)
+            # Edge08 promoted into bot params overlay.
+            with open(os.path.join(tmp, "pimp-bot-params.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "btc15m": {
+                        "venue_edge": 0.08,
+                        "promoted_from_shadow": "edge08",
+                    }
+                }, fh)
+            # Seed distance board rows via SLA refresh (uses promote_distance_observe).
+            sla = desk_roi_staff.promote_gate_sla(tmp, refresh=True)
+            by_gate = {g["gate"]: g for g in (sla.get("gates") or []) if isinstance(g, dict)}
+            for gate in ("helper_gate_a", "inx_band", "edge08"):
+                self.assertIn(gate, by_gate, sorted(by_gate))
+                self.assertTrue(by_gate[gate].get("armed"), by_gate[gate])
+                self.assertFalse(by_gate[gate].get("ready_but_unarmed"), by_gate[gate])
 
     def test_csv_exports_observe_only(self):
         with tempfile.TemporaryDirectory() as tmp:
