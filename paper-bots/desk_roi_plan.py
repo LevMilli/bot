@@ -3421,9 +3421,10 @@ def backfill_commodity_time_stop_from_closed(
 ) -> dict:
     """Catch-up densify: closed commodity → time-stop shadow when near-close underwater.
 
-    Honest clock from closed_at vs close_time — never force rem=0 (sports t-final
-    poison lesson). Covers model-flip sells that raced ahead of mid-open densify.
-    Observe only; never LIVE; never arms.
+    Honest clock from closed_at vs close_time. Sells stamped slightly after the
+    bell (≤min_left overshoot) evaluate at close_time for settle-retro parity —
+    never invent rem=0 for early flips. Covers model-flip sells that raced ahead
+    of mid-open densify. Observe only; never LIVE; never arms.
     """
     path = _commodity_account_path(root)
     try:
@@ -3462,6 +3463,27 @@ def backfill_commodity_time_stop_from_closed(
             continue
         scanned += 1
         closed_at = _parse_commodity_closed_at(row.get("closed") or row.get("closed_at"))
+        # Sell stamped slightly after the bell: evaluate at close_time (rem≈0,
+        # settle-retro parity). Overshoot beyond min_left keeps early flips out
+        # — never invent rem=0 for sells minutes before settle.
+        close_dt = None
+        try:
+            from datetime import datetime, timezone
+            raw = str(close_time).replace("Z", "+00:00")
+            close_dt = datetime.fromisoformat(raw)
+            if close_dt.tzinfo is None:
+                close_dt = close_dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            close_dt = None
+        eval_now = closed_at
+        if (
+            closed_at is not None
+            and close_dt is not None
+            and closed_at > close_dt
+            and (closed_at - close_dt).total_seconds() / 60.0
+            <= float(COMMODITY_TIME_STOP_MIN_LEFT) + 1e-12
+        ):
+            eval_now = close_dt
         bid = None
         for key in ("exit_price", "exit_bid", "mark_bid", "bid"):
             if row.get(key) is not None:
@@ -3490,7 +3512,7 @@ def backfill_commodity_time_stop_from_closed(
             contracts=row.get("contracts"),
             cost=row.get("cost"),
             note="catchup closed time-stop — no live sell",
-            now=closed_at,
+            now=eval_now,
         )
         if rec.get("recorded"):
             recorded += 1
@@ -3504,8 +3526,9 @@ def backfill_commodity_time_stop_from_closed(
         "auto_promote": False,
         "live": False,
         "note": (
-            "Commodity time-stop catch-up from closed[] with honest closed_at clock. "
-            "Never LIVE; never arms; never forces rem=0."
+            "Commodity time-stop catch-up from closed[] with honest closed_at clock "
+            "(past-bell ≤min_left clamps to close_time for settle-retro parity). "
+            "Never LIVE; never arms; never invents rem=0 on early flips."
         ),
     }
 
