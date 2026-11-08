@@ -1,11 +1,17 @@
 {
-  "at": "2026-11-07T09:27:43Z",
+  "at": "2026-11-08T10:32:54Z",
   "auto_promote": false,
+  "code_default_live": false,
+  "decision": "review",
   "edge_relax": 0.0,
   "fee_floors_locked": true,
-  "live": false,
-  "note": "staff disarm thin force-arms \u2014 need n\u226530 EV\u22650 before re-arm",
+  "live": true,
+  "note": "staff no-force promote-ready batch",
+  "p_relax": 0.0,
   "paper_only": true,
-  "soft": null,
-  "staff_approved": false
+  "shadow_ev": 1.3143,
+  "shadow_n": 35,
+  "soft": "z",
+  "staff_approved": true,
+  "z_relax": 0.05
 }
