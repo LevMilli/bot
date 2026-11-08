@@ -141,6 +141,59 @@ class TradeWinClvCushionTests(unittest.TestCase):
             self.assertEqual(summ["binary_excluded_n"], 1)
             self.assertAlmostEqual(summ["beat_close_rate"], 0.0, places=4)
 
+    def test_gap_bot_post_settle_densifies_line_fair_home(self):
+        """Bare post / info=None must densify fair_home so green CLV is not binary."""
+        gap_path = os.path.join(ROOT, "sports-gap-paper", "gap_bot.py")
+        with open(gap_path, encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertIn("def _line_clv_fair_home", src)
+        self.assertIn("def _post_settle_fair_home", src)
+        # Scoreboard post + open hold densifies fair_home before continue.
+        post_idx = src.find('if g["state"] == "post":')
+        self.assertGreater(post_idx, 0)
+        post_chunk = src[post_idx:post_idx + 900]
+        self.assertIn("open_by_game", post_chunk)
+        self.assertIn("_post_settle_fair_home", post_chunk)
+        self.assertIn('entry["fair_home"]', post_chunk)
+        # Next-day info=None lift also densifies fair_home.
+        none_idx = src.find("if info is None:")
+        self.assertGreater(none_idx, 0)
+        none_chunk = src[none_idx:none_idx + 2200]
+        self.assertIn("_post_settle_fair_home", none_chunk)
+        self.assertIn('info["fair_home"] = fair_home', none_chunk)
+        # Idle cache must not skip leagues with open holds.
+        idle_idx = src.find("if league_cached_idle(path)")
+        self.assertGreater(idle_idx, 0)
+        idle_chunk = src[idle_idx:idle_idx + 200]
+        self.assertIn("league_has_open", idle_chunk)
+        # Runtime: wipe 0/1 refused; line WP accepted.
+        spec = importlib.util.spec_from_file_location("gap_bot_clv_post", gap_path)
+        gap = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gap)
+        self.assertIsNone(gap._line_clv_fair_home(0.0))
+        self.assertIsNone(gap._line_clv_fair_home(1.0))
+        self.assertIsNone(gap._line_clv_fair_home(None))
+        self.assertAlmostEqual(gap._line_clv_fair_home(0.9533), 0.9533, places=4)
+        with mock.patch.object(gap, "espn_summary", return_value={
+            "winprobability": [{"homeWinPercentage": 0.9533}],
+        }):
+            fair = gap._post_settle_fair_home(
+                "football/college-football",
+                {"id": "401856856", "state": "post", "status": {}},
+                "espn",
+            )
+        self.assertAlmostEqual(fair, 0.9533, places=4)
+        with mock.patch.object(gap, "espn_summary", return_value={
+            "winprobability": [{"homeWinPercentage": 1.0}],
+        }):
+            self.assertIsNone(
+                gap._post_settle_fair_home(
+                    "football/college-football",
+                    {"id": "x", "state": "post", "status": {}},
+                    "espn",
+                )
+            )
+
     def test_repair_does_not_invent_binary_close(self):
         with tempfile.TemporaryDirectory() as tmp:
             desk_more.record_sports_clv(
