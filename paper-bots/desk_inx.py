@@ -2,24 +2,33 @@
 desk_inx.py — Positive-ROI helpers for Kalshi S&P / sized twins (paper only).
 
 - Anti-double: sized refuses same settle-day ticker/side already open on kalshi-sp
-- Twin edge: sized needs residual edge ≥ S&P twin venue edge + 1¢
-- Dual-side pick: prefer max (1 − ask − fee) capital efficiency inside the band
+- Twin edge: sized needs fair edge ≥ venue + 1¢ (never residual payout)
+- Dual-side pick: band candidate ranking only — not venue clearance
+- Independent Φ fair vs ^GSPC spot: p − ask − fee must clear kalshi_inx venue floor
 - Pre/post macro: block calm before FOMC and first 30m after CPI/JOBS/FOMC prints
 
 Fee floors unchanged. No profit guarantee.
 """
 from __future__ import annotations
 
+import json
 import math
+import urllib.request
 from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 CT = ZoneInfo("America/Chicago")
 
-TWIN_EDGE_EXTRA = 0.01  # sized must clear venue + 1¢ vs residual edge proxy
+TWIN_EDGE_EXTRA = 0.01  # sized must clear venue + 1¢ vs fair edge
 POST_PRINT_MINUTES = 30
 PRE_FOMC_BLOCK_HOUR = 12  # CT — no new INX entries afternoon before FOMC day
+SPX_YAHOO = "^GSPC"
+# Afternoon INX: ~0.5% of spot per √hour until 15:00 CT (conservative).
+INX_SIGMA_FRAC = 0.005
+MIN_FAIR_P = 0.80
+MIN_FAIR_Z = 0.60
+_UA = {"User-Agent": "desk-inx-paper/1.0"}
 
 # Typical release clocks (CT). Used for post-print 30m when day is tradeable.
 MACRO_RELEASE_CT = {
@@ -63,6 +72,138 @@ def residual_edge(ask, *, rate: float = 0.07) -> float | None:
 def refuse_residual_as_edge() -> str:
     """Hard skip reason: residual payout is not fee-aware model edge."""
     return "no independent fair — residual payout (1−ask−fee) is not edge"
+
+
+def phi(z: float) -> float:
+    return 0.5 * (1.0 + math.erf(float(z) / math.sqrt(2.0)))
+
+
+def spx_spot() -> float | None:
+    """Live S&P spot via Yahoo ^GSPC. Fail-closed → None."""
+    url = (
+        "https://query1.finance.yahoo.com/v8/finance/chart/"
+        f"{SPX_YAHOO}?interval=1m&range=1d"
+    )
+    try:
+        req = urllib.request.Request(url, headers=_UA)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.load(resp)
+        result = ((data.get("chart") or {}).get("result") or [None])[0]
+        if not result:
+            return None
+        meta = result.get("meta") or {}
+        px = meta.get("regularMarketPrice")
+        if px is None:
+            quotes = ((result.get("indicators") or {}).get("quote") or [{}])[0]
+            closes = [c for c in (quotes.get("close") or []) if c is not None]
+            px = closes[-1] if closes else None
+        out = _finite(px)
+        return out if out is not None and out > 0 else None
+    except Exception:
+        return None
+
+
+def minutes_to_inx_settle(
+    now: datetime | None = None,
+    *,
+    settle_time_ct: str = "15:00",
+) -> float:
+    now = now or datetime.now(CT)
+    if now.tzinfo is None:
+        now_ct = now.replace(tzinfo=CT)
+    else:
+        now_ct = now.astimezone(CT)
+    parts = str(settle_time_ct or "15:00").split(":")
+    hh = int(parts[0]) if parts else 15
+    mm = int(parts[1]) if len(parts) > 1 else 0
+    settle = datetime.combine(now_ct.date(), time(hh, mm), CT)
+    return max((settle - now_ct).total_seconds() / 60.0, 1.0)
+
+
+def inx_sigma(spot: float, minutes_left: float) -> float:
+    s = float(spot)
+    m = max(float(minutes_left), 15.0)
+    return max(s * float(INX_SIGMA_FRAC) * math.sqrt(m / 60.0), 1e-6)
+
+
+def fair_evaluate(
+    pick: dict | None,
+    *,
+    venue_edge: float = 0.02,
+    spot: float | None = None,
+    now: datetime | None = None,
+    settle_time_ct: str = "15:00",
+    fee_rate: float = 0.07,
+    min_p: float = MIN_FAIR_P,
+    min_z: float = MIN_FAIR_Z,
+) -> dict:
+    """Independent Φ fair for a KXINXU band pick. Never treats residual as edge.
+
+    YES ≈ P(S≥K) = Φ((S−K)/σ). Fee-aware edge = p − ask − fee must clear venue.
+    Missing spot → refuse (fail-closed).
+    """
+    out: dict[str, Any] = {
+        "ok": False,
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "reason": "",
+        "p": None,
+        "edge": None,
+        "z": None,
+        "spot": None,
+        "sigma": None,
+        "fee": None,
+        "ask": None,
+        "strike": None,
+        "side": None,
+        "minutes_left": None,
+    }
+    if not isinstance(pick, dict):
+        out["reason"] = refuse_residual_as_edge()
+        return out
+    ask = _finite(pick.get("ask"))
+    strike = _finite(pick.get("strike"))
+    side = str(pick.get("side") or "").strip().lower()
+    out["ask"] = ask
+    out["strike"] = strike
+    out["side"] = side or None
+    if ask is None or not (0.0 < ask < 1.0) or strike is None or side not in ("yes", "no"):
+        out["reason"] = "inx fair: pick missing ask/strike/side"
+        return out
+    px = _finite(spot) if spot is not None else spx_spot()
+    if px is None or px <= 0:
+        out["reason"] = refuse_residual_as_edge() + " (no ^GSPC spot)"
+        return out
+    out["spot"] = px
+    minutes_left = minutes_to_inx_settle(now, settle_time_ct=settle_time_ct)
+    out["minutes_left"] = round(minutes_left, 2)
+    sigma = inx_sigma(px, minutes_left)
+    out["sigma"] = round(sigma, 4)
+    z_yes = (px - strike) / sigma
+    p_yes = phi(z_yes)
+    p = float(p_yes) if side == "yes" else float(1.0 - p_yes)
+    z = abs(z_yes)
+    fee = taker_fee_one(ask, fee_rate)
+    edge = p - float(ask) - float(fee)
+    out.update({
+        "p": round(p, 4),
+        "z": round(z, 4),
+        "fee": fee,
+        "edge": round(edge, 4),
+    })
+    need = float(venue_edge)
+    if p + 1e-12 < float(min_p):
+        out["reason"] = f"inx fair p {p:.3f} < {float(min_p):.2f}"
+        return out
+    if z + 1e-12 < float(min_z):
+        out["reason"] = f"inx fair z {z:.2f} < {float(min_z):.2f}"
+        return out
+    if edge + 1e-12 < need:
+        out["reason"] = f"inx fair edge {edge:.3f} < venue {need:.3f}"
+        return out
+    out["ok"] = True
+    out["reason"] = ""
+    return out
 
 
 def dual_side_pick(candidates: list, *, band_lo: float, band_hi: float) -> dict | None:
@@ -244,6 +385,7 @@ def self_check() -> None:
 
     assert residual_edge(0.85) is not None
     assert "not edge" in refuse_residual_as_edge().lower()
+    assert abs(phi(0.0) - 0.5) < 1e-9
     cands = [
         {"ticker": "A", "ask": 0.90, "side": "yes"},
         {"ticker": "B", "ask": 0.82, "side": "yes"},
@@ -254,6 +396,24 @@ def self_check() -> None:
     assert not anti_double_blocks(ticker="T2", sp_state={"open": [{"ticker": "T1"}]})
     assert twin_edge_blocks(sized_edge=0.02, venue_edge=0.02, extra=0.01)
     assert not twin_edge_blocks(sized_edge=0.04, venue_edge=0.02, extra=0.01)
+    # Fair: deep ITM yes clears; missing spot refuses; ATM thin skips.
+    now = datetime(2026, 11, 10, 13, 0, tzinfo=CT)
+    deep = fair_evaluate(
+        {"ticker": "T", "side": "yes", "ask": 0.85, "strike": 7300},
+        venue_edge=0.02, spot=7500.0, now=now,
+    )
+    assert deep["ok"] is True and deep["edge"] is not None and deep["edge"] >= 0.02
+    # Missing/invalid spot → refuse (no network in self_check).
+    miss = fair_evaluate(
+        {"ticker": "T", "side": "yes", "ask": 0.85, "strike": 7300},
+        venue_edge=0.02, spot=-1.0, now=now,
+    )
+    assert miss["ok"] is False and "residual" in (miss.get("reason") or "").lower()
+    thin = fair_evaluate(
+        {"ticker": "T", "side": "yes", "ask": 0.88, "strike": 7490},
+        venue_edge=0.02, spot=7500.0, now=now,
+    )
+    assert thin["ok"] is False
     skip = {"2026-11-10": ["CPI"], "2026-10-28": ["FOMC"]}
     # CPI day 08:00 CT — still in blackout
     blocked = post_macro_blackout(
