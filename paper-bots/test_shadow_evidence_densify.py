@@ -183,6 +183,93 @@ class ShadowEvidenceDensify(unittest.TestCase):
             self.assertAlmostEqual(by_ask[0.75], 0.6667, places=3)
             self.assertAlmostEqual(by_ask[0.79], 0.5316, places=3)
 
+    def test_recover_near_miss_ask_from_edge(self):
+        """Pre-#408 rows kept edge=p−ask−fee — invert recovers organic ask."""
+        ask = 0.98
+        fee = desk_roi_plan._kalshi_fee_per_contract(ask)
+        p = 0.764256841634797
+        edge = p - ask - fee
+        got = desk_roi_plan.recover_near_miss_ask_from_edge(p, edge)
+        self.assertIsNotNone(got)
+        self.assertAlmostEqual(float(got), ask, places=3)
+        self.assertIsNone(desk_roi_plan.recover_near_miss_ask_from_edge(0.7, None))
+        self.assertIsNone(desk_roi_plan.recover_near_miss_ask_from_edge(None, 0.01))
+
+    def test_densify_near_miss_ask_catchup_sibling_and_edge(self):
+        """Catch-up stamps sibling ask + p/edge recover; repairs ±stake poison."""
+        with tempfile.TemporaryDirectory() as tmp:
+            # Ask-less BTC with recoverable p+edge (pre-#408 shape).
+            desk_more.record_near_miss(
+                tmp,
+                {
+                    "bot": "btc15m",
+                    "ticker": "KXBTC15M-EDGE-RECOVER",
+                    "side": "YES",
+                    "soft": ["p"],
+                    "p": 0.764256841634797,
+                    "edge": 0.764256841634797 - 0.98 - desk_roi_plan._kalshi_fee_per_contract(0.98),
+                    "note": "pre-408 dropped ask",
+                },
+            )
+            state = desk_more.load_more(tmp)
+            state["near_miss"][0].pop("ask", None)
+            state["near_miss"][0].pop("entry_price", None)
+            # Poison label at default entry 0.5 (win → +stake).
+            state["near_miss"][0]["would_pnl"] = 2.0
+            state["near_miss"][0]["labeled_at"] = "2026-11-08T18:34:14Z"
+            desk_more.save_more(state, tmp)
+            # Sports ask-less + sibling with organic ask.
+            desk_more.record_near_miss(
+                tmp,
+                {
+                    "bot": "sports-gap",
+                    "ticker": "KXNFLGAME-ASK-SIB",
+                    "side": "YES",
+                    "soft": ["p"],
+                    "p": 0.76,
+                    "edge": 0.01,
+                    "note": "ask-less pending",
+                },
+            )
+            state = desk_more.load_more(tmp)
+            for row in state["near_miss"]:
+                if row.get("ticker") == "KXNFLGAME-ASK-SIB":
+                    row.pop("ask", None)
+                    row.pop("entry_price", None)
+            desk_more.save_more(state, tmp)
+            desk_more.record_near_miss(
+                tmp,
+                {
+                    "bot": "sports-gap",
+                    "ticker": "KXNFLGAME-ASK-SIB",
+                    "side": "YES",
+                    "soft": ["p"],
+                    "p": 0.76,
+                    "edge": 0.01,
+                    "ask": 0.79,
+                    "note": "organic sibling",
+                },
+            )
+            out = desk_roi_plan.densify_near_miss_ask_catchup(tmp)
+            self.assertTrue(out["ok"])
+            self.assertGreaterEqual(out["stamped"], 2)
+            self.assertGreaterEqual(out["relabeled"], 1)
+            self.assertFalse(out.get("live"))
+            self.assertFalse(out.get("auto_promote"))
+            rows = desk_more.load_more(tmp).get("near_miss") or []
+            btc = next(r for r in rows if r.get("ticker") == "KXBTC15M-EDGE-RECOVER")
+            self.assertAlmostEqual(float(btc["ask"]), 0.98, places=3)
+            self.assertEqual(btc.get("ask_densify"), "p_edge")
+            # Win at 0.98: contracts=2/0.98 → pnl ≈ 0.0408 (not +2.0)
+            self.assertAlmostEqual(float(btc["would_pnl"]), 0.0408, places=3)
+            self.assertTrue(btc.get("ask_densify_relabel"))
+            sib = [
+                r for r in rows
+                if r.get("ticker") == "KXNFLGAME-ASK-SIB" and r.get("ask_densify") == "sibling"
+            ]
+            self.assertTrue(sib)
+            self.assertAlmostEqual(float(sib[0]["ask"]), 0.79, places=4)
+
     def test_near_miss_catchup_cli_labels_pending(self):
         with tempfile.TemporaryDirectory() as tmp:
             desk_more.record_near_miss(

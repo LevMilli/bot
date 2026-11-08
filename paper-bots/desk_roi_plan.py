@@ -3653,6 +3653,7 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
     Observe only — never arms soft gates, never LIVE_ORDERS, never tip invent.
     Safe to call from money-pulse / ritual / make living-shadow-catchup.
     """
+    nm_ask = {"ok": False, "stamped": 0, "relabeled": 0}
     labeled = {"ok": False, "labeled": 0, "labeled_n": 0}
     backfilled = {"ok": False, "recorded": 0}
     fee_ledger_bf = {"ok": False, "recorded": 0}
@@ -3661,6 +3662,12 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
     hs_repair = {"ok": False, "removed": 0}
     tf_repair = {"ok": False, "removed": 0}
     errors: list[str] = []
+    # Stamp ask onto ask-less rows BEFORE settle label so pending get honest entry.
+    try:
+        nm_ask = densify_near_miss_ask_catchup(root)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"nm_ask:{type(exc).__name__}")
+        nm_ask = {"ok": False, "stamped": 0, "relabeled": 0, "error": type(exc).__name__}
     try:
         labeled = label_near_miss_catchup(root, fetch_result=fetch_result)
     except Exception as exc:  # noqa: BLE001
@@ -3743,6 +3750,9 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
         "time_final_poison_removed": int(tf_repair.get("removed") or 0),
         "weekly_sports_m1_repaired": int(weekly_m1.get("repaired") or 0),
         "journals_created": list(journals_ensured.get("created") or []),
+        "near_miss_ask_stamped": int(nm_ask.get("stamped") or 0),
+        "near_miss_ask_relabeled": int(nm_ask.get("relabeled") or 0),
+        "near_miss_ask": nm_ask,
         "near_miss_label": labeled,
         "helper_backfill": backfilled,
         "fee_ledger_backfill": fee_ledger_bf,
@@ -3970,6 +3980,177 @@ def shadow_ops_alerts(root: str | None = None) -> dict:
             "Shadow ops observe — heartbeat / edge08 / catch-up age / "
             "sports+commodity shadow journals / near-miss thin / fee ledger / "
             "thin promote boards. Never arms LIVE_ORDERS."
+        ),
+    }
+
+
+def _kalshi_fee_per_contract(ask: float) -> float:
+    """Kalshi-style ceil(0.07·p·(1-p)·100)/100 fee for one contract."""
+    a = float(ask)
+    return math.ceil(round(0.07 * a * (1.0 - a) * 100, 6)) / 100
+
+
+def recover_near_miss_ask_from_edge(p, edge) -> float | None:
+    """Recover organic ask from stored soft-p + edge when ask was dropped.
+
+    evaluate_window stores edge = p − ask − fee(ask). Pre-#408 BTC/ETH rows
+    kept edge but dropped ask; invert on a 0.1¢ grid. Never invents a quote
+    without both p and edge. Returns ask∈(0,1) or None.
+    """
+    p_n = _finite(p)
+    e_n = _finite(edge)
+    if p_n is None or e_n is None:
+        return None
+    target = float(p_n) - float(e_n)  # ask + fee
+    if not (0.0 < target < 2.0):
+        return None
+    best: float | None = None
+    best_err = 1e9
+    # 0.1¢ grid covers Kalshi dollar asks; stop on first tight match.
+    for i in range(1, 1000):
+        ask = i / 1000.0
+        got = ask + _kalshi_fee_per_contract(ask)
+        err = abs(got - target)
+        if err < best_err:
+            best_err = err
+            best = ask
+        if err < 5e-4:
+            return round(ask, 4)
+    if best is not None and best_err < 1e-3:
+        return round(float(best), 4)
+    return None
+
+
+def densify_near_miss_ask_catchup(root: str | None = None) -> dict:
+    """Stamp organic ask onto ask-less near-miss rows (sibling or p+edge recover).
+
+    Order: (1) sibling ask/entry on same ticker+side+bot, (2) invert p−edge=ask+fee
+    for pre-#408 rows that kept edge. When a labeled row's would_pnl matches the
+    default entry=0.5 poison (±stake), recompute with the recovered ask.
+
+    Observe only — never LIVE; never arms soft gates.
+    """
+    try:
+        import desk_more
+        state = desk_more.load_more(root)
+        rows = list(state.get("near_miss") or [])
+    except Exception:
+        return {
+            "ok": True,
+            "stamped": 0,
+            "relabeled": 0,
+            "scanned": 0,
+            "paper_only": True,
+            "observe_only": True,
+            "auto_promote": False,
+            "live": False,
+            "note": "no near_miss store",
+        }
+    # Sibling organic ask index (ticker, side, bot) → ask.
+    organic: dict[tuple, float] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        tick = str(row.get("ticker") or "").strip()
+        if not tick:
+            continue
+        side = str(row.get("side") or "YES").strip().upper() or "YES"
+        bot_id = str(row.get("bot") or "")
+        key = (tick, side, bot_id)
+        for field in ("ask", "entry_price"):
+            a = _finite(row.get(field))
+            if a is not None and 0.0 < float(a) < 1.0:
+                organic[key] = float(a)
+                break
+
+    stamped = 0
+    relabeled = 0
+    scanned = 0
+    out_rows: list = []
+    try:
+        default_stake = float(desk_more.NEAR_MISS_STAKE)
+    except Exception:
+        default_stake = 2.0
+
+    for row in rows:
+        if not isinstance(row, dict):
+            out_rows.append(row)
+            continue
+        item = dict(row)
+        own = _finite(item.get("ask"))
+        if own is None:
+            own = _finite(item.get("entry_price"))
+        if own is not None and 0.0 < float(own) < 1.0:
+            out_rows.append(item)
+            continue
+        scanned += 1
+        tick = str(item.get("ticker") or "").strip()
+        side = str(item.get("side") or "YES").strip().upper() or "YES"
+        bot_id = str(item.get("bot") or "")
+        key = (tick, side, bot_id)
+        ask = organic.get(key)
+        source = "sibling" if ask is not None else None
+        if ask is None:
+            ask = recover_near_miss_ask_from_edge(item.get("p"), item.get("edge"))
+            if ask is not None:
+                source = "p_edge"
+        if ask is None or not (0.0 < float(ask) < 1.0):
+            out_rows.append(item)
+            continue
+        ask_r = round(float(ask), 4)
+        item["ask"] = ask_r
+        item["entry_price"] = ask_r
+        item["ask_densify"] = source
+        stamped += 1
+        # Repair default-entry poison labels (±stake) now that ask is honest.
+        wp = _finite(item.get("would_pnl"))
+        stake_n = _finite(item.get("stake")) or default_stake
+        if wp is not None and abs(abs(float(wp)) - float(stake_n)) < 1e-9:
+            # Infer settle result from sign of would_pnl + side.
+            won = float(wp) > 0
+            if side == "YES":
+                result = "yes" if won else "no"
+            else:
+                result = "no" if won else "yes"
+            fresh = near_miss_would_pnl(
+                side=side, result=result, stake=stake_n, entry_price=ask_r,
+            )
+            if fresh is not None and abs(float(fresh) - float(wp)) > 1e-9:
+                item["would_pnl"] = round(float(fresh), 4)
+                item["ask_densify_relabel"] = True
+                relabeled += 1
+        out_rows.append(item)
+
+    if stamped:
+        try:
+            state["near_miss"] = out_rows
+            state["last_at"] = _now()
+            desk_more.save_more(state, root)
+        except Exception:
+            return {
+                "ok": False,
+                "stamped": 0,
+                "relabeled": 0,
+                "scanned": scanned,
+                "paper_only": True,
+                "observe_only": True,
+                "auto_promote": False,
+                "live": False,
+                "error": "save failed",
+            }
+    return {
+        "ok": True,
+        "stamped": stamped,
+        "relabeled": relabeled,
+        "scanned": scanned,
+        "paper_only": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "live": False,
+        "note": (
+            "Near-miss ask catch-up: sibling organic ask, else p+edge invert. "
+            "Repairs ±stake default-entry poison when ask recovered. Never LIVE."
         ),
     }
 
