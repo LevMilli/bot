@@ -3271,22 +3271,9 @@ def backfill_sports_exit_shadow_from_closed(
                 if rec.get("recorded"):
                     hard_n += 1
                     hs_seen.add(tick)
-        if need_tf:
-            rec = record_sports_time_final_shadow(
-                root,
-                ticker=tick,
-                side=str(row.get("side") or ""),
-                league=str(row.get("league") or ""),
-                minutes_left=0.0,  # closed → treat as final
-                entry_price=entry,
-                bid=bid,
-                contracts=row.get("contracts"),
-                cost=row.get("cost"),
-                note="catchup settle-retro time-final — no live sell",
-            )
-            if rec.get("recorded"):
-                tfinal_n += 1
-                tf_seen.add(tick)
+        # Time-final is NOT settle-retro densified: forcing minutes_left=0 on
+        # gap-decay / model-flip closes invents false "near-final" trims. Honest
+        # t-final evidence comes from mid-open ticks with real clock rem.
     return {
         "ok": True,
         "paper_only": True,
@@ -3298,8 +3285,50 @@ def backfill_sports_exit_shadow_from_closed(
         "time_final": tfinal_n,
         "recorded": hard_n + tfinal_n,
         "note": (
-            "Sports exit-shadow catch-up from closed settles "
-            "(closed-row bid fallback when API bid=0; no winner wipe→hard-stop). "
+            "Sports exit-shadow catch-up: hard-stop from closed "
+            "(closed-row bid fallback; no winner wipe invent). "
+            "Time-final settle-retro disabled — mid-open clock only. "
+            "Never LIVE; never arms."
+        ),
+    }
+
+
+def repair_sports_time_final_settle_poison(root: str | None = None) -> dict:
+    """Drop settle-retro time-final rows invented with forced minutes_left=0.
+
+    Mid-open shadow ticks (real rem>0 notes) stay. Observe only; never LIVE.
+    """
+    path = _path(SPORTS_TIME_FINAL_SHADOW, root)
+    state = _load(path, {"paper_only": True, "version": 1, "rows": [], "live": False})
+    rows = [r for r in (state.get("rows") or []) if isinstance(r, dict)]
+    kept: list[dict] = []
+    removed = 0
+    for row in rows:
+        note = str(row.get("note") or "").lower()
+        rem = _finite(row.get("minutes_left"))
+        settle_retro = "settle-retro" in note and "time-final" in note
+        forced_final = rem is not None and rem <= 1e-12 and settle_retro
+        if forced_final or settle_retro:
+            removed += 1
+            continue
+        kept.append(row)
+    if removed:
+        state["rows"] = kept[-MAX_SPORTS_TFINAL_ROWS:]
+        state["last_at"] = _now()
+        state["paper_only"] = True
+        state["live"] = sports_time_final_is_live(root)
+        _save(path, state)
+    return {
+        "ok": True,
+        "removed": removed,
+        "kept": len(kept),
+        "paper_only": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live": False,
+        "summary": sports_time_final_shadow_summary(root),
+        "note": (
+            "Removed settle-retro time-final poison (forced rem=0 invents). "
             "Never LIVE; never arms."
         ),
     }
@@ -3400,6 +3429,7 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
     repaired = {"ok": False, "repaired": 0}
     sports_exit = {"ok": False, "recorded": 0}
     hs_repair = {"ok": False, "removed": 0}
+    tf_repair = {"ok": False, "removed": 0}
     errors: list[str] = []
     try:
         labeled = label_near_miss_catchup(root, fetch_result=fetch_result)
@@ -3421,6 +3451,11 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
     except Exception as exc:  # noqa: BLE001
         errors.append(f"hs_repair:{type(exc).__name__}")
         hs_repair = {"ok": False, "removed": 0, "error": type(exc).__name__}
+    try:
+        tf_repair = repair_sports_time_final_settle_poison(root)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"tf_repair:{type(exc).__name__}")
+        tf_repair = {"ok": False, "removed": 0, "error": type(exc).__name__}
     try:
         sports_exit = backfill_sports_exit_shadow_from_closed(root)
     except Exception as exc:  # noqa: BLE001
@@ -3450,10 +3485,12 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
         "repaired": int(repaired.get("repaired") or 0),
         "sports_exit_shadow": int(sports_exit.get("recorded") or 0),
         "hard_stop_poison_removed": int(hs_repair.get("removed") or 0),
+        "time_final_poison_removed": int(tf_repair.get("removed") or 0),
         "near_miss_label": labeled,
         "helper_backfill": backfilled,
         "clv_repair": repaired,
         "hard_stop_repair": hs_repair,
+        "time_final_repair": tf_repair,
         "sports_exit": sports_exit,
         "errors": errors[:8],
         "note": (

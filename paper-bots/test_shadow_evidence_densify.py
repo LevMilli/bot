@@ -315,7 +315,7 @@ class ShadowEvidenceDensify(unittest.TestCase):
             )
             self.assertTrue(out["ok"])
             self.assertEqual(out["hard_stop"], 1)
-            # No closed-row bid → time-final still skips settle wipe (API bid=0).
+            # Time-final is not settle-retro densified.
             self.assertEqual(out["time_final"], 0)
             hs = desk_roi_plan.sports_hard_stop_shadow_summary(tmp)
             self.assertEqual(hs["n"], 1)
@@ -327,8 +327,8 @@ class ShadowEvidenceDensify(unittest.TestCase):
             )
             self.assertEqual(again["recorded"], 0)
 
-    def test_catchup_prefers_closed_row_bid_for_time_final(self):
-        """API bid=0 on finalized markets must fall back to closed-row mark bid."""
+    def test_catchup_prefers_closed_row_bid_for_hard_stop(self):
+        """API bid=0 falls back to closed-row mark for hard-stop; t-final not settle-retro."""
         with tempfile.TemporaryDirectory() as tmp:
             sports_dir = os.path.join(tmp, "sports-gap-paper")
             os.makedirs(sports_dir, exist_ok=True)
@@ -361,10 +361,38 @@ class ShadowEvidenceDensify(unittest.TestCase):
             )
             self.assertTrue(out["ok"], out)
             self.assertEqual(out["hard_stop"], 1)
-            self.assertEqual(out["time_final"], 1)
-            tf = desk_roi_plan.sports_time_final_shadow_summary(tmp)
-            self.assertEqual(tf["n"], 1)
-            self.assertLess(tf["shadow_expectancy"], 0)
+            # Time-final settle-retro disabled — mid-open clock only.
+            self.assertEqual(out["time_final"], 0)
+            self.assertEqual(desk_roi_plan.sports_time_final_shadow_summary(tmp)["n"], 0)
+
+    def test_repair_removes_time_final_settle_retro_poison(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            desk_roi_plan.record_sports_time_final_shadow(
+                tmp,
+                ticker="KX-POISON-TF",
+                minutes_left=0.0,
+                entry_price=0.72,
+                bid=0.55,
+                contracts=10,
+                cost=7.2,
+                note="catchup settle-retro time-final — no live sell",
+            )
+            desk_roi_plan.record_sports_time_final_shadow(
+                tmp,
+                ticker="KX-REAL-TF",
+                minutes_left=1.2,
+                entry_price=0.72,
+                bid=0.55,
+                contracts=10,
+                cost=7.2,
+                note="shadow time-final — no live sell",
+            )
+            self.assertEqual(desk_roi_plan.sports_time_final_shadow_summary(tmp)["n"], 2)
+            out = desk_roi_plan.repair_sports_time_final_settle_poison(tmp)
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out["removed"], 1)
+            self.assertEqual(out["kept"], 1)
+            self.assertEqual(desk_roi_plan.sports_time_final_shadow_summary(tmp)["n"], 1)
 
     def test_catchup_skips_winner_wipe_hard_stop(self):
         """Finalized bid=0 on a settle winner must not invent a threshold hard-stop."""
