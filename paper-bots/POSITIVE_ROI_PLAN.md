@@ -2001,7 +2001,7 @@ Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers. Ne
 
 | Ticket | Where |
 | --- | --- |
-| Sports settle-retro Kalshi bid fallback | `gap_bot.fetch_kalshi_market` / `market_yes_bid` when next-day finals rebuild has no pair → hard-stop shadow only (skip winner wipe_quote); **t-final settle-retro disabled** (forced rem=0 invents) — mid-open clock densify only |
+| Sports settle-retro Kalshi bid fallback | `gap_bot.fetch_kalshi_market` / `market_yes_bid` when next-day finals rebuild has no pair → hard-stop shadow only (skip winner wipe_quote); catch-up honors API wipe 0 on losers / `exit_bid|mark|exit_price` (never entry companion `bid`); **t-final settle-retro disabled** (forced rem=0 invents) — mid-open clock densify only |
 | Money-pulse peers | `staff_living_status money-pulse` top-level `commodity_time_stop` + `sports_time_final` (mirror `hard_stop`) |
 | Doctor shadow-ops densify | `shadow_ops_alerts` += `catchup_stale` / `tick_stale` / `*_journal_missing` / `*_promote_thin` (observe; doctor does not hard-fail) |
 | Commodity in shadow tick | `pimp_desk.run_shadow_tick` smokes `commodity-15m` paper (`commodity_smoked`) alongside sports-gap |

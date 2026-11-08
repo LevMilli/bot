@@ -360,8 +360,8 @@ class ShadowEvidenceDensify(unittest.TestCase):
             )
             self.assertEqual(again["recorded"], 0)
 
-    def test_catchup_prefers_closed_row_bid_for_hard_stop(self):
-        """API bid=0 falls back to closed-row mark for hard-stop; t-final not settle-retro."""
+    def test_catchup_api_wipe_on_loser_records_hard_stop(self):
+        """API wipe 0 on settle loser densifies hard-stop; entry companion bid ignored."""
         with tempfile.TemporaryDirectory() as tmp:
             sports_dir = os.path.join(tmp, "sports-gap-paper")
             os.makedirs(sports_dir, exist_ok=True)
@@ -370,12 +370,69 @@ class ShadowEvidenceDensify(unittest.TestCase):
                 "open": [],
                 "closed": [
                     {
-                        "ticker": "KX-CLOSED-MARK",
+                        "ticker": "KX-WIPE-LOSER",
+                        "side": "home",
+                        "league": "NCAAF",
+                        "entry_price": 0.70,
+                        # Entry companion bid ≈ ask — must NOT block wipe densify.
+                        "bid": 0.69,
+                        "ask": 0.70,
+                        "exit_price": 0.65,
+                        "contracts": 21,
+                        "cost": 15.12,
+                        "pnl": -1.89,
+                    }
+                ],
+                "paper_only": True,
+            }
+            with open(os.path.join(sports_dir, "state.json"), "w", encoding="utf-8") as fh:
+                json.dump(state, fh)
+
+            def fake_market(ticker: str):
+                return {
+                    "ticker": ticker,
+                    "yes_bid_dollars": "0.0000",
+                    "status": "finalized",
+                    "result": "no",
+                }
+
+            out = desk_roi_plan.backfill_sports_exit_shadow_from_closed(
+                tmp, fetch_market=fake_market,
+            )
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out["hard_stop"], 1)
+            self.assertEqual(out["time_final"], 0)
+            summ = desk_roi_plan.sports_hard_stop_shadow_summary(tmp)
+            self.assertEqual(summ["n"], 1)
+            with open(
+                os.path.join(tmp, desk_roi_plan.SPORTS_HARD_STOP_SHADOW),
+                encoding="utf-8",
+            ) as fh:
+                row = (json.load(fh).get("rows") or [])[0]
+            self.assertEqual(row.get("bid"), 0.0)
+            self.assertTrue(row.get("priced_at_threshold"))
+            # Repair must keep loser wipe densify (not strip via entry bid).
+            repair = desk_roi_plan.repair_sports_hard_stop_settle_poison(tmp)
+            self.assertEqual(repair["removed"], 0)
+            self.assertEqual(repair["kept"], 1)
+
+    def test_catchup_prefers_exit_mark_not_entry_bid(self):
+        """API missing → use exit_price/exit_bid; never entry companion bid."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sports_dir = os.path.join(tmp, "sports-gap-paper")
+            os.makedirs(sports_dir, exist_ok=True)
+            state = {
+                "cash": 100.0,
+                "open": [],
+                "closed": [
+                    {
+                        "ticker": "KX-EXIT-MARK",
                         "side": "home",
                         "league": "NCAAF",
                         "entry_price": 0.72,
-                        "bid": 0.55,  # underwater + past hard-stop drop
-                        "ask": 0.56,
+                        "bid": 0.71,  # entry companion — not a stop
+                        "exit_price": 0.55,  # underwater past −12¢
+                        "ask": 0.72,
                         "contracts": 27,
                         "cost": 19.44,
                         "pnl": -4.59,
@@ -386,17 +443,45 @@ class ShadowEvidenceDensify(unittest.TestCase):
             with open(os.path.join(sports_dir, "state.json"), "w", encoding="utf-8") as fh:
                 json.dump(state, fh)
 
-            def fake_market(ticker: str):
-                return {"ticker": ticker, "yes_bid": None, "status": "finalized", "result": "yes"}
+            def fake_missing(ticker: str):
+                return None
 
             out = desk_roi_plan.backfill_sports_exit_shadow_from_closed(
-                tmp, fetch_market=fake_market,
+                tmp, fetch_market=fake_missing,
             )
             self.assertTrue(out["ok"], out)
             self.assertEqual(out["hard_stop"], 1)
-            # Time-final settle-retro disabled — mid-open clock only.
             self.assertEqual(out["time_final"], 0)
-            self.assertEqual(desk_roi_plan.sports_time_final_shadow_summary(tmp)["n"], 0)
+
+            # Entry companion only — no densify invent.
+            state2 = {
+                "cash": 100.0,
+                "open": [],
+                "closed": [
+                    {
+                        "ticker": "KX-ENTRY-ONLY",
+                        "side": "home",
+                        "league": "NCAAF",
+                        "entry_price": 0.72,
+                        "bid": 0.71,
+                        "ask": 0.72,
+                        "contracts": 10,
+                        "cost": 7.2,
+                        "pnl": -2.0,
+                    }
+                ],
+                "paper_only": True,
+            }
+            with open(os.path.join(sports_dir, "state.json"), "w", encoding="utf-8") as fh:
+                json.dump(state2, fh)
+            # Clear prior journal so we only count this ticker.
+            hs_path = os.path.join(tmp, desk_roi_plan.SPORTS_HARD_STOP_SHADOW)
+            if os.path.exists(hs_path):
+                os.remove(hs_path)
+            out2 = desk_roi_plan.backfill_sports_exit_shadow_from_closed(
+                tmp, fetch_market=fake_missing,
+            )
+            self.assertEqual(out2["hard_stop"], 0)
 
     def test_repair_removes_time_final_settle_retro_poison(self):
         with tempfile.TemporaryDirectory() as tmp:
