@@ -179,6 +179,74 @@ class TradeWinClvCushionTests(unittest.TestCase):
         reasons = " | ".join(ev.get("reasons") or [])
         self.assertIn("cushion", reasons)
 
+    def test_btc_toward_skipped_when_p_clears_need(self):
+        btc = _load_btc()
+        close = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=12)
+        open_t = close - dt.timedelta(minutes=15)
+        # YES side + falling last 5 candles → toward=True; Φ(z) still fee-clears.
+        m = {
+            "ticker": "KXBTC15M-TOWARD-OK",
+            "series": "KXBTC15M",
+            "target": 100000.0,
+            "open_time": open_t,
+            "close_time": close,
+            "yes_ask": 0.82,
+            "no_ask": 0.20,
+            "yes_bid": 0.80,
+            "no_bid": 0.18,
+        }
+        # 6+ closes ending lower so move < 0 while price still above target.
+        closes = [100050.0] * 5 + [100040.0, 100030.0]
+        with mock.patch.object(btc, "_sigma_for", return_value=(20.0, 20.0, None)):
+            with mock.patch.object(btc, "usd_high_impact_near", return_value=False):
+                with mock.patch.object(
+                    desk_roi_plan,
+                    "effective_near_miss_relax",
+                    return_value={"p_relax": 0.0, "z_relax": 0.0},
+                ):
+                    ev = btc.evaluate_window(
+                        m, 100030.0, closes, None, False, 0.05,
+                        book=(0.80, 0.82, 10.0),
+                    )
+        self.assertTrue(ev.get("toward"))
+        self.assertGreaterEqual(float(ev.get("p") or 0), float(ev.get("need") or 1))
+        reasons = " | ".join(ev.get("reasons") or [])
+        self.assertNotIn("candles moving toward", reasons)
+
+    def test_btc_toward_still_blocks_when_p_thin(self):
+        btc = _load_btc()
+        close = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=12)
+        open_t = close - dt.timedelta(minutes=15)
+        # Ask high so need_p > p even with solid z; toward must still veto.
+        m = {
+            "ticker": "KXBTC15M-TOWARD-BLOCK",
+            "series": "KXBTC15M",
+            "target": 100000.0,
+            "open_time": open_t,
+            "close_time": close,
+            "yes_ask": 0.90,
+            "no_ask": 0.12,
+            "yes_bid": 0.88,
+            "no_bid": 0.10,
+        }
+        closes = [100050.0] * 5 + [100040.0, 100030.0]
+        with mock.patch.object(btc, "_sigma_for", return_value=(20.0, 20.0, None)):
+            with mock.patch.object(btc, "usd_high_impact_near", return_value=False):
+                with mock.patch.object(
+                    desk_roi_plan,
+                    "effective_near_miss_relax",
+                    return_value={"p_relax": 0.0, "z_relax": 0.0},
+                ):
+                    ev = btc.evaluate_window(
+                        m, 100030.0, closes, None, False, 0.05,
+                        book=(0.88, 0.90, 10.0),
+                    )
+        self.assertTrue(ev.get("toward"))
+        self.assertLess(float(ev.get("p") or 1), float(ev.get("need") or 0) + 0.05)
+        reasons = " | ".join(ev.get("reasons") or [])
+        # Either p < need reason and/or toward candle — toward must fire when p thin.
+        self.assertIn("candles moving toward", reasons)
+
 
 if __name__ == "__main__":
     unittest.main()
