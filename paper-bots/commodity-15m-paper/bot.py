@@ -931,37 +931,8 @@ def main() -> int:
             f"  {series} {m['ticker']} spot={spot:.5f} target={m['target']} "
             f"side={ev.get('side')} p={ev.get('p')} reasons={ev.get('reasons')}"
         )
-        # Exits before entries — model-flip when this window's model speaks.
-        if (
-            flip_on
-            and account.get("open")
-            and ev.get("side")
-            and ev.get("bid") is not None
-            and ev.get("p") is not None
-        ):
-            sold = manage_model_flips(
-                account,
-                ev["side"],
-                ev["p"],
-                ev["bid"],
-                kalshi_fee(float(ev["bid"])) if ev.get("bid") else 0.0,
-                flip_delta,
-                ticker=ev.get("ticker"),
-            )
-            if sold:
-                save_account(account)
-                for line in sold:
-                    print(f"  MODEL-FLIP SELL: {line}")
-                try:
-                    import desk_roi_plan
-                    desk_roi_plan.record_anti_revenge(
-                        DESK_ROOT, bot="commodity-15m",
-                        ticker=str(ev.get("ticker") or ""), reason="model-flip",
-                        note=str(sold[0])[:120],
-                    )
-                except Exception:
-                    pass
-        # Phase 3: time-stop shadow (≤3m to close + underwater mark). Live staff-gated.
+        # Phase 3 densify BEFORE model-flip — near-close underwater flips otherwise
+        # leave open[] and never hit mid-open / all-opens time-stop shadow.
         try:
             import desk_roi_plan
             tick = str(m.get("ticker") or "")
@@ -1022,6 +993,36 @@ def main() -> int:
                     save_account(account)
         except Exception:
             pass
+        # Exits before entries — model-flip when this window's model speaks.
+        if (
+            flip_on
+            and account.get("open")
+            and ev.get("side")
+            and ev.get("bid") is not None
+            and ev.get("p") is not None
+        ):
+            sold = manage_model_flips(
+                account,
+                ev["side"],
+                ev["p"],
+                ev["bid"],
+                kalshi_fee(float(ev["bid"])) if ev.get("bid") else 0.0,
+                flip_delta,
+                ticker=ev.get("ticker"),
+            )
+            if sold:
+                save_account(account)
+                for line in sold:
+                    print(f"  MODEL-FLIP SELL: {line}")
+                try:
+                    import desk_roi_plan
+                    desk_roi_plan.record_anti_revenge(
+                        DESK_ROOT, bot="commodity-15m",
+                        ticker=str(ev.get("ticker") or ""), reason="model-flip",
+                        note=str(sold[0])[:120],
+                    )
+                except Exception:
+                    pass
         try:
             import kalshi_history
             kalshi_history.record_snapshot(

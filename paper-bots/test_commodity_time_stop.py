@@ -1,6 +1,7 @@
 """Commodity Phase 3 time-stop shadow — ≤3m left + underwater mark."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -162,6 +163,73 @@ class CommodityTimeStop(unittest.TestCase):
             }
             self.assertTrue(closed["time_stop_shadowed"])
             self.assertEqual(closed["exit"], "settled")
+
+    def test_catchup_from_closed_near_close_underwater(self):
+        """Closed near-final underwater densifies; early flip does not invent rem=0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cmd_dir = os.path.join(tmp, "commodity-15m-paper")
+            os.makedirs(cmd_dir, exist_ok=True)
+            close_iso = "2026-11-08T12:15:00Z"
+            # Closed 2m before settle — honest near-close.
+            closed_near = {
+                "ticker": "KXWTI-NEAR",
+                "side": "YES",
+                "series": "KXWTI15M",
+                "close_time": close_iso,
+                "entry": 0.60,
+                "cost": 6.0,
+                "contracts": 10,
+                "exit_price": 0.40,
+                "pnl": -2.0,
+                "exit": "model-flip fair Δ≥0.08",
+                "closed": "2026-11-08 12:13:00 UTC",
+            }
+            # Closed 10m before settle — not near-close; must not invent.
+            closed_early = {
+                "ticker": "KXWTI-EARLY",
+                "side": "YES",
+                "series": "KXWTI15M",
+                "close_time": close_iso,
+                "entry": 0.60,
+                "cost": 6.0,
+                "contracts": 10,
+                "exit_price": 0.40,
+                "pnl": -2.0,
+                "exit": "model-flip fair Δ≥0.08",
+                "closed": "2026-11-08 12:05:00 UTC",
+            }
+            with open(os.path.join(cmd_dir, "paper_account.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "cash": 100.0,
+                    "open": [],
+                    "closed": [closed_near, closed_early],
+                    "paper_only": True,
+                }, fh)
+            out = desk_roi_plan.backfill_commodity_time_stop_from_closed(tmp)
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out["recorded"], 1)
+            summ = desk_roi_plan.commodity_time_stop_shadow_summary(tmp)
+            self.assertEqual(summ["n"], 1)
+            # Idempotent.
+            out2 = desk_roi_plan.backfill_commodity_time_stop_from_closed(tmp)
+            self.assertEqual(out2["recorded"], 0)
+            # Catchup surfaces commodity_tstop.
+            catch = desk_roi_plan.run_shadow_catchup(tmp)
+            self.assertIn("commodity_tstop", catch)
+            self.assertEqual(int(catch.get("commodity_tstop_shadow") or 0), 0)
+
+    def test_bot_densify_before_model_flip(self):
+        bot_src = os.path.join(HERE, "commodity-15m-paper", "bot.py")
+        with open(bot_src, encoding="utf-8") as fh:
+            text = fh.read()
+        densify = text.find("Phase 3 densify BEFORE model-flip")
+        flip = text.find("Exits before entries — model-flip")
+        self.assertGreater(densify, 0)
+        self.assertGreater(flip, densify)
+        plan_path = os.path.join(HERE, "desk_roi_plan.py")
+        with open(plan_path, encoding="utf-8") as fh:
+            plan_src = fh.read()
+        self.assertIn("backfill_commodity_time_stop_from_closed", plan_src)
 
 
 if __name__ == "__main__":
