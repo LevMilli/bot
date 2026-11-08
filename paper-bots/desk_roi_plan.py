@@ -3255,6 +3255,8 @@ def backfill_sports_exit_shadow_from_closed(
         api_bid = _kalshi_yes_bid_from_market(market)
         # gap_bot stores entry companion `bid`≈ask at open — never use it as an
         # exit mark. Prefer true exit marks; honor API wipe 0 on settle losers.
+        # When organic exit_mark already hits HS (gap-decay/flip), keep it —
+        # live api_bid>0 after exit can recover above threshold and DROP evidence.
         exit_mark = None
         for key in ("exit_bid", "mark_bid", "exit_price"):
             if row.get(key) is not None:
@@ -3262,20 +3264,23 @@ def backfill_sports_exit_shadow_from_closed(
                 break
         settle_pnl = _finite(row.get("pnl"))
         is_loser = settle_pnl is not None and settle_pnl + 1e-12 < 0.0
-        if api_bid is not None and api_bid > 0:
-            bid = api_bid
-        elif api_bid is not None and api_bid <= 0 and is_loser:
-            # Finalized wipe on a loser — honest settle-retro densify.
-            bid = api_bid
-        elif exit_mark is not None and exit_mark >= 0:
-            bid = exit_mark
-        elif api_bid is not None:
-            bid = api_bid
-        else:
-            bid = None
+        entry = row.get("entry_price")
+        bid = None
+        if need_hs and exit_mark is not None:
+            if sports_hard_stop_hit(entry, exit_mark).get("hit"):
+                bid = exit_mark
+        if bid is None:
+            if api_bid is not None and api_bid > 0:
+                bid = api_bid
+            elif api_bid is not None and api_bid <= 0 and is_loser:
+                # Finalized wipe on a loser — honest settle-retro densify.
+                bid = api_bid
+            elif exit_mark is not None and exit_mark >= 0:
+                bid = exit_mark
+            elif api_bid is not None:
+                bid = api_bid
         if bid is None:
             continue
-        entry = row.get("entry_price")
         if need_hs:
             # Finalized API bid=0 always "hits" via threshold pricing. That invents
             # hard-stops on winners that never traded through entry−drop. Only

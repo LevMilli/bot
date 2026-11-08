@@ -631,6 +631,53 @@ class ShadowEvidenceDensify(unittest.TestCase):
             )
             self.assertEqual(out2["hard_stop"], 0)
 
+    def test_catchup_prefers_exit_mark_when_api_recovered(self):
+        """Gap-decay exit hits HS; recovered live api_bid must not drop it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sports_dir = os.path.join(tmp, "sports-gap-paper")
+            os.makedirs(sports_dir, exist_ok=True)
+            state = {
+                "cash": 100.0,
+                "open": [],
+                "closed": [
+                    {
+                        "ticker": "KX-GAP-DECAY-HS",
+                        "side": "home",
+                        "league": "NFL",
+                        "entry_price": 0.80,
+                        "bid": 0.79,  # entry companion
+                        "exit_price": 0.65,  # hits thr 0.68
+                        "contracts": 10,
+                        "cost": 8.0,
+                        "pnl": -1.5,
+                        "exit": "gap-decay: now 0.01 < 55% of entry 0.06",
+                    }
+                ],
+                "paper_only": True,
+            }
+            with open(os.path.join(sports_dir, "state.json"), "w", encoding="utf-8") as fh:
+                json.dump(state, fh)
+
+            def fake_recovered(ticker: str):
+                return {"yes_bid_dollars": "0.75"}  # above thr — old path dropped HS
+
+            out = desk_roi_plan.backfill_sports_exit_shadow_from_closed(
+                tmp, fetch_market=fake_recovered,
+            )
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out["hard_stop"], 1, out)
+            hs = desk_roi_plan._load(
+                desk_roi_plan._path(desk_roi_plan.SPORTS_HARD_STOP_SHADOW, tmp),
+                {"rows": []},
+            )
+            row = (hs.get("rows") or [])[0]
+            self.assertAlmostEqual(float(row.get("bid")), 0.65, places=4)
+            # Idempotent
+            again = desk_roi_plan.backfill_sports_exit_shadow_from_closed(
+                tmp, fetch_market=fake_recovered,
+            )
+            self.assertEqual(again["hard_stop"], 0)
+
     def test_repair_removes_time_final_settle_retro_poison(self):
         with tempfile.TemporaryDirectory() as tmp:
             desk_roi_plan.record_sports_time_final_shadow(
