@@ -1044,6 +1044,34 @@ class PimpDeskTests(unittest.TestCase):
             self.assertNotIn("without the strict", state["open"][0]["why"])
             self.assertTrue(state["open"][0]["paper_only"])
 
+    def test_btc_skip_prefers_densified_card_over_no_skip_lie(self):
+        # Commodity (#397) prints evaluate reasons on CARD only — never SIGNAL:.
+        commodity = (
+            "commodity-15m paper check (no live orders)\n"
+            "  KXGOLD15M KXGOLD-1 spot=2650 reasons=['edge < 0.05 after fees']\n"
+            "CARD: edge < 0.05 after fees; z < 1.0\n"
+        )
+        self.assertEqual(
+            pimp_desk._btc_skip(commodity),
+            "edge < 0.05 after fees; z < 1.0",
+        )
+        self.assertEqual(
+            pimp_desk.card_copy(commodity),
+            "edge < 0.05 after fees; z < 1.0",
+        )
+        # Generic empty CARD is not a skip reason — keep honest empty message.
+        empty = "CARD: Checked commodity 15m markets. No paper buy.\n"
+        self.assertEqual(
+            pimp_desk._btc_skip(empty),
+            "The last run did not include a skip line.",
+        )
+        # SIGNAL: still wins when present (BTC evaluate path).
+        btc = (
+            "  SIGNAL: SKIP -> z < 1.25 (0.91)\n"
+            "CARD: z < 1.25 (0.91)\n"
+        )
+        self.assertIn("SIGNAL: SKIP", pimp_desk._btc_skip(btc))
+
     def test_card_copy_is_plain_and_accounts_keep_cash(self):
         raw = (
             "No news calendar on this bot.\n"
