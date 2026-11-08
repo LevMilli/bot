@@ -840,8 +840,9 @@ def paper_buy(state: dict, ev: dict) -> str:
 def _card_sentence(*, buys: int, skip_reasons=None, open_windows: bool = True) -> str:
     """CARD body only. Prefer first evaluate skip over generic no-buy (#396 sibling).
 
-    Prefer-1: skip_reasons (spot / Kalshi list failed) must beat empty-window invent —
-    feed-down must not false-friend as "No open windows" (#433/#434 sibling).
+    Prefer-1: skip_reasons (spot / Kalshi list failed|incomplete) must beat
+    empty-window invent — feed-down must not false-friend as "No open windows"
+    (#433/#434/#435/#439 sibling).
     """
     skips = [str(s).strip() for s in (skip_reasons or []) if str(s).strip()]
     if buys <= 0 and skips:
@@ -972,13 +973,26 @@ def main() -> int:
             )
             print(f"SKIP densify: {spot_reason}")
         elif list_errs:
-            # Spots present but every list_open raised → Kalshi feed-down invent.
-            kalshi_reason = "markets failed (kalshi)"
+            # Spots present + list_open raised → Kalshi feed-down invent.
+            # Prefer-1 leftover of #435/#439: when SOME spotted series listed OK
+            # as [] and SOME raised, "markets failed" invents total Kalshi-down
+            # over honest empty siblings. Name incomplete (not total failed).
+            spotted = [s for s in SERIES if s in spots]
+            listed_ok = [s for s in spotted if s not in list_errs]
+            if listed_ok:
+                kalshi_reason = (
+                    f"markets incomplete (kalshi "
+                    f"{len(list_errs)}/{len(spotted)} failed)"
+                )
+                densify_note = "commodity partial kalshi list densify"
+            else:
+                kalshi_reason = "markets failed (kalshi)"
+                densify_note = "commodity kalshi list densify"
             empty_skip_reasons.append(kalshi_reason)
             empty_note = kalshi_reason
             _densify_evaluate_skip(
                 reasons=[kalshi_reason],
-                note="commodity kalshi list densify",
+                note=densify_note,
             )
             print(f"SKIP densify: {kalshi_reason} ({','.join(list_errs)})")
         elif missing_spots:
@@ -1027,10 +1041,18 @@ def main() -> int:
                     "spot incomplete card",
                 )
             elif list_errs:
-                spot_lat_note, eval_lat_note = (
-                    "commodity kalshi list failed",
-                    "kalshi list failed card",
-                )
+                spotted = [s for s in SERIES if s in spots]
+                listed_ok = [s for s in spotted if s not in list_errs]
+                if listed_ok:
+                    spot_lat_note, eval_lat_note = (
+                        "commodity kalshi list incomplete",
+                        "kalshi list incomplete card",
+                    )
+                else:
+                    spot_lat_note, eval_lat_note = (
+                        "commodity kalshi list failed",
+                        "kalshi list failed card",
+                    )
             else:
                 spot_lat_note, eval_lat_note = (
                     "commodity spot (empty)",
