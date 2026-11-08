@@ -1083,8 +1083,10 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         reasons.append(f"spread {spread:.2f} > {MAX_SPREAD:.2f}")
     if depth < MIN_DEPTH:
         reasons.append(f"only {depth:.0f} contracts at/below ask (< {MIN_DEPTH})")
-    # Soft: unknown candle trend does not block (only adverse toward-target does).
-    if toward:
+    # Soft: unknown candle trend does not block.
+    # Adverse toward-target only blocks when p has not already cleared fee-aware need —
+    # otherwise candle double-vetoes fee-clear Φ edges (p/z/edge floors stay locked).
+    if toward and p + 1e-12 < float(need_p):
         reasons.append("last 5 candles moving toward target")
     # Living upgrade P0: calendar never loaded → FAIL-CLOSED (block buys).
     # Known high-impact hits still block. Matches desk copy "unavailable = skip BUY".
