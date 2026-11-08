@@ -984,17 +984,19 @@ def main() -> int:
         elif missing_spots:
             # Prefer-1: partial Yahoo down + empty windows ≠ clean no-open invent
             # (#434 leftover — all-down densified; partial still false-friended).
-            spot_reason = "spot failed (yahoo)"
+            # Name incomplete (not total "spot failed") — spotted series may be
+            # truly empty Kalshi; still must not invent a complete empty check.
+            spot_reason = (
+                f"spot incomplete (yahoo "
+                f"{len(missing_spots)}/{len(SERIES)} missing)"
+            )
             empty_skip_reasons.append(spot_reason)
             empty_note = spot_reason
             _densify_evaluate_skip(
                 reasons=[spot_reason],
                 note="commodity partial spot densify",
             )
-            print(
-                f"SKIP densify: {spot_reason} "
-                f"(partial {len(missing_spots)}/{len(SERIES)} missing)"
-            )
+            print(f"SKIP densify: {spot_reason}")
         print(
             "CARD: "
             + _card_sentence(
@@ -1014,31 +1016,34 @@ def main() -> int:
                     series=series,
                     note=empty_note,
                 )
-            spot_feed_down = (not spots) or bool(missing_spots and not list_errs)
+            if not spots:
+                spot_lat_note, eval_lat_note = (
+                    "commodity spot failed",
+                    "spot failed card",
+                )
+            elif missing_spots and not list_errs:
+                spot_lat_note, eval_lat_note = (
+                    "commodity spot incomplete",
+                    "spot incomplete card",
+                )
+            elif list_errs:
+                spot_lat_note, eval_lat_note = (
+                    "commodity kalshi list failed",
+                    "kalshi list failed card",
+                )
+            else:
+                spot_lat_note, eval_lat_note = (
+                    "commodity spot (empty)",
+                    "empty card",
+                )
             desk_roi_plan.record_latency(
                 DESK_ROOT, bot="commodity-15m", seconds=spot_secs,
-                note=(
-                    "commodity spot failed"
-                    if spot_feed_down
-                    else (
-                        "commodity kalshi list failed"
-                        if list_errs
-                        else "commodity spot (empty)"
-                    )
-                ),
+                note=spot_lat_note,
                 stage="spot",
             )
             desk_roi_plan.record_latency(
                 DESK_ROOT, bot="commodity-15m", seconds=elapsed,
-                note=(
-                    "spot failed card"
-                    if spot_feed_down
-                    else (
-                        "kalshi list failed card"
-                        if list_errs
-                        else "empty card"
-                    )
-                ),
+                note=eval_lat_note,
                 stage="evaluate",
             )
         except Exception:

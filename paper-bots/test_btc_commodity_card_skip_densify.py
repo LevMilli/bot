@@ -328,16 +328,17 @@ class CommodityCardSkipDensify(unittest.TestCase):
         self.assertIn("missing_spots", chunk)
         self.assertIn("elif missing_spots:", chunk)
         self.assertIn("commodity partial spot densify", chunk)
-        self.assertIn("spot failed (yahoo)", chunk)
+        self.assertIn("spot incomplete (yahoo", chunk)
         self.assertIn("_densify_evaluate_skip", chunk)
         # Partial must beat invent: CARD prefers densified skip over No open windows.
+        # Incomplete (not total "spot failed") — spotted series may be true empty.
         cmd = _load(CMD, "commodity_partial_spot_card_under_test")
         card = cmd._card_sentence(
             buys=0,
             open_windows=False,
-            skip_reasons=["spot failed (yahoo)"],
+            skip_reasons=["spot incomplete (yahoo 2/6 missing)"],
         )
-        self.assertIn("spot failed", card)
+        self.assertIn("spot incomplete", card)
         self.assertNotIn("No open windows", card)
         import desk_brain
         import desk_more
@@ -345,14 +346,14 @@ class CommodityCardSkipDensify(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cmd.DESK_ROOT = tmp
             cmd._densify_evaluate_skip(
-                reasons=["spot failed (yahoo)"],
+                reasons=["spot incomplete (yahoo 2/6 missing)"],
                 note="commodity partial spot densify",
             )
             journal = desk_brain.load_journal(tmp)
             last = (journal.get("decisions") or [])[-1]
             self.assertEqual(last.get("bot"), "commodity-15m")
             self.assertEqual(last.get("action"), "skip")
-            self.assertIn("spot failed", " ".join(last.get("reasons") or []))
+            self.assertIn("spot incomplete", " ".join(last.get("reasons") or []))
             board = desk_more.skip_leaderboard(tmp)
             self.assertIn("commodity-15m", board.get("by_bot") or {})
 
