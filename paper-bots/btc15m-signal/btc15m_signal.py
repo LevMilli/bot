@@ -1657,6 +1657,8 @@ def main():
                             "z": z_val,
                             "p": ev.get("p"),
                             "edge": ev.get("edge"),
+                            "ask": ev.get("ask"),
+                            "series": "KXBTC15M",
                             "note": nm.get("note"),
                             "is_shadow": bool(IS_SHADOW),
                         })
@@ -2037,6 +2039,7 @@ def main():
                         "z": z_val,
                         "p": ev_early.get("p"),
                         "edge": ev_early.get("edge"),
+                        "ask": ev_early.get("ask"),
                         "note": f"ETH {nm.get('note')}",
                         "series": "KXETH15M",
                         "is_shadow": bool(IS_SHADOW),
