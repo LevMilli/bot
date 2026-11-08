@@ -1698,6 +1698,19 @@ def main():
             skips += 1
             skip_reasons.append(str(sticky_block))
             last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
+            # Mirror firm-queue densify (#403 sibling) — CARD already has sticky;
+            # skip_board / holograms need desk_brain → record_skip_codes.
+            if desk_brain and not IS_SHADOW:
+                try:
+                    desk_brain.record_decision(
+                        DESK_ROOT, bot="btc15m", action="skip",
+                        ticker=ev.get("ticker") or "", side=ev.get("side") or "",
+                        edge=ev.get("edge"), confidence=ev.get("confidence") or ev.get("p"),
+                        depth=ev.get("depth"), reasons=[sticky_block],
+                        score=ev.get("_brain_score"),
+                    )
+                except Exception:
+                    pass
             print()
             continue
         tp = min(round(ev["ask"] + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP)
