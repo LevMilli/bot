@@ -49,6 +49,11 @@ class DashGraphTests(unittest.TestCase):
             "🚀 Biggest hit: +$10 · Not Lelouch · Over 20.5"))
         self.assertFalse(bot.dashboard_hidden_line("📕 Closed week: this week"))
 
+    def test_group_stats_filter_matches_hidden_helper(self):
+        rows = [{"name": "Lelouch"}, {"name": "LELOUCH"}, {"name": "Levi"}, {"name": "Not Lelouch"}]
+        kept = [s["name"] for s in rows if not bot.dashboard_hidden_name(s.get("name"))]
+        self.assertEqual(kept, ["Levi", "Not Lelouch"])
+
 
 if __name__ == "__main__":
     unittest.main()

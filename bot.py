@@ -4093,6 +4093,36 @@ def grade_leg(guild_id: int, pick_id: int, idx: int,
     return p2, note
 
 
+def dashboard_hidden_name(name) -> bool:
+    """True when this display name is kept off every PIMP-BOT dashboard surface."""
+    return str(name or "").strip().casefold() == "lelouch"
+
+
+def dashboard_hidden_pick(row) -> bool:
+    """True when a pick/row's bettor display name is kept off the dashboard."""
+    if row is None:
+        return False
+    try:
+        name = row["bettor_name"]
+    except Exception:
+        name = None
+    if name is None and isinstance(row, dict):
+        name = row.get("bettor_name") or row.get("who") or row.get("name") or row.get("user_name")
+    return dashboard_hidden_name(name)
+
+
+def dashboard_hidden_line(text: str) -> bool:
+    """True when a dashboard records/label line names the hidden display name."""
+    plain = re.sub(r"[*_`]", "", str(text or ""))
+    for part in plain.split("·"):
+        token = part.strip()
+        head = token.split("(", 1)[0].strip()
+        if dashboard_hidden_name(token) or dashboard_hidden_name(head):
+            return True
+    return False
+
+
+
 def compute_stats(guild_id: int, bettor_key: Optional[str] = None,
                   since: Optional[str] = None, until: Optional[str] = None,
                   sport: Optional[str] = None, preseason: bool = True, platform: Optional[str] = None) -> list[dict]:
@@ -4142,7 +4172,11 @@ def compute_stats(guild_id: int, bettor_key: Optional[str] = None,
     for s in out.values():
         s["net"] = s["returned"] - s["staked"]
         s["roi"] = (s["net"] / s["staked"] * 100) if s["staked"] else 0.0
-    return sorted(out.values(), key=lambda s: s["net"], reverse=True)
+    ranked = sorted(out.values(), key=lambda s: s["net"], reverse=True)
+    # Single-person lookups still resolve; group boards drop the hidden display name.
+    if bettor_key:
+        return ranked
+    return [s for s in ranked if not dashboard_hidden_name(s.get("name"))]
 
 
 def leg_counts(guild_id: int, bettor_key: Optional[str] = None,
@@ -8237,35 +8271,6 @@ def chart_series(guild_id: int, days: int, bettor_key: Optional[str] = None) -> 
             pts.append((datetime.fromisoformat(p["settled_at"]), total))
         out[names[k]] = pts
     return out
-
-
-def dashboard_hidden_name(name) -> bool:
-    """True when this display name is kept off every PIMP-BOT dashboard surface."""
-    return str(name or "").strip().casefold() == "lelouch"
-
-
-def dashboard_hidden_pick(row) -> bool:
-    """True when a pick/row's bettor display name is kept off the dashboard."""
-    if row is None:
-        return False
-    try:
-        name = row["bettor_name"]
-    except Exception:
-        name = None
-    if name is None and isinstance(row, dict):
-        name = row.get("bettor_name") or row.get("who") or row.get("name") or row.get("user_name")
-    return dashboard_hidden_name(name)
-
-
-def dashboard_hidden_line(text: str) -> bool:
-    """True when a dashboard records/label line names the hidden display name."""
-    plain = re.sub(r"[*_`]", "", str(text or ""))
-    for part in plain.split("·"):
-        token = part.strip()
-        head = token.split("(", 1)[0].strip()
-        if dashboard_hidden_name(token) or dashboard_hidden_name(head):
-            return True
-    return False
 
 
 def dashboard_profit_series(series: dict) -> dict:
@@ -17876,6 +17881,8 @@ def card_payload(guild_id: int, key: str, name: str, back: bool = False) -> Opti
     if cn is None:
         return None
     s = cn["s"]
+    if dashboard_hidden_name(s.get("name") or name):
+        return None
     green, red = ART_GREEN, ART_RED
     streak = current_streak(guild_id, key).lstrip("🔥🧊")
     stats = [("WIN %", f"{s['wins'] / cn['n'] * 100:.0f}%" if cn["n"] else "-", None),
@@ -18411,6 +18418,8 @@ async def board_snapshot(client, guild_id: int) -> Optional[tuple]:
     today = datetime.now(TZ).date()
     slips = []
     for p in picks:
+        if dashboard_hidden_pick(p):
+            continue
         entries = await cached_progress(p) if p["status"] == "open" else db_entries(p)
         design_remember(p, entries)
         relevant = p["status"] != "open"
@@ -20651,7 +20660,7 @@ async def cashed_poster_file(client, guild_id: int, days: int = 7) -> Optional[d
     since = iso(datetime.now(timezone.utc) - timedelta(days=days))
     wins = db().execute("SELECT * FROM picks WHERE guild_id = ? AND status = 'win' AND settled_at >= ? AND "
                         "(hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL)", (guild_id, since)).fetchall()
-    wins = sorted(wins, key=pick_net, reverse=True)[:6]
+    wins = [p for p in sorted(wins, key=pick_net, reverse=True) if not dashboard_hidden_pick(p)][:6]
     if not wins:
         return None
     receipts = []
@@ -20677,7 +20686,8 @@ async def standings_poster_file(client, guild_id: int, period: str = "season", b
         since = iso(now - timedelta(days=60))
         until = iso(now - timedelta(days=30))
         season = None
-    stats = [s for s in compute_stats(guild_id, since=since, until=until) if s["wins"] + s["losses"] + s["pushes"] > 0]
+    stats = [s for s in compute_stats(guild_id, since=since, until=until)
+             if s["wins"] + s["losses"] + s["pushes"] > 0 and not dashboard_hidden_name(s.get("name"))]
     if not stats:
         return None
     moves = rank_movement(guild_id, [s["key"] for s in stats], since, None) if period == "season" else {}
@@ -26732,6 +26742,8 @@ def dash_person(guild_id: int, key: str) -> Optional[dict]:
     if not stats:
         return None
     s = stats[0]
+    if dashboard_hidden_name(s.get("name")):
+        return None
     rows = [p for p in db().execute(f"SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND {_DASH_VISIBLE} "
                         "ORDER BY COALESCE(settled_at, created_at) DESC, id DESC LIMIT 500", (guild_id, key)).fetchall()
             if not pick_is_test(p)]
@@ -35760,6 +35772,21 @@ const S={data:null,tab:'overview',lb:'season',period:'season',back:0,loadedAt:0,
 const COLORS=['#8b5cf6','#f59e0b','#10b981','#3b82f6','#ec4899','#14b8a6','#f97316','#84cc16'];
 const GQ=(()=>{const g=new URLSearchParams(location.search).get('guild');return g&&/^\d{1,20}$/.test(g)?'guild='+g:''})();
 const qs=(...xs)=>{const p=[GQ,...xs].filter(Boolean).join('&');return p?'?'+p:''};
+function dashHiddenName(n){return String(n||'').trim().toLowerCase()==='lelouch'}
+function scrubDash(d){if(!d||typeof d!=='object')return d;
+ const drop=xs=>Array.isArray(xs)?xs.filter(x=>x&&!dashHiddenName(x.name||x.who||x.user_name||x.a||x.b)):xs;
+ d.people=drop(d.people);d.leaderboard=drop(d.leaderboard);d.alltime=drop(d.alltime);
+ d.recent=drop(d.recent);d.open=drop(d.open);d.futures=drop(d.futures);d.markets=drop(d.markets);
+ d.tickets=drop(d.tickets);d.coins=drop(d.coins);d.groupparlay=drop(d.groupparlay);
+ d.weekplays=drop(d.weekplays);d.settled24=drop(d.settled24);
+ d.h2h=(Array.isArray(d.h2h)?d.h2h:[]).filter(x=>x&&!dashHiddenName(x.a)&&!dashHiddenName(x.b));
+ if(d.series&&typeof d.series==='object'){const keep={};for(const k in d.series)if(!dashHiddenName(k))keep[k]=d.series[k];d.series=keep}
+ if(Array.isArray(d.records))d.records=d.records.filter(line=>{
+  return !String(line||'').split('·').some(part=>{
+   const t=String(part||'').replace(/[*_`]/g,'').trim();
+   return dashHiddenName(t)||dashHiddenName(t.split('(')[0].trim())})});
+ if(d.lastSettle&&dashHiddenName(d.lastSettle.who))d.lastSettle=null;
+ return d}
 function h(tag,props,...kids){const el=document.createElement(tag);
  if(props)for(const k in props){const v=props[k];if(v==null||v===false)continue;
   if(k==='class')el.className=v;else if(k==='text')el.textContent=v;else if(k==='style')el.style.cssText=v;
@@ -36332,7 +36359,7 @@ async function load(){const seq=++S.seq;const bar=$('#loadbar');if(bar)bar.class
   ($('main')||document.body).prepend(bar);if(S.data)S.data.updated='offline'}return}
  if(seq!==S.seq)return;
  for(const k of ['open','recent','alltime','leaderboard','people','coins','groupparlay','records','needs','ticker','games'])d[k]=d[k]||[];
- S.data=d;S.loadedAt=Date.now();S.hold=1;renderMeta(d);renderTicker(d);renderMini();render()}
+ S.data=scrubDash(d);S.loadedAt=Date.now();S.hold=1;renderMeta(S.data);renderTicker(S.data);renderMini();render()}
 function skeletonAll(){const kpi=()=>h('div',{class:'card kpi'},h('div',{class:'skl',style:'height:12px;width:50%'}),h('div',{class:'skl',style:'height:22px;width:70%;margin-top:8px'}));
  const slip=()=>h('div',{class:'card'},h('div',{class:'skl',style:'height:14px;width:40%'}),h('div',{class:'skl',style:'height:64px;margin-top:10px'}));
  const row=()=>h('div',{class:'row'},h('div',{class:'skl',style:'height:16px;width:55%'}),h('div',{class:'skl',style:'height:12px;width:30%;margin-top:6px'}));
