@@ -702,14 +702,23 @@ def run():
                 live_info[key] = {"final": True, "game": g, "name": name, "score": score}
                 continue
             pair = match_event(g, markets)
-            if not pair:
-                lines.append(f"| {ts} | {league} | {name} | {score} | | | | | no Kalshi match - skip |"); continue
-            summary_out["matched"] += 1
             try:
                 summ = espn_summary(path, g["id"])
                 fair_home = nhl_model(summ, g) if src != "espn" else espn_fair_home(summ, g)
             except Exception as e:
                 fair_home = None
+            if not pair:
+                # Seed live_info anyway so open-hold densify (hard-stop / t-final /
+                # last_fair) can ticker-fetch bids. Buy path stays skipped.
+                live_info[key] = {
+                    "final": False, "game": g, "pair": None, "fair_home": fair_home,
+                    "name": name, "score": score,
+                }
+                lines.append(
+                    f"| {ts} | {league} | {name} | {score} | | | | | no Kalshi match - skip |"
+                )
+                continue
+            summary_out["matched"] += 1
             hb, ha = px(pair["home"], "yes_bid_dollars"), px(pair["home"], "yes_ask_dollars")
             ab, aa = px(pair["away"], "yes_bid_dollars"), px(pair["away"], "yes_ask_dollars")
             src_tag = "model" if src != "espn" else ("ESPN" if g.get("state") == "in" else "pregame")

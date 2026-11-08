@@ -30,6 +30,8 @@ desk_roi_baseline.json
 desk_near_miss_weekly.json
 desk_inx_band_research.json
 desk_sports_hard_stop_shadow.json
+desk_commodity_time_stop_shadow.json
+desk_sports_time_final_shadow.json
 # Shadow tick / catch-up runtime (never commit; regenerate via make living-shadow-tick).
 btc15m-signal/shadow_edge08_account.json
 desk_promote_gate_sla.json
