@@ -68,18 +68,32 @@ def classify_regime(
 ) -> str:
     """
     confident_early | volatile_hold | parlay_window | too_late | unknown
+
+    Early singles follow evaluate fee-clear parity: when p/z clear (absolute
+    cushion waived once z clears — same as BTC #378), do not re-veto into
+    volatile_hold / ≤5m parlay. Rock-solid still unlocks the 5–10m band.
     """
     if minutes_left < parlay_min:
         return "too_late"
     p = float(model_p) if model_p is not None else 0.0
     zz = float(z) if z is not None else 0.0
     c = float(cushion) if cushion is not None else 0.0
-    strong = p >= max(min_p, 0.85) and zz >= (min_z + 0.15) and c >= (min_cushion * 1.25)
-    ok = p >= min_p and zz >= min_z and c >= min_cushion
-    volatile = (not strong) and (c < min_cushion * 1.5 or zz < min_z + 0.2 or p < 0.88)
+    # Absolute cushion only binds when z is thin — distance is already in Φ(z).
+    cushion_ok = (c + 1e-12 >= float(min_cushion)) or (zz + 1e-12 >= float(min_z))
+    strong_cush = (
+        (c + 1e-12 >= float(min_cushion) * 1.25)
+        or (zz + 1e-12 >= float(min_z) + 0.15)
+    )
+    strong = (
+        p >= max(float(min_p), 0.85)
+        and zz + 1e-12 >= float(min_z) + 0.15
+        and strong_cush
+    )
+    ok = p + 1e-12 >= float(min_p) and zz + 1e-12 >= float(min_z) and cushion_ok
 
     if minutes_left >= early_min:
-        if strong or (ok and not volatile):
+        # Fee-clear evaluate already cleared → single now (no p≥0.88 re-veto).
+        if strong or ok:
             return "confident_early"
         return "volatile_hold"
     if minutes_left <= parlay_max:

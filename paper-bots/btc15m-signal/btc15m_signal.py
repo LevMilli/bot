@@ -1488,6 +1488,14 @@ def main():
                 parlay_max=PARLAY_MAX_MIN,
                 parlay_min=PARLAY_MIN_MIN,
             )
+        # Safety: evaluate already fee-cleared in early window — never re-veto
+        # into volatile_hold / ≤5m parlay (#378/#380 parity).
+        if (
+            regime == "volatile_hold"
+            and not reasons
+            and ml + 1e-12 >= float(MIN_MINUTES_LEFT)
+        ):
+            regime = "confident_early"
         print(f"  regime: {regime}")
         # History snapshot densify under DESK_SHADOW (settle→near-miss label bridge).
         if kalshi_history is not None:
@@ -1509,7 +1517,7 @@ def main():
             except Exception:
                 pass
 
-        # Volatile → hold for ≤5m parlay (even if some gates look soft).
+        # Volatile → hold for ≤5m parlay (thin evaluate only).
         if regime == "volatile_hold":
             hold_reason = "volatile — holding for ≤5m parlay window"
             if hold_reason not in reasons:
@@ -1799,6 +1807,13 @@ def main():
                 min_z=MIN_Z,
                 min_p=MIN_MODEL_PROB,
             )
+        # Same evaluate→single safety as BTC: don't re-veto fee-clear early ETH.
+        if (
+            regime == "volatile_hold"
+            and not (ev_early.get("reasons") or [])
+            and ml + 1e-12 >= float(MIN_MINUTES_LEFT)
+        ):
+            regime = "confident_early"
         print(f"--- ETH {m['ticker']} regime={regime} p={ev_early.get('p')} cushion={ev_early.get('cushion')}")
         if account.get("open") and ev_early.get("bid") is not None:
             eth_bid = ev_early["bid"]
