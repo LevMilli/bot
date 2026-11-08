@@ -15,8 +15,21 @@ class HistoryParlayTests(unittest.TestCase):
             min_cushion=40, min_z=0.65,
         )
         self.assertEqual(early, "confident_early")
-        hold = kalshi_parlay.classify_regime(
+        # Fee-clear evaluate parity: p/z clear → early single (no p≥0.88 re-veto).
+        fee_clear = kalshi_parlay.classify_regime(
             minutes_left=12, model_p=0.81, z=0.66, cushion=45,
+            min_cushion=40, min_z=0.65,
+        )
+        self.assertEqual(fee_clear, "confident_early")
+        # Thin cushion still OK when z already clears (BTC #378 parity).
+        cush_thin = kalshi_parlay.classify_regime(
+            minutes_left=12, model_p=0.82, z=0.70, cushion=30,
+            min_cushion=35, min_z=0.60,
+        )
+        self.assertEqual(cush_thin, "confident_early")
+        # Thin z still holds for parlay.
+        hold = kalshi_parlay.classify_regime(
+            minutes_left=12, model_p=0.81, z=0.40, cushion=20,
             min_cushion=40, min_z=0.65,
         )
         self.assertEqual(hold, "volatile_hold")
