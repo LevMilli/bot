@@ -7469,14 +7469,47 @@ def staff_set_commodity_time_stop_live(
 
 # ---- Sports time-to-final trim shadow (Phase 3 P1) --------------------------
 
+def _parse_espn_mmss_prefix(text) -> float | None:
+    """Parse leading ``m:ss`` / ``mm:ss`` from ESPN shortDetail-style strings.
+
+    Examples: ``3:42 - 4th``, ``0:45-4th Quarter``. Refuses non-clock junk so
+    we never invent a near-final rem from prose alone.
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    head = raw.split()[0]
+    for sep in ("-", "–", "—"):
+        if sep in head and ":" in head.split(sep, 1)[0]:
+            head = head.split(sep, 1)[0]
+            break
+    if ":" not in head:
+        return None
+    try:
+        mm_s, ss_s = head.split(":", 1)
+        if not mm_s.isdigit():
+            return None
+        ss = float(ss_s)
+        if ss < 0.0 or ss >= 60.0:
+            return None
+        total = int(mm_s) * 60.0 + ss
+        # Regulation period clocks are ≤20:00 (NHL); refuse longer as non-clock.
+        if total > 20.0 * 60.0 + 1e-9:
+            return None
+        return total
+    except Exception:
+        return None
+
+
 def _sports_clock_seconds(status) -> float | None:
     """Parse ESPN status clock into seconds remaining in the current period.
 
     Empty/whitespace ``displayClock`` is end-of-slice 0:00 — the old
     ``a or b`` chain treated ``""`` as missing and fell through to a full
     ``period_min`` fallback, DROPping time-final densify in the last period.
-    Numeric ``clock`` wins when present. Absent clock keys stay None so
-    ``sports_minutes_remaining`` can keep the conservative period_min guess.
+    Numeric ``clock`` wins when present. When displayClock key is absent,
+    parse ``shortDetail``/``detail`` ``m:ss - Nth`` before the conservative
+    period_min guess. End/Halftime/Final detail still means 0s left in slice.
     """
     if not isinstance(status, dict):
         return None
@@ -7517,6 +7550,11 @@ def _sports_clock_seconds(status) -> float | None:
         )
     ):
         return 0.0
+    # ESPN often puts the live clock only in shortDetail ("3:42 - 4th").
+    for key in ("shortDetail", "detail", "description"):
+        parsed = _parse_espn_mmss_prefix(typ.get(key) or "")
+        if parsed is not None:
+            return parsed
     return None
 
 
