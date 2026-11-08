@@ -873,22 +873,41 @@ def run():
                     "side": p.get("side") or "",
                     "at": ts,
                 })
-            # Closing-line value: entry fair vs settle binary (1 win / 0 loss) as close proxy.
+            # Closing-line value: entry fair vs last model/market fair — never binary 0/1.
+            # Binary settle proxies invert beat-close (wins always "lose" CLV) and starve green_boost.
             try:
                 if DESK_ROOT not in sys.path:
                     sys.path.insert(0, DESK_ROOT)
                 import desk_more
-                close_fair = 1.0 if payout > 0 else 0.0
-                desk_more.record_sports_clv(
-                    DESK_ROOT,
-                    ticker=str(p.get("ticker") or ""),
-                    side=str(p.get("side") or ""),
-                    fair_entry=p.get("fair_at_entry"),
-                    close_fair=close_fair,
-                    pnl=pnl,
-                    league=str(p.get("league") or ""),
-                    exit_reason="settled",
-                )
+                close_fair = None
+                if info.get("fair_home") is not None:
+                    close_fair = (
+                        float(info["fair_home"]) if p["side"] == "home"
+                        else 1.0 - float(info["fair_home"])
+                    )
+                if close_fair is None:
+                    pair_clv = info.get("pair") if isinstance(info, dict) else None
+                    m_clv = None
+                    if isinstance(pair_clv, dict):
+                        m_clv = pair_clv.get(p["side"])
+                    bid_clv = market_yes_bid(m_clv) if m_clv else None
+                    if bid_clv is None:
+                        m_clv = fetch_kalshi_market(p.get("ticker"))
+                        bid_clv = market_yes_bid(m_clv) if m_clv else None
+                    if bid_clv is not None:
+                        close_fair = float(bid_clv)
+                if close_fair is not None:
+                    desk_more.record_sports_clv(
+                        DESK_ROOT,
+                        ticker=str(p.get("ticker") or ""),
+                        side=str(p.get("side") or ""),
+                        fair_entry=p.get("fair_at_entry"),
+                        close_fair=close_fair,
+                        pnl=pnl,
+                        league=str(p.get("league") or ""),
+                        exit_reason="settled",
+                        clv_kind="line",
+                    )
             except Exception:
                 pass
             try:

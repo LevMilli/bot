@@ -180,6 +180,7 @@ class ShadowEvidenceDensify(unittest.TestCase):
 
     def test_repair_clv_completeness(self):
         with tempfile.TemporaryDirectory() as tmp:
+            # Missing close stays incomplete — repair must NOT invent binary 0/1.
             desk_more.record_sports_clv(
                 tmp,
                 ticker="KX-CLV-1",
@@ -190,7 +191,6 @@ class ShadowEvidenceDensify(unittest.TestCase):
                 league="NBA",
                 exit_reason="settled",
             )
-            # Force incomplete: strip close/clv if present
             state = desk_more.load_clv(tmp)
             row = state["rows"][0]
             row.pop("fair_close", None)
@@ -202,11 +202,29 @@ class ShadowEvidenceDensify(unittest.TestCase):
             self.assertFalse(before["pass"])
             out = desk_roi_plan.repair_clv_completeness(tmp)
             self.assertTrue(out["ok"])
-            self.assertGreaterEqual(out["repaired"], 1)
+            self.assertEqual(out["repaired"], 0)
+            self.assertGreaterEqual(out["skipped"], 1)
             after = desk_roi_plan.clv_completeness(tmp)
-            self.assertTrue(after["pass"])
-            self.assertFalse(out["auto_promote"])
-            self.assertFalse(out["live"])
+            self.assertFalse(after["pass"])
+            # With both fairs present, repair only fills missing clv (line).
+            desk_more.record_sports_clv(
+                tmp,
+                ticker="KX-CLV-2",
+                side="home",
+                fair_entry=0.70,
+                close_fair=0.65,
+                pnl=1.0,
+                league="NBA",
+                exit_reason="settled",
+                clv_kind="line",
+            )
+            state = desk_more.load_clv(tmp)
+            state["rows"][-1]["clv"] = None
+            desk_more.save_clv(state, tmp)
+            out2 = desk_roi_plan.repair_clv_completeness(tmp)
+            self.assertGreaterEqual(out2["repaired"], 1)
+            self.assertFalse(out2["auto_promote"])
+            self.assertFalse(out2["live"])
 
     def test_exports_observe_only(self):
         with tempfile.TemporaryDirectory() as tmp:

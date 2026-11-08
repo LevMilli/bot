@@ -1264,8 +1264,13 @@ def record_sports_clv(
     pnl=None,
     league: str = "",
     exit_reason: str = "",
+    clv_kind: str = "line",
 ) -> dict:
-    """Closing-line value: entry fair vs later fair/close. Positive CLV = we beat the close."""
+    """Closing-line value: entry fair vs later fair/close. Positive CLV = we beat the close.
+
+    clv_kind='line' = model/market fair (counts toward green_boost).
+    clv_kind='binary' = settle 0/1 proxy — stored for autopsy but excluded from beat rate.
+    """
     fe = _finite(fair_entry)
     fc = _finite(close_fair)
     if fc is None:
@@ -1274,6 +1279,7 @@ def record_sports_clv(
     if fe is not None and fc is not None:
         # For YES/home-style: bought when fair was higher than later close → good CLV
         clv = round(fe - fc, 4)
+    kind = str(clv_kind or "line").strip().lower() or "line"
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     row = {
         "at": now,
@@ -1285,6 +1291,7 @@ def record_sports_clv(
         "clv": clv,
         "pnl": _finite(pnl),
         "exit": exit_reason[:80],
+        "clv_kind": kind,
     }
     state = load_clv(root)
     state.setdefault("rows", []).append(row)
@@ -1306,7 +1313,10 @@ def clv_by_league(
 ) -> dict:
     """Phase 4 per-league CLV board — NFL/NCAAF/NBA/WNBA/MLB/NHL north star."""
     state = load_clv(root)
-    rows = [r for r in (state.get("rows") or []) if isinstance(r, dict) and r.get("clv") is not None]
+    rows = [
+        r for r in (state.get("rows") or [])
+        if isinstance(r, dict) and _clv_counts_for_boost(r)
+    ]
     by: dict[str, list] = {}
     for r in rows:
         lg = str(r.get("league") or "UNK").strip().upper() or "UNK"
@@ -1366,9 +1376,27 @@ def clv_by_league(
     }
 
 
+def _clv_counts_for_boost(row: dict) -> bool:
+    """Line CLV only — binary settle proxies invert beat-close and must not gate green_boost."""
+    if not isinstance(row, dict) or row.get("clv") is None:
+        return False
+    kind = str(row.get("clv_kind") or "").strip().lower()
+    if kind == "binary":
+        return False
+    # Legacy untagged settle rows with exact 0/1 close are binary proxies.
+    if kind in ("", "line") and str(row.get("exit") or "").lower().startswith("settled"):
+        fc = _finite(row.get("fair_close"))
+        if fc is None:
+            fc = _finite(row.get("close_fair"))
+        if fc is not None and (abs(fc - 0.0) < 1e-12 or abs(fc - 1.0) < 1e-12):
+            return False
+    return True
+
+
 def clv_summary(root: str | None = None) -> dict:
     state = load_clv(root)
-    rows = [r for r in (state.get("rows") or []) if isinstance(r, dict) and r.get("clv") is not None]
+    all_rows = [r for r in (state.get("rows") or []) if isinstance(r, dict) and r.get("clv") is not None]
+    rows = [r for r in all_rows if _clv_counts_for_boost(r)]
     n = len(rows)
     avg = round(sum(float(r["clv"]) for r in rows) / n, 4) if n else None
     pos = sum(1 for r in rows if float(r["clv"]) > 0)
@@ -1384,7 +1412,11 @@ def clv_summary(root: str | None = None) -> dict:
         "pass": n < 20 or (rate is not None and rate + 1e-12 >= CLV_BEAT_BAR),
         "by_league": leagues,
         "recent": rows[-20:],
-        "note": "CLV>0 means entry fair beat later fair/close (learning north star for sports).",
+        "binary_excluded_n": max(0, len(all_rows) - n),
+        "note": (
+            "CLV>0 means entry fair beat later fair/close (learning north star for sports). "
+            "Binary settle proxies excluded from beat-close / green_boost."
+        ),
     }
 
 
