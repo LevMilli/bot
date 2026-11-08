@@ -84,6 +84,19 @@ class BtcCardSkipDensify(unittest.TestCase):
         self.assertIn("skip_reasons.append(max_note)", cmd_chunk)
         self.assertIn("_densify_evaluate_skip", cmd_chunk)
         self.assertIn("commodity max-buys densify", cmd_chunk)
+
+    def test_desk_block_path_densifies_brain_like_max_buys(self):
+        """Desk/account blocked fill must call record_decision (#407 sibling)."""
+        src = BTC.read_text(encoding="utf-8")
+        block_idx = src.find("desk/account blocked fill:")
+        self.assertGreater(block_idx, 0)
+        # Window around the BTC buy-fail densify (not ETH duplicate).
+        chunk = src[max(0, block_idx - 400):block_idx + 900]
+        self.assertIn("desk_brain.record_decision", chunk)
+        self.assertIn("reasons=[block_note]", chunk)
+        cmd_src = CMD.read_text(encoding="utf-8")
+        self.assertIn("commodity desk-block densify", cmd_src)
+        self.assertIn("skip_reasons.append(block_note)", cmd_src)
         # Consumer path: sticky reason → skip_board by_bot btc15m.
         import desk_brain
         import desk_more

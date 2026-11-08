@@ -1791,8 +1791,22 @@ def main():
                     pass
         else:
             skips += 1
-            skip_reasons.append(str(last_sentence)[:160] or "desk/account blocked fill")
+            block_note = str(last_sentence)[:160] or "desk/account blocked fill"
+            skip_reasons.append(block_note)
             print(f"  desk/account blocked fill: {last_sentence}")
+            # Mirror sticky/max-buys densify (#407 sibling) — CARD+features already;
+            # skip_board needs desk_brain → record_skip_codes.
+            if desk_brain and not IS_SHADOW:
+                try:
+                    desk_brain.record_decision(
+                        DESK_ROOT, bot="btc15m", action="skip",
+                        ticker=ev.get("ticker") or "", side=ev.get("side") or "",
+                        edge=ev.get("edge"), confidence=ev.get("confidence") or ev.get("p"),
+                        depth=ev.get("depth"), reasons=[block_note],
+                        score=ev.get("_brain_score"),
+                    )
+                except Exception:
+                    pass
             if not IS_SHADOW:
                 try:
                     import desk_roi_plan
@@ -1800,15 +1814,15 @@ def main():
                     desk_roi_plan.record_fit(
                         DESK_ROOT, bot="btc15m", outcome="block",
                         ticker=str(ev.get("ticker") or ""), side=str(ev.get("side") or ""),
-                        edge=ev.get("edge"), note=str(last_sentence)[:160],
+                        edge=ev.get("edge"), note=block_note,
                     )
                     desk_living.record_eval_features(
                         DESK_ROOT, bot="btc15m", action="skip",
                         series=str(ev.get("series") or "KXBTC15M"),
                         ticker=str(ev.get("ticker") or ""),
                         ev=ev,
-                        reasons=list(ev.get("reasons") or []) + [str(last_sentence)[:80]],
-                        note=str(last_sentence)[:160],
+                        reasons=list(ev.get("reasons") or []) + [block_note[:80]],
+                        note=block_note,
                     )
                     why = str(last_sentence or "").lower()
                     if any(
