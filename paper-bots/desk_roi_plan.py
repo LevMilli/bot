@@ -7469,20 +7469,43 @@ def staff_set_commodity_time_stop_live(
 
 # ---- Sports time-to-final trim shadow (Phase 3 P1) --------------------------
 
+def _parse_sports_mmss_clock(text) -> float | None:
+    """Parse ``mm:ss`` (optionally ``mm:ss - 4th``) into seconds left in the slice."""
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    head = raw.split("-", 1)[0].strip()
+    if not head:
+        return None
+    try:
+        if ":" in head:
+            mm, ss = head.split(":", 1)
+            ss_n = "".join(ch for ch in str(ss) if ch.isdigit() or ch == ".")
+            return int(mm) * 60.0 + float(ss_n or 0.0)
+        return float(head)
+    except Exception:
+        return None
+
+
 def _sports_clock_seconds(status) -> float | None:
     """Parse ESPN status clock into seconds remaining in the current period.
 
     Empty/whitespace ``displayClock`` is end-of-slice 0:00 — the old
     ``a or b`` chain treated ``""`` as missing and fell through to a full
     ``period_min`` fallback, DROPping time-final densify in the last period.
-    Numeric ``clock`` wins when present. Absent clock keys stay None so
-    ``sports_minutes_remaining`` can keep the conservative period_min guess.
+    Numeric ``clock`` wins when present; string ``clock`` and type
+    ``shortDetail``/``detail`` ``mm:ss`` fill in when displayClock keys are
+    absent (otherwise rem falls through to full period_min).
     """
     if not isinstance(status, dict):
         return None
     clock = status.get("clock")
     if isinstance(clock, (int, float)):
         return float(clock)
+    if isinstance(clock, str) and str(clock).strip():
+        parsed = _parse_sports_mmss_clock(clock)
+        if parsed is not None:
+            return float(parsed)
     has_disp = "displayClock" in status or "display_clock" in status
     if has_disp:
         disp = status.get("displayClock")
@@ -7490,14 +7513,10 @@ def _sports_clock_seconds(status) -> float | None:
             disp = status.get("display_clock")
         if disp is None or str(disp).strip() == "":
             return 0.0
-        try:
-            text = str(disp).strip()
-            if ":" in text:
-                mm, ss = text.split(":", 1)
-                return int(mm) * 60.0 + float(ss)
-            return float(text)
-        except Exception:
-            return 0.0
+        parsed = _parse_sports_mmss_clock(disp)
+        if parsed is not None:
+            return float(parsed)
+        return 0.0
     # No clock fields — End/Halftime/Final detail still means 0s left in slice.
     typ = status.get("type") if isinstance(status.get("type"), dict) else {}
     blob = " ".join(
@@ -7517,6 +7536,11 @@ def _sports_clock_seconds(status) -> float | None:
         )
     ):
         return 0.0
+    # shortDetail-only payloads ("2:00 - 4th") — organic ESPN text, not invent.
+    for key in ("shortDetail", "detail", "description"):
+        parsed = _parse_sports_mmss_clock(typ.get(key))
+        if parsed is not None:
+            return float(parsed)
     return None
 
 

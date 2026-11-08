@@ -58,6 +58,29 @@ class SportsTimeFinal(unittest.TestCase):
         )
         self.assertAlmostEqual(rem_miss, 15.0, places=2)
 
+    def test_short_detail_and_string_clock_densify_tfinal(self):
+        """Absent displayClock must not period_min-DROP when shortDetail has mm:ss."""
+        # Was rem=15 with period_min; shortDetail "2:00 - 4th" → rem=2 → near_final.
+        rem = desk_roi_plan.sports_minutes_remaining(
+            {"period": 4, "type": {"shortDetail": "2:00 - 4th"}},
+            league="NFL",
+        )
+        self.assertAlmostEqual(rem, 2.0, places=2)
+        hit = desk_roi_plan.sports_time_final_hit(
+            rem, bid=0.50, entry_price=0.80, cost=16.0, contracts=20,
+        )
+        self.assertTrue(hit["near_final"])
+        self.assertTrue(hit["hit"])
+        # String clock seconds (some ESPN payloads stringify).
+        self.assertEqual(
+            desk_roi_plan._sports_clock_seconds({"period": 4, "clock": "90"}),
+            90.0,
+        )
+        rem_str = desk_roi_plan.sports_minutes_remaining(
+            {"period": 4, "clock": "90"}, league="NFL",
+        )
+        self.assertAlmostEqual(rem_str, 1.5, places=2)
+
     def test_hit_near_final_underwater(self):
         hit = desk_roi_plan.sports_time_final_hit(
             4.0,
