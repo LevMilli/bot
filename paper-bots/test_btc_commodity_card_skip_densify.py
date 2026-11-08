@@ -97,6 +97,44 @@ class BtcCardSkipDensify(unittest.TestCase):
         cmd_src = CMD.read_text(encoding="utf-8")
         self.assertIn("commodity desk-block densify", cmd_src)
         self.assertIn("skip_reasons.append(block_note)", cmd_src)
+
+    def test_eth_skip_paths_densify_brain(self):
+        """ETH desk-block/delay/volatile must densify skip_board (#409 sibling)."""
+        btc = _load(BTC, "btc15m_eth_brain_under_test")
+        src = BTC.read_text(encoding="utf-8")
+        self.assertIn("def _densify_skip_brain", src)
+        for note in (
+            "ETH desk-block densify",
+            "ETH delay densify",
+            "ETH volatile densify",
+            "ETH parlay densify",
+            "ETH evaluate densify",
+        ):
+            self.assertIn(note, src)
+        import desk_brain
+        import desk_more
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # Helper uses module DESK_ROOT — point it at tmp.
+            btc.DESK_ROOT = tmp
+            btc.IS_SHADOW = False
+            btc._densify_skip_brain(
+                reasons=["ETH desk/account blocked fill"],
+                ticker="KXETH-TEST",
+                side="YES",
+                edge=0.06,
+                confidence=0.7,
+                note="ETH desk-block densify",
+            )
+            board = desk_more.skip_leaderboard(tmp)
+            by_bot = board.get("by_bot") or {}
+            self.assertIn("btc15m", by_bot)
+            codes = by_bot.get("btc15m") or {}
+            self.assertGreaterEqual(sum(int(v) for v in codes.values()), 1)
+            journal = desk_brain.load_journal(tmp)
+            last = (journal.get("decisions") or [])[-1]
+            self.assertEqual(last.get("action"), "skip")
+            self.assertEqual(last.get("ticker"), "KXETH-TEST")
         # Consumer path: sticky reason → skip_board by_bot btc15m.
         import desk_brain
         import desk_more

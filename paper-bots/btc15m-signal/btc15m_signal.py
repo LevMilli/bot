@@ -936,6 +936,44 @@ def _card_sentence(*, buys, markets_n, eth_markets_n, last_sentence, skip_reason
     )
 
 
+def _densify_skip_brain(
+    *,
+    reasons,
+    ticker: str = "",
+    side: str = "",
+    edge=None,
+    confidence=None,
+    depth=None,
+    score=None,
+    note: str = "",
+) -> None:
+    """ETH/BTC skip → desk_brain → skip_board. Observe only; never LIVE."""
+    if IS_SHADOW:
+        return
+    why = [str(r) for r in (reasons or []) if str(r).strip()]
+    if not why:
+        return
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_brain
+        desk_brain.record_decision(
+            DESK_ROOT,
+            bot="btc15m",
+            action="skip",
+            ticker=str(ticker or ""),
+            side=str(side or ""),
+            edge=edge,
+            confidence=confidence,
+            depth=depth,
+            reasons=why,
+            score=score,
+            note=str(note or "")[:160],
+        )
+    except Exception:
+        pass
+
+
 def eth_early_should_buy(regime, reasons=None, *, delay_eth: bool = False) -> bool:
     """
     E1 #106 — ETH early singles under the same confident_early gates as BTC.
@@ -2005,30 +2043,48 @@ def main():
                     pass
             else:
                 skips += 1
-                skip_reasons.append(str(sentence)[:160] or "ETH desk/account blocked fill")
+                eth_block = str(sentence)[:160] or "ETH desk/account blocked fill"
+                skip_reasons.append(eth_block)
                 print(f"  ETH desk/account blocked fill: {sentence}")
+                _densify_skip_brain(
+                    reasons=[eth_block],
+                    ticker=str(m.get("ticker") or ""),
+                    side=str(ev_early.get("side") or ""),
+                    edge=ev_early.get("edge"),
+                    confidence=ev_early.get("p"),
+                    depth=ev_early.get("depth"),
+                    note="ETH desk-block densify",
+                )
         elif regime == "confident_early" and delay_eth:
             mv = f"{btc_move:.3f}%" if btc_move is not None else "?"
             delay_note = f"ETH early DELAYED ({delay_sec}s study) — BTC move {mv}"
             print(f"  {delay_note} (paper lead-lag)")
             skips += 1
             skip_reasons.append(delay_note)
+            _densify_skip_brain(
+                reasons=[delay_note],
+                ticker=str(m.get("ticker") or ""),
+                side=str(ev_early.get("side") or ""),
+                edge=ev_early.get("edge"),
+                confidence=ev_early.get("p"),
+                depth=ev_early.get("depth"),
+                note="ETH delay densify",
+            )
         elif regime == "confident_early":
             reasons = list(ev_early.get("reasons") or []) or [regime]
             eth_skip = "; ".join(reasons)
             print("  ETH SIGNAL: SKIP -> " + eth_skip)
             skips += 1
             skip_reasons.append(eth_skip)
-            if desk_brain and not IS_SHADOW:
-                try:
-                    desk_brain.record_decision(
-                        DESK_ROOT, bot="btc15m", action="skip",
-                        ticker=str(m.get("ticker") or ""), side=ev_early.get("side") or "",
-                        edge=ev_early.get("edge"), confidence=ev_early.get("p"),
-                        depth=ev_early.get("depth"), reasons=reasons,
-                    )
-                except Exception:
-                    pass
+            _densify_skip_brain(
+                reasons=reasons,
+                ticker=str(m.get("ticker") or ""),
+                side=str(ev_early.get("side") or ""),
+                edge=ev_early.get("edge"),
+                confidence=ev_early.get("p"),
+                depth=ev_early.get("depth"),
+                note="ETH evaluate densify",
+            )
             # Near-miss densify under DESK_SHADOW too (soft z|p only).
             try:
                 import desk_more
@@ -2078,7 +2134,18 @@ def main():
                 print("  ETH PARLAY-CANDIDATE")
             else:
                 skips += 1
-                skip_reasons.append("; ".join(late_reasons or ["ETH parlay_window skip"]))
+                eth_parlay = "; ".join(late_reasons or ["ETH parlay_window skip"])
+                skip_reasons.append(eth_parlay)
+                _densify_skip_brain(
+                    reasons=[eth_parlay],
+                    ticker=str(m.get("ticker") or ""),
+                    side=str(ev_early.get("side") or late.get("side") or ""),
+                    edge=late.get("edge") if isinstance(late, dict) else ev_early.get("edge"),
+                    confidence=(
+                        late.get("p") if isinstance(late, dict) else None
+                    ) or ev_early.get("p"),
+                    note="ETH parlay densify",
+                )
         elif regime == "volatile_hold":
             if kalshi_history is not None:
                 try:
@@ -2089,10 +2156,29 @@ def main():
                 except Exception:
                     pass
             skips += 1
-            skip_reasons.append("ETH volatile — hold for ≤5m parlay")
+            eth_vol = "ETH volatile — hold for ≤5m parlay"
+            skip_reasons.append(eth_vol)
+            _densify_skip_brain(
+                reasons=[eth_vol],
+                ticker=str(m.get("ticker") or ""),
+                side=str(ev_early.get("side") or ""),
+                edge=ev_early.get("edge"),
+                confidence=ev_early.get("p"),
+                depth=ev_early.get("depth"),
+                note="ETH volatile densify",
+            )
         else:
             skips += 1
-            skip_reasons.append(str(regime or "ETH skip"))
+            eth_else = str(regime or "ETH skip")
+            skip_reasons.append(eth_else)
+            _densify_skip_brain(
+                reasons=[eth_else],
+                ticker=str(m.get("ticker") or ""),
+                side=str(ev_early.get("side") or ""),
+                edge=ev_early.get("edge"),
+                confidence=ev_early.get("p"),
+                note="ETH regime densify",
+            )
 
     # Open paper parlay when ≥2 fee-aware legs ready in the ≤5m window.
     if (not IS_SHADOW) and kalshi_parlay is not None and len(parlay_legs) >= 2:
