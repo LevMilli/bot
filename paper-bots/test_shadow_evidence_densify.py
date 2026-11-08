@@ -366,6 +366,96 @@ class ShadowEvidenceDensify(unittest.TestCase):
             self.assertEqual(tf["n"], 1)
             self.assertLess(tf["shadow_expectancy"], 0)
 
+    def test_catchup_skips_winner_wipe_hard_stop(self):
+        """Finalized bid=0 on a settle winner must not invent a threshold hard-stop."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sports_dir = os.path.join(tmp, "sports-gap-paper")
+            os.makedirs(sports_dir, exist_ok=True)
+            state = {
+                "cash": 100.0,
+                "open": [],
+                "closed": [
+                    {
+                        "ticker": "KX-WINNER-WIPE",
+                        "side": "home",
+                        "league": "NCAAF",
+                        "entry_price": 0.72,
+                        "contracts": 27,
+                        "cost": 19.44,
+                        "pnl": 6.48,  # won — no mid-game stop evidence
+                    }
+                ],
+                "paper_only": True,
+            }
+            with open(os.path.join(sports_dir, "state.json"), "w", encoding="utf-8") as fh:
+                json.dump(state, fh)
+
+            def fake_market(ticker: str):
+                return {"ticker": ticker, "yes_bid": None, "status": "finalized"}
+
+            out = desk_roi_plan.backfill_sports_exit_shadow_from_closed(
+                tmp, fetch_market=fake_market,
+            )
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out["hard_stop"], 0)
+            self.assertEqual(desk_roi_plan.sports_hard_stop_shadow_summary(tmp)["n"], 0)
+
+    def test_repair_removes_threshold_poison_on_winners(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sports_dir = os.path.join(tmp, "sports-gap-paper")
+            os.makedirs(sports_dir, exist_ok=True)
+            # Seed a poisoned threshold row + a real loser stop.
+            desk_roi_plan.record_sports_hard_stop_shadow(
+                tmp,
+                ticker="KX-POISON",
+                entry_price=0.72,
+                bid=0.0,
+                contracts=10,
+                cost=7.2,
+                note="poison",
+            )
+            desk_roi_plan.record_sports_hard_stop_shadow(
+                tmp,
+                ticker="KX-REAL",
+                entry_price=0.72,
+                bid=0.50,
+                contracts=10,
+                cost=7.2,
+                note="real",
+            )
+            with open(os.path.join(sports_dir, "state.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "cash": 100.0,
+                    "open": [],
+                    "closed": [
+                        {
+                            "ticker": "KX-POISON",
+                            "entry_price": 0.72,
+                            "bid": 0.71,
+                            "pnl": 5.0,
+                            "contracts": 10,
+                            "cost": 7.2,
+                        },
+                        {
+                            "ticker": "KX-REAL",
+                            "entry_price": 0.72,
+                            "bid": 0.50,
+                            "pnl": -5.0,
+                            "contracts": 10,
+                            "cost": 7.2,
+                        },
+                    ],
+                    "paper_only": True,
+                }, fh)
+            before = desk_roi_plan.sports_hard_stop_shadow_summary(tmp)["n"]
+            self.assertEqual(before, 2)
+            out = desk_roi_plan.repair_sports_hard_stop_settle_poison(tmp)
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out["removed"], 1)
+            self.assertEqual(out["kept"], 1)
+            summ = desk_roi_plan.sports_hard_stop_shadow_summary(tmp)
+            self.assertEqual(summ["n"], 1)
+
     def test_commodity_tstop_allows_bid_zero(self):
         hit = desk_roi_plan.commodity_time_stop_hit(
             close_time=None,

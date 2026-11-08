@@ -3248,21 +3248,29 @@ def backfill_sports_exit_shadow_from_closed(
         if bid is None:
             continue
         entry = row.get("entry_price")
+        settle_pnl = _finite(row.get("pnl"))
         if need_hs:
-            rec = record_sports_hard_stop_shadow(
-                root,
-                ticker=tick,
-                side=str(row.get("side") or ""),
-                league=str(row.get("league") or ""),
-                entry_price=entry,
-                bid=bid,
-                contracts=row.get("contracts"),
-                cost=row.get("cost"),
-                note="catchup settle-retro hard-stop — no live sell",
-            )
-            if rec.get("recorded"):
-                hard_n += 1
-                hs_seen.add(tick)
+            # Finalized API bid=0 always "hits" via threshold pricing. That invents
+            # hard-stops on winners that never traded through entry−drop. Only
+            # invent threshold wipe stops for known settle losers.
+            wipe_quote = bool(bid is not None and bid <= 0)
+            if wipe_quote and (settle_pnl is None or settle_pnl + 1e-12 >= 0.0):
+                pass  # skip — no mid-game stop evidence
+            else:
+                rec = record_sports_hard_stop_shadow(
+                    root,
+                    ticker=tick,
+                    side=str(row.get("side") or ""),
+                    league=str(row.get("league") or ""),
+                    entry_price=entry,
+                    bid=bid,
+                    contracts=row.get("contracts"),
+                    cost=row.get("cost"),
+                    note="catchup settle-retro hard-stop — no live sell",
+                )
+                if rec.get("recorded"):
+                    hard_n += 1
+                    hs_seen.add(tick)
         if need_tf:
             rec = record_sports_time_final_shadow(
                 root,
@@ -3291,7 +3299,92 @@ def backfill_sports_exit_shadow_from_closed(
         "recorded": hard_n + tfinal_n,
         "note": (
             "Sports exit-shadow catch-up from closed settles "
-            "(closed-row bid fallback when API bid=0). Never LIVE; never arms."
+            "(closed-row bid fallback when API bid=0; no winner wipe→hard-stop). "
+            "Never LIVE; never arms."
+        ),
+    }
+
+
+def repair_sports_hard_stop_settle_poison(root: str | None = None) -> dict:
+    """Drop settle-retro hard-stop rows invented from finalized bid=0 on winners.
+
+    priced_at_threshold + closed settle pnl≥0 (or closed mark never hit drop)
+    means the stop was never evidenced mid-game — keep journals honest.
+    Observe only; never LIVE; never arms.
+    """
+    path = _path(SPORTS_HARD_STOP_SHADOW, root)
+    state = _load(path, {"paper_only": True, "version": 1, "rows": [], "live": False})
+    rows = [r for r in (state.get("rows") or []) if isinstance(r, dict)]
+    if not rows:
+        return {
+            "ok": True,
+            "removed": 0,
+            "kept": 0,
+            "paper_only": True,
+            "observe_only": True,
+            "auto_promote": False,
+            "live": False,
+            "note": "no hard-stop rows",
+        }
+    closed_by: dict[str, dict] = {}
+    try:
+        with open(_sports_account_path(root), encoding="utf-8") as handle:
+            sports = json.load(handle)
+        for crow in sports.get("closed") or []:
+            if not isinstance(crow, dict):
+                continue
+            tick = str(crow.get("ticker") or "").strip()
+            if tick:
+                closed_by[tick] = crow
+    except (OSError, json.JSONDecodeError, TypeError):
+        closed_by = {}
+    kept: list[dict] = []
+    removed = 0
+    for row in rows:
+        tick = str(row.get("ticker") or "").strip()
+        crow = closed_by.get(tick) if tick else None
+        priced_thr = bool(row.get("priced_at_threshold"))
+        drop_row = False
+        if priced_thr and crow is not None:
+            settle_pnl = _finite(crow.get("pnl"))
+            row_bid = None
+            for key in ("bid", "exit_bid", "mark_bid"):
+                if crow.get(key) is not None:
+                    row_bid = _finite(crow.get(key))
+                    break
+            entry = crow.get("entry_price")
+            if entry is None:
+                entry = row.get("entry_price")
+            # Winner + threshold invent → poison.
+            if settle_pnl is not None and settle_pnl + 1e-12 >= 0.0:
+                drop_row = True
+            # Closed mark never crossed the stop → poison.
+            elif row_bid is not None:
+                hit = sports_hard_stop_hit(entry, row_bid)
+                if not hit.get("hit"):
+                    drop_row = True
+        if drop_row:
+            removed += 1
+            continue
+        kept.append(row)
+    if removed:
+        state["rows"] = kept[-MAX_HARD_STOP_ROWS:]
+        state["last_at"] = _now()
+        state["paper_only"] = True
+        state["live"] = sports_hard_stop_is_live(root)
+        _save(path, state)
+    return {
+        "ok": True,
+        "removed": removed,
+        "kept": len(kept),
+        "paper_only": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live": False,
+        "summary": sports_hard_stop_shadow_summary(root),
+        "note": (
+            "Removed settle-retro hard-stop poison (threshold invent on "
+            "winners / non-hit marks). Never LIVE; never arms."
         ),
     }
 
@@ -3306,6 +3399,7 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
     backfilled = {"ok": False, "recorded": 0}
     repaired = {"ok": False, "repaired": 0}
     sports_exit = {"ok": False, "recorded": 0}
+    hs_repair = {"ok": False, "removed": 0}
     errors: list[str] = []
     try:
         labeled = label_near_miss_catchup(root, fetch_result=fetch_result)
@@ -3322,6 +3416,11 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
     except Exception as exc:  # noqa: BLE001
         errors.append(f"clv:{type(exc).__name__}")
         repaired = {"ok": False, "repaired": 0, "error": type(exc).__name__}
+    try:
+        hs_repair = repair_sports_hard_stop_settle_poison(root)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"hs_repair:{type(exc).__name__}")
+        hs_repair = {"ok": False, "removed": 0, "error": type(exc).__name__}
     try:
         sports_exit = backfill_sports_exit_shadow_from_closed(root)
     except Exception as exc:  # noqa: BLE001
@@ -3350,9 +3449,11 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
         "backfilled": int(backfilled.get("recorded") or 0),
         "repaired": int(repaired.get("repaired") or 0),
         "sports_exit_shadow": int(sports_exit.get("recorded") or 0),
+        "hard_stop_poison_removed": int(hs_repair.get("removed") or 0),
         "near_miss_label": labeled,
         "helper_backfill": backfilled,
         "clv_repair": repaired,
+        "hard_stop_repair": hs_repair,
         "sports_exit": sports_exit,
         "errors": errors[:8],
         "note": (
