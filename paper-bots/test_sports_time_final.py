@@ -58,6 +58,23 @@ class SportsTimeFinal(unittest.TestCase):
         )
         self.assertAlmostEqual(rem_miss, 15.0, places=2)
 
+    
+    def test_string_clock_seconds_densify_tfinal(self):
+        """Stringified ESPN clock must not fall through to period_min."""
+        self.assertEqual(
+            desk_roi_plan._sports_clock_seconds({"period": 4, "clock": "90"}),
+            90.0,
+        )
+        rem = desk_roi_plan.sports_minutes_remaining(
+            {"period": 4, "clock": "90"}, league="NFL",
+        )
+        self.assertAlmostEqual(rem, 1.5, places=2)
+        hit = desk_roi_plan.sports_time_final_hit(
+            rem, bid=0.50, entry_price=0.80, cost=16.0, contracts=20,
+        )
+        self.assertTrue(hit["near_final"])
+        self.assertTrue(hit["hit"])
+
     def test_short_detail_mmss_densifies_when_display_clock_absent(self):
         """ESPN often puts live clock only in shortDetail — must not invent rem=period."""
         self.assertAlmostEqual(
