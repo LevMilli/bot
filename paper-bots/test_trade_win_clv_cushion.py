@@ -1,4 +1,4 @@
-"""Trade-more / win-more: line CLV for green_boost + BTC cushion when z clears."""
+"""Trade-more / win-more: line CLV for green_boost + BTC/commodity cushion when z clears."""
 
 from __future__ import annotations
 
@@ -18,6 +18,14 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 def _load_btc():
     path = os.path.join(ROOT, "btc15m-signal", "btc15m_signal.py")
     spec = importlib.util.spec_from_file_location("btc15m_tw", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _load_commodity():
+    path = os.path.join(ROOT, "commodity-15m-paper", "bot.py")
+    spec = importlib.util.spec_from_file_location("commodity15m_tw", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -246,6 +254,59 @@ class TradeWinClvCushionTests(unittest.TestCase):
         reasons = " | ".join(ev.get("reasons") or [])
         # Either p < need reason and/or toward candle — toward must fire when p thin.
         self.assertIn("candles moving toward", reasons)
+
+    def test_commodity_cushion_skipped_when_z_clears(self):
+        # Silver metal playbook: min_z=0.70, cush_mult=1.10 → frac floor 0.0011*spot.
+        # ml=10 → σ≈0.0367; cushion 0.0315 → z≈0.86 clears, frac floor still fails.
+        cmd = _load_commodity()
+        close = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=10)
+        spot = 30.0
+        cushion = 0.0315
+        m = {
+            "ticker": "KXSILVER15M-TEST",
+            "series": "KXSILVER15M",
+            "target": spot - cushion,
+            "close_time": close,
+            "yes_ask": 0.70,
+            "no_ask": 0.32,
+            "yes_bid": 0.68,
+            "no_bid": 0.30,
+        }
+        with mock.patch.object(
+            desk_roi_plan,
+            "effective_near_miss_relax",
+            return_value={"p_relax": 0.0, "z_relax": 0.0},
+        ):
+            ev = cmd.evaluate(m, spot, 0.05, book=(0.02, 10))
+        reasons = " | ".join(ev.get("reasons") or [])
+        self.assertNotIn("cushion", reasons)
+        self.assertGreaterEqual(float(ev.get("z") or 0), 0.70)
+        self.assertFalse(ev.get("reasons"))
+
+    def test_commodity_cushion_still_blocks_when_z_thin(self):
+        cmd = _load_commodity()
+        close = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=10)
+        spot = 30.0
+        cushion = 0.020  # z≈0.54 < metal min_z 0.70 → frac cushion still vetoes
+        m = {
+            "ticker": "KXSILVER15M-TEST2",
+            "series": "KXSILVER15M",
+            "target": spot - cushion,
+            "close_time": close,
+            "yes_ask": 0.70,
+            "no_ask": 0.32,
+            "yes_bid": 0.68,
+            "no_bid": 0.30,
+        }
+        with mock.patch.object(
+            desk_roi_plan,
+            "effective_near_miss_relax",
+            return_value={"p_relax": 0.0, "z_relax": 0.0},
+        ):
+            ev = cmd.evaluate(m, spot, 0.05, book=(0.02, 10))
+        reasons = " | ".join(ev.get("reasons") or [])
+        self.assertIn("cushion", reasons)
+        self.assertLess(float(ev.get("z") or 1), 0.70)
 
 
 if __name__ == "__main__":

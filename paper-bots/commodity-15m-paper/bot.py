@@ -613,8 +613,6 @@ def evaluate(m: dict, spot: float, edge_buf: float, book=None) -> dict:
         spread, depth = book[0], int(book[1] or 0)
     else:
         spread, depth = book_depth(str(m["ticker"]), side, ask)
-    if cushion + 1e-12 < min_cush:
-        reasons.append(f"cushion {cushion:.5f} < {min_cush:.5f}")
     lane = "accurate"
     need_edge = 0.0
     p_acc = max(0.50, float(MIN_MODEL_ACCURATE) - p_relax)
@@ -630,6 +628,10 @@ def evaluate(m: dict, spot: float, edge_buf: float, book=None) -> dict:
     z_floor = max(0.40, float(z_floor) - z_relax)
     if z + 1e-12 < z_floor:
         reasons.append(f"z {z:.2f} < {z_floor}")
+    # Frac cushion only when z does not already clear — distance is in Φ(z).
+    # Matches BTC #378; avoids double-vetoing fee-clear edges.
+    if cushion + 1e-12 < min_cush and z + 1e-12 < float(z_floor):
+        reasons.append(f"cushion {cushion:.5f} < {min_cush:.5f}")
     if not (ASK_MIN - 1e-12 <= float(ask) <= ASK_MAX + 1e-12):
         reasons.append(f"ask {ask:.3f} outside band")
     if spread is not None and spread > MAX_SPREAD + 1e-12:
