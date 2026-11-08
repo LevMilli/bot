@@ -947,58 +947,35 @@ def run():
                         info["fair_home"] if p["side"] == "home"
                         else 1 - info["fair_home"]
                     )
+                # Hard-stop settle-retro: never invent threshold stops from
+                # finalized bid=0 on winners (same poison catch-up repair strips).
                 if bid_settle is not None and not p.get("hard_stop_shadowed"):
-                    hs = desk_roi_plan.sports_hard_stop_hit(
-                        p.get("entry_price"), bid_settle,
-                    )
-                    if hs.get("hit"):
-                        desk_roi_plan.record_sports_hard_stop_shadow(
-                            DESK_ROOT,
-                            ticker=str(p.get("ticker") or ""),
-                            side=str(p.get("side") or ""),
-                            league=str(p.get("league") or ""),
-                            entry_price=p.get("entry_price"),
-                            bid=bid_settle,
-                            fair=fair_settle,
-                            contracts=p.get("contracts"),
-                            cost=p.get("cost"),
-                            note="settle-retro shadow hard-stop — no live sell",
+                    wipe_quote = float(bid_settle) <= 0
+                    if wipe_quote and float(pnl) + 1e-12 >= 0.0:
+                        pass
+                    else:
+                        hs = desk_roi_plan.sports_hard_stop_hit(
+                            p.get("entry_price"), bid_settle,
                         )
-                        p["hard_stop_shadowed"] = True
-                        summary_out.setdefault("hard_stop_shadow", []).append(
-                            f"SETTLE-RETRO STOP {p.get('ticker')} bid {bid_settle}"
-                        )
-                if bid_settle is not None and not p.get("time_final_shadowed"):
-                    game = info.get("game") if isinstance(info, dict) else None
-                    status = (game or {}).get("status") if isinstance(game, dict) else None
-                    rem = desk_roi_plan.sports_minutes_remaining(
-                        status, league=str(p.get("league") or ""),
-                    )
-                    if rem is None:
-                        rem = 0.0  # final → treat as 0 min left for retrospective
-                    tf = desk_roi_plan.sports_time_final_hit(
-                        rem, bid_settle,
-                        entry_price=p.get("entry_price"),
-                        cost=p.get("cost"),
-                        contracts=p.get("contracts"),
-                    )
-                    if tf.get("hit"):
-                        desk_roi_plan.record_sports_time_final_shadow(
-                            DESK_ROOT,
-                            ticker=str(p.get("ticker") or ""),
-                            side=str(p.get("side") or ""),
-                            league=str(p.get("league") or ""),
-                            minutes_left=rem,
-                            entry_price=p.get("entry_price"),
-                            bid=bid_settle,
-                            contracts=p.get("contracts"),
-                            cost=p.get("cost"),
-                            note="settle-retro shadow time-final — no live sell",
-                        )
-                        p["time_final_shadowed"] = True
-                        summary_out.setdefault("time_final_shadow", []).append(
-                            f"SETTLE-RETRO TFINAL {p.get('ticker')} rem={rem}"
-                        )
+                        if hs.get("hit"):
+                            desk_roi_plan.record_sports_hard_stop_shadow(
+                                DESK_ROOT,
+                                ticker=str(p.get("ticker") or ""),
+                                side=str(p.get("side") or ""),
+                                league=str(p.get("league") or ""),
+                                entry_price=p.get("entry_price"),
+                                bid=bid_settle,
+                                fair=fair_settle,
+                                contracts=p.get("contracts"),
+                                cost=p.get("cost"),
+                                note="settle-retro shadow hard-stop — no live sell",
+                            )
+                            p["hard_stop_shadowed"] = True
+                            summary_out.setdefault("hard_stop_shadow", []).append(
+                                f"SETTLE-RETRO STOP {p.get('ticker')} bid {bid_settle}"
+                            )
+                # Time-final settle-retro disabled: forcing rem=0 on finals invents
+                # false near-final trims. Mid-open clock densify only.
             except Exception:
                 pass
             lines.append(f"| {ts} | {p['league']} | {p['game']} | FINAL {as_}-{hs} | | | | | **PAPER SETTLE** {p['team']}: {'WON' if payout else 'LOST'} payout ${payout:.2f}, P&L ${pnl:+.2f} |")
