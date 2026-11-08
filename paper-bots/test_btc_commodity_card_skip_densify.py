@@ -204,6 +204,25 @@ class CommodityCardSkipDensify(unittest.TestCase):
             self.assertIsInstance(bot_codes, dict)
             self.assertGreaterEqual(sum(int(v) for v in bot_codes.values()), 1)
 
+    def test_firm_sticky_append_card_skip_reasons(self):
+        """Firm/sticky brain densify must also feed CARD skip_reasons."""
+        src = CMD.read_text(encoding="utf-8")
+        firm_idx = src.find("if firm_block:")
+        sticky_idx = src.find("if sticky_block:")
+        self.assertGreater(firm_idx, 0)
+        self.assertGreater(sticky_idx, 0)
+        firm_chunk = src[firm_idx:firm_idx + 500]
+        sticky_chunk = src[sticky_idx:sticky_idx + 400]
+        self.assertIn("skip_reasons.append(str(firm_block))", firm_chunk)
+        self.assertIn("skip_reasons.append(str(sticky_block))", sticky_chunk)
+        cmd = _load(CMD, "commodity_firm_card_under_test")
+        card = cmd._card_sentence(
+            buys=0,
+            skip_reasons=["firm queue reserved for higher edge"],
+        )
+        self.assertIn("firm queue", card)
+        self.assertNotIn("No paper buy", card)
+
     def test_btc_eth_commodity_near_miss_passes_ask(self):
         """#402 persist is a no-op unless callers pass ask — densify entry honesty."""
         btc_src = BTC.read_text(encoding="utf-8")

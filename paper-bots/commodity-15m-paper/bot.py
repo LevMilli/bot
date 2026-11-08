@@ -1379,6 +1379,7 @@ def main() -> int:
             firm_block = ""
         if firm_block:
             print(f"  → skip: {firm_block}")
+            skip_reasons.append(str(firm_block))  # CARD densify parity with BTC
             try:
                 import desk_roi_plan
                 desk_roi_plan.record_fit(
@@ -1413,6 +1414,7 @@ def main() -> int:
             sticky_block = ""
         if sticky_block:
             print(f"  → skip: {sticky_block}")
+            skip_reasons.append(str(sticky_block))  # CARD densify parity with BTC
             _densify_evaluate_skip(
                 reasons=[sticky_block],
                 ticker=str(ev.get("ticker") or ""),
