@@ -131,6 +131,55 @@ class BtcCardSkipDensify(unittest.TestCase):
             self.assertEqual(last.get("action"), "skip")
             self.assertIn("spot failed", " ".join(last.get("reasons") or []))
 
+    def test_eth_windows_no_eth_spot_densifies_not_generic_no_buy(self):
+        """Prefer-1/2: open ETH windows + ETH spots down densify (#436 leftover).
+
+        Early gate skips when eth_markets exist; silent eth_price is None break
+        invented clean Checked… No paper buy (dual spot-down invent).
+        """
+        src = BTC.read_text(encoding="utf-8")
+        gate_idx = src.find("if eth_markets and eth_price is None:")
+        self.assertGreater(gate_idx, 0)
+        chunk = src[gate_idx:gate_idx + 1600]
+        self.assertIn('eth_spot_reason = "spot failed (eth)"', chunk)
+        self.assertIn("skip_reasons.append(eth_spot_reason)", chunk)
+        self.assertIn("_densify_skip_brain", chunk)
+        self.assertIn("btc eth spot densify", chunk)
+        self.assertIn('series="KXETH15M"', chunk)
+        # Must not leave the silent break as the only ETH-spot handling.
+        silent_break = src.find("for m in eth_markets:\n        if eth_price is None:\n            break")
+        self.assertGreater(silent_break, gate_idx)
+
+        import desk_brain
+        import desk_more
+
+        btc = _load(BTC, "btc15m_eth_spot_fail_under_test")
+        with tempfile.TemporaryDirectory() as tmp:
+            btc.DESK_ROOT = tmp
+            btc.IS_SHADOW = False
+            btc._densify_skip_brain(
+                reasons=["spot failed (eth)"],
+                note="btc eth spot densify",
+            )
+            board = desk_more.skip_leaderboard(tmp)
+            by_bot = board.get("by_bot") or {}
+            self.assertIn("btc15m", by_bot)
+            journal = desk_brain.load_journal(tmp)
+            last = (journal.get("decisions") or [])[-1]
+            self.assertEqual(last.get("action"), "skip")
+            self.assertIn("spot failed (eth)", " ".join(last.get("reasons") or []))
+
+        # CARD prefers densified eth spot fail over ETH/BTC clean no-buy invent.
+        card = btc._card_sentence(
+            buys=0,
+            markets_n=0,
+            eth_markets_n=2,
+            last_sentence="Checked ETH/BTC crypto Kalshi markets. No paper buy.",
+            skip_reasons=["spot failed (eth)"],
+        )
+        self.assertIn("spot failed (eth)", card)
+        self.assertNotIn("No paper buy", card)
+
     def test_eth_skip_paths_densify_brain(self):
         """ETH desk-block/delay/volatile must densify skip_board (#409 sibling)."""
         btc = _load(BTC, "btc15m_eth_brain_under_test")
