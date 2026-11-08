@@ -181,14 +181,10 @@ class SettleRetroDensify(unittest.TestCase):
             for name in ("desk_shadow_catchup_at.txt", "desk_shadow_tick_at.txt"):
                 with open(os.path.join(tmp, name), "w", encoding="utf-8") as fh:
                     fh.write("fresh\n")
-            # Materialize empty journals → missing clears; thin may fire.
-            for name in (
-                desk_roi_plan.SPORTS_HARD_STOP_SHADOW,
-                desk_roi_plan.COMMODITY_TIME_STOP_SHADOW,
-                desk_roi_plan.SPORTS_TIME_FINAL_SHADOW,
-            ):
-                with open(os.path.join(tmp, name), "w", encoding="utf-8") as fh:
-                    json.dump({"paper_only": True, "version": 1, "rows": [], "live": False}, fh)
+            # Catch-up materializes empty journals → missing clears; thin may fire.
+            ensured = desk_roi_plan.ensure_shadow_densify_journals(tmp)
+            self.assertTrue(ensured["ok"], ensured)
+            self.assertEqual(ensured["created_n"], 3)
             # Edge08 + heartbeat so those clear too.
             pimp_desk.touch_heartbeat(tmp)
             edge = pimp_desk.shadow_account_path(tmp, "btc15m", "edge08")
@@ -207,6 +203,11 @@ class SettleRetroDensify(unittest.TestCase):
                 {"hard_stop_promote_thin", "commodity_tstop_promote_thin", "sports_tfinal_promote_thin"}
                 & got2
             )
+            # Idempotent ensure; catchup surfaces journals_ensured.
+            again = desk_roi_plan.ensure_shadow_densify_journals(tmp)
+            self.assertEqual(again["created_n"], 0)
+            catch = desk_roi_plan.run_shadow_catchup(tmp)
+            self.assertIn("journals_ensured", catch)
             self.assertFalse(alerts2["live_orders_enabled"])
 
     def test_run_shadow_tick_smokes_commodity(self):

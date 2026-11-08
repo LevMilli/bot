@@ -3604,6 +3604,12 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
     except Exception as exc:  # noqa: BLE001
         errors.append(f"commodity_tstop:{type(exc).__name__}")
         commodity_tstop = {"ok": False, "recorded": 0, "error": type(exc).__name__}
+    journals_ensured = {"ok": False, "created": []}
+    try:
+        journals_ensured = ensure_shadow_densify_journals(root)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"journals:{type(exc).__name__}")
+        journals_ensured = {"ok": False, "created": [], "error": type(exc).__name__}
     weekly_m1 = {"ok": False, "repaired": 0}
     try:
         weekly_m1 = repair_weekly_sports_m1(root)
@@ -3637,6 +3643,7 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
         "hard_stop_poison_removed": int(hs_repair.get("removed") or 0),
         "time_final_poison_removed": int(tf_repair.get("removed") or 0),
         "weekly_sports_m1_repaired": int(weekly_m1.get("repaired") or 0),
+        "journals_created": list(journals_ensured.get("created") or []),
         "near_miss_label": labeled,
         "helper_backfill": backfilled,
         "clv_repair": repaired,
@@ -3644,11 +3651,48 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
         "time_final_repair": tf_repair,
         "sports_exit": sports_exit,
         "commodity_tstop": commodity_tstop,
+        "journals_ensured": journals_ensured,
         "weekly_sports_m1_repair": weekly_m1,
         "errors": errors[:8],
         "note": (
             "Shadow catch-up — labels/backfills/repairs densify evidence only. "
             "Never arms; never LIVE; soft-max tip invent exhausted."
+        ),
+    }
+
+
+def ensure_shadow_densify_journals(root: str | None = None) -> dict:
+    """Materialize empty sports/commodity shadow journals if missing.
+
+    Distinguishes *missing* (never created) from *thin* (present, n=0) in
+    shadow_ops_alerts. Never invents promote rows; never LIVE; never arms.
+    """
+    created: list[str] = []
+    specs = (
+        (SPORTS_HARD_STOP_SHADOW, {"paper_only": True, "version": 1, "rows": [], "live": False}),
+        (COMMODITY_TIME_STOP_SHADOW, {"paper_only": True, "version": 1, "rows": [], "live": False}),
+        (SPORTS_TIME_FINAL_SHADOW, {"paper_only": True, "version": 1, "rows": [], "live": False}),
+    )
+    for name, blank in specs:
+        path = _path(name, root)
+        if os.path.isfile(path):
+            continue
+        try:
+            _save(path, dict(blank))
+            created.append(name)
+        except OSError:
+            continue
+    return {
+        "ok": True,
+        "created": created,
+        "created_n": len(created),
+        "paper_only": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live": False,
+        "note": (
+            "Ensured empty densify journals exist (missing→thin). "
+            "Never invents evidence; never LIVE; never arms."
         ),
     }
 
