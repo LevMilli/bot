@@ -174,12 +174,37 @@ def step_scan(args, state, day):
     quotes = live_quotes(ev)
     print(f"Event {ev}: {len(quotes)} active contracts read at {logger.now_ct()}")
     lo, hi = _ask_band()
-    pick = signal_engine.pick_trade(quotes, lo, hi)
-    if not pick:
+    cands = signal_engine.candidate_sides(quotes, lo, hi)
+    if not cands:
         print(alerts.format_skip_note(day, "no contract with ask in the 80-90c band"))
         if not args.dry_run:
             logger.learn(f"{day}: no trade - nothing in 80-90c band at scan time", "skip")
         return
+    venue_edge = 0.02
+    try:
+        desk = _desk()
+        venue_edge = float(desk.venue_min_edge("kalshi_inx", desk.load_settings(DESK_ROOT)))
+    except Exception:
+        pass
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_inx
+        chosen = desk_inx.pick_by_fair(
+            cands,
+            venue_edge=venue_edge,
+            now=now,
+            settle_time_ct=str(CFG.get("settle_time_ct") or "15:00"),
+        )
+    except Exception as exc:
+        chosen = {"ok": False, "reason": f"inx fair pick unavailable ({type(exc).__name__})"}
+    if not chosen.get("ok") or not chosen.get("pick"):
+        reason = str(chosen.get("reason") or "no candidate cleared inx fair venue edge")
+        print(alerts.format_skip_note(day, reason))
+        if not args.dry_run:
+            logger.learn(f"{day}: no trade - {reason}", "skip")
+        return
+    pick = chosen["pick"]
     pick, ob = confirm_with_orderbook(pick)
     if not pick:
         print(alerts.format_skip_note(day, "chosen contract moved out of the band on the order-book re-check"))

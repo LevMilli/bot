@@ -206,6 +206,85 @@ def fair_evaluate(
     return out
 
 
+def pick_by_fair(
+    candidates: list | None,
+    *,
+    venue_edge: float = 0.02,
+    spot: float | None = None,
+    now: datetime | None = None,
+    settle_time_ct: str = "15:00",
+    fee_rate: float = 0.07,
+    min_p: float = MIN_FAIR_P,
+    min_z: float = MIN_FAIR_Z,
+) -> dict:
+    """Among band candidates, pick max Φ fair edge that clears venue.
+
+    Highest-ask pick often fails fair while a cheaper ITM side clears — use this
+    instead of signal_engine.pick_trade for fee-aware fills. Missing spot → refuse.
+    """
+    empty = {
+        "ok": False,
+        "pick": None,
+        "fair": None,
+        "n_candidates": 0,
+        "n_ok": 0,
+        "reason": "no band candidates",
+        "paper_only": True,
+        "fee_floors_locked": True,
+    }
+    cands = [c for c in (candidates or []) if isinstance(c, dict)]
+    empty["n_candidates"] = len(cands)
+    if not cands:
+        return empty
+    # One spot fetch for the whole board (or fail-closed once).
+    px = _finite(spot) if spot is not None else spx_spot()
+    if px is None or px <= 0:
+        empty["reason"] = refuse_residual_as_edge() + " (no ^GSPC spot)"
+        return empty
+    best = None
+    best_fair = None
+    best_edge = None
+    last_fail = ""
+    n_ok = 0
+    for c in cands:
+        fair = fair_evaluate(
+            c,
+            venue_edge=venue_edge,
+            spot=px,
+            now=now,
+            settle_time_ct=settle_time_ct,
+            fee_rate=fee_rate,
+            min_p=min_p,
+            min_z=min_z,
+        )
+        if not fair.get("ok"):
+            last_fail = str(fair.get("reason") or "")
+            continue
+        n_ok += 1
+        edge = _finite(fair.get("edge"))
+        if edge is None:
+            continue
+        if best_edge is None or edge > best_edge + 1e-12:
+            best_edge = edge
+            best = {**c, "fair_edge": edge, "fair_p": fair.get("p"), "fair_z": fair.get("z")}
+            best_fair = fair
+    if best is None:
+        empty["n_ok"] = 0
+        empty["reason"] = last_fail or "no candidate cleared inx fair venue edge"
+        return empty
+    return {
+        "ok": True,
+        "pick": best,
+        "fair": best_fair,
+        "n_candidates": len(cands),
+        "n_ok": n_ok,
+        "reason": "",
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "spot": px,
+    }
+
+
 def dual_side_pick(candidates: list, *, band_lo: float, band_hi: float) -> dict | None:
     """
     Among candidates in ask band, pick max residual edge / ask (capital efficiency).
@@ -414,6 +493,13 @@ def self_check() -> None:
         venue_edge=0.02, spot=7500.0, now=now,
     )
     assert thin["ok"] is False
+    # Highest-ask RICH fails fair; VALUE clears — pick_by_fair must choose VALUE.
+    board = [
+        {"ticker": "RICH", "side": "yes", "ask": 0.90, "strike": 7480},
+        {"ticker": "VALUE", "side": "yes", "ask": 0.82, "strike": 7200},
+    ]
+    chosen = pick_by_fair(board, venue_edge=0.02, spot=7500.0, now=now)
+    assert chosen["ok"] is True and chosen["pick"]["ticker"] == "VALUE"
     skip = {"2026-11-10": ["CPI"], "2026-10-28": ["FOMC"]}
     # CPI day 08:00 CT — still in blackout
     blocked = post_macro_blackout(
