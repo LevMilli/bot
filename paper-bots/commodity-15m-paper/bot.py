@@ -182,10 +182,9 @@ def spots_by_series() -> dict[str, float]:
 
 
 def list_open(series: str, limit: int = 4) -> list[dict]:
-    try:
-        data = get_json(f"{KALSHI}/markets?series_ticker={series}&status=open&limit={limit}")
-    except Exception:
-        return []
+    # Prefer-1: Kalshi GET must raise — silent [] false-friends as empty windows
+    # when the feed is down (#433/#434 sibling). Call site densifies list_errs.
+    data = get_json(f"{KALSHI}/markets?series_ticker={series}&status=open&limit={limit}")
     rows = []
     for m in data.get("markets") or []:
         try:
@@ -841,8 +840,8 @@ def paper_buy(state: dict, ev: dict) -> str:
 def _card_sentence(*, buys: int, skip_reasons=None, open_windows: bool = True) -> str:
     """CARD body only. Prefer first evaluate skip over generic no-buy (#396 sibling).
 
-    Prefer-1: skip_reasons (incl. spot failed) must beat empty-window invent —
-    all-Yahoo-down must not false-friend as "No open windows" (#433 sibling).
+    Prefer-1: skip_reasons (spot / Kalshi list failed) must beat empty-window invent —
+    feed-down must not false-friend as "No open windows" (#433/#434 sibling).
     """
     skips = [str(s).strip() for s in (skip_reasons or []) if str(s).strip()]
     if buys <= 0 and skips:
@@ -941,33 +940,49 @@ def main() -> int:
     spot_secs = time.perf_counter() - t_spot
     print(f"Spots ready: {len(spots)}/{len(SERIES)}  cash=${float(account.get('cash') or 0):.2f}")
     windows = []
+    list_errs: list[str] = []
     for series in SERIES:
         spot = spots.get(series)
         if spot is None:
             print(f"  {series}: no spot — skip")
             continue
-        for m in list_open(series, limit=3):
-            windows.append((series, spot, m))
+        try:
+            for m in list_open(series, limit=3):
+                windows.append((series, spot, m))
+        except Exception as exc:
+            # Prefer-1: do not collapse Kalshi list-down into empty windows.
+            list_errs.append(series)
+            print(f"  {series}: Kalshi list failed — {type(exc).__name__}")
     if not windows:
         elapsed = time.perf_counter() - t0
-        # Prefer-1/2: all Yahoo spots missing ≠ empty Kalshi windows (#433 sibling).
+        # Prefer-1/2: feed-down ≠ empty Kalshi windows (#433/#434 sibling).
         # Without this, CARD invents "No open windows" and skip_board stays empty.
-        spot_skip_reasons: list[str] = []
+        empty_skip_reasons: list[str] = []
         empty_note = "no open commodity windows"
         if not spots:
             spot_reason = "spot failed (yahoo)"
-            spot_skip_reasons.append(spot_reason)
+            empty_skip_reasons.append(spot_reason)
             empty_note = spot_reason
             _densify_evaluate_skip(
                 reasons=[spot_reason],
                 note="commodity spot densify",
             )
             print(f"SKIP densify: {spot_reason}")
+        elif list_errs:
+            # Spots present but every list_open raised → Kalshi feed-down invent.
+            kalshi_reason = "markets failed (kalshi)"
+            empty_skip_reasons.append(kalshi_reason)
+            empty_note = kalshi_reason
+            _densify_evaluate_skip(
+                reasons=[kalshi_reason],
+                note="commodity kalshi list densify",
+            )
+            print(f"SKIP densify: {kalshi_reason} ({','.join(list_errs)})")
         print(
             "CARD: "
             + _card_sentence(
                 buys=0,
-                skip_reasons=spot_skip_reasons or None,
+                skip_reasons=empty_skip_reasons or None,
                 open_windows=False,
             )
         )
@@ -987,13 +1002,25 @@ def main() -> int:
                 note=(
                     "commodity spot failed"
                     if not spots
-                    else "commodity spot (empty)"
+                    else (
+                        "commodity kalshi list failed"
+                        if list_errs
+                        else "commodity spot (empty)"
+                    )
                 ),
                 stage="spot",
             )
             desk_roi_plan.record_latency(
                 DESK_ROOT, bot="commodity-15m", seconds=elapsed,
-                note="empty card" if spots else "spot failed card",
+                note=(
+                    "spot failed card"
+                    if not spots
+                    else (
+                        "kalshi list failed card"
+                        if list_errs
+                        else "empty card"
+                    )
+                ),
                 stage="evaluate",
             )
         except Exception:

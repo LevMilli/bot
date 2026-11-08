@@ -197,17 +197,28 @@ class CommodityCardSkipDensify(unittest.TestCase):
         self.assertIn("spot failed", card)
         self.assertNotIn("No open windows", card)
 
+    def test_card_kalshi_list_failed_beats_empty_windows_invent(self):
+        """Prefer-1: Kalshi list-down must not false-friend as No open windows (#434 leftover)."""
+        cmd = _load(CMD, "commodity_card_kalshi_list_fail_under_test")
+        card = cmd._card_sentence(
+            buys=0,
+            open_windows=False,
+            skip_reasons=["markets failed (kalshi)"],
+        )
+        self.assertIn("markets failed", card)
+        self.assertNotIn("No open windows", card)
+
     def test_all_spot_fail_path_densifies_not_empty_windows(self):
         """Empty windows + no spots densifies spot failed into CARD/brain."""
         src = CMD.read_text(encoding="utf-8")
         empty_idx = src.find("if not windows:")
         self.assertGreater(empty_idx, 0)
-        chunk = src[empty_idx:empty_idx + 1600]
+        chunk = src[empty_idx:empty_idx + 2200]
         self.assertIn("if not spots:", chunk)
         self.assertIn("spot failed (yahoo)", chunk)
         self.assertIn("commodity spot densify", chunk)
         self.assertIn("_densify_evaluate_skip", chunk)
-        self.assertIn("skip_reasons=spot_skip_reasons", chunk)
+        self.assertIn("skip_reasons=empty_skip_reasons", chunk)
         cmd = _load(CMD, "commodity_spot_fail_brain_under_test")
         import desk_brain
         import desk_more
@@ -225,6 +236,52 @@ class CommodityCardSkipDensify(unittest.TestCase):
             self.assertIn("spot failed", " ".join(last.get("reasons") or []))
             board = desk_more.skip_leaderboard(tmp)
             self.assertIn("commodity-15m", board.get("by_bot") or {})
+
+    def test_kalshi_list_fail_path_densifies_not_empty_windows(self):
+        """Spots present + list_open raises densifies markets failed — not empty invent."""
+        src = CMD.read_text(encoding="utf-8")
+        # list_open must raise on GET fail (no silent []).
+        list_fn = src.split("def list_open", 1)[1].split("\ndef ", 1)[0]
+        self.assertNotIn("return []", list_fn)
+        self.assertIn("get_json(", list_fn)
+        empty_idx = src.find("if not windows:")
+        self.assertGreater(empty_idx, 0)
+        chunk = src[empty_idx:empty_idx + 2200]
+        self.assertIn("elif list_errs:", chunk)
+        self.assertIn("markets failed (kalshi)", chunk)
+        self.assertIn("commodity kalshi list densify", chunk)
+        self.assertIn("_densify_evaluate_skip", chunk)
+        # Call site must catch list_open failures into list_errs.
+        build_idx = src.find("list_errs: list[str] = []")
+        self.assertGreater(build_idx, 0)
+        build_chunk = src[build_idx:empty_idx]
+        self.assertIn("Kalshi list failed", build_chunk)
+        self.assertIn("list_errs.append(series)", build_chunk)
+        cmd = _load(CMD, "commodity_kalshi_list_fail_brain_under_test")
+        import desk_brain
+        import desk_more
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cmd.DESK_ROOT = tmp
+            cmd._densify_evaluate_skip(
+                reasons=["markets failed (kalshi)"],
+                note="commodity kalshi list densify",
+            )
+            journal = desk_brain.load_journal(tmp)
+            last = (journal.get("decisions") or [])[-1]
+            self.assertEqual(last.get("bot"), "commodity-15m")
+            self.assertEqual(last.get("action"), "skip")
+            self.assertIn("markets failed", " ".join(last.get("reasons") or []))
+            board = desk_more.skip_leaderboard(tmp)
+            self.assertIn("commodity-15m", board.get("by_bot") or {})
+
+        # Runtime: list_open raises instead of returning [].
+        def _boom(_url, timeout=20):
+            raise RuntimeError("kalshi 503")
+
+        cmd.get_json = _boom
+        with self.assertRaises(RuntimeError):
+            cmd.list_open("KXGOLD15M", limit=1)
 
     def test_evaluate_skip_densifies_brain_skip_board(self):
         cmd = _load(CMD, "commodity_brain_skip_under_test")
