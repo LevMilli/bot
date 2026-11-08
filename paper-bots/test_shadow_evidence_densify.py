@@ -201,16 +201,17 @@ class ShadowEvidenceDensify(unittest.TestCase):
         self.assertIsNone(
             desk_roi_plan.recover_near_miss_ask_from_edge(p, edge, bot="memecoin"),
         )
-        # Commodity embeds venue edge_buf in stored edge — invert must subtract it.
+        # Commodity embeds edge_buf — refuse without stored buf; subtract when known.
         cmd_ask = 0.85
         cmd_fee = desk_roi_plan._kalshi_fee_per_contract(cmd_ask)
         cmd_buf = 0.05
         cmd_p = 0.92
         cmd_edge = cmd_p - cmd_ask - cmd_fee - cmd_buf
-        drifted = desk_roi_plan.recover_near_miss_ask_from_edge(
-            cmd_p, cmd_edge, bot="commodity-15m",
+        self.assertIsNone(
+            desk_roi_plan.recover_near_miss_ask_from_edge(
+                cmd_p, cmd_edge, bot="commodity-15m",
+            ),
         )
-        self.assertAlmostEqual(float(drifted), cmd_ask + cmd_buf, places=3)
         fixed = desk_roi_plan.recover_near_miss_ask_from_edge(
             cmd_p, cmd_edge, bot="commodity-15m", edge_buf=cmd_buf,
         )
@@ -321,7 +322,7 @@ class ShadowEvidenceDensify(unittest.TestCase):
             self.assertAlmostEqual(float(row["would_pnl"]), 2.0, places=4)
 
     def test_densify_near_miss_ask_catchup_commodity_edge_buf(self):
-        """Commodity stored edge embeds venue buf — catch-up must not drift ask."""
+        """Commodity without stored edge_buf is sibling-only; with buf invert is honest."""
         with tempfile.TemporaryDirectory() as tmp:
             ask = 0.85
             fee = desk_roi_plan._kalshi_fee_per_contract(ask)
@@ -332,27 +333,62 @@ class ShadowEvidenceDensify(unittest.TestCase):
                 tmp,
                 {
                     "bot": "commodity-15m",
-                    "ticker": "KXGOLD15M-BUF",
+                    "ticker": "KXGOLD15M-NOBUF",
                     "side": "YES",
                     "soft": ["p"],
                     "p": p,
                     "edge": edge,
-                    "note": "commodity edge_buf invert",
+                    "note": "pre-store buf missing → sibling only",
                 },
             )
             state = desk_more.load_more(tmp)
             state["near_miss"][0].pop("ask", None)
             state["near_miss"][0].pop("entry_price", None)
+            state["near_miss"][0].pop("edge_buf", None)
             desk_more.save_more(state, tmp)
             out = desk_roi_plan.densify_near_miss_ask_catchup(tmp)
             self.assertTrue(out["ok"])
-            self.assertGreaterEqual(out["stamped"], 1)
+            self.assertEqual(out["stamped"], 0)
+            no_buf = next(
+                r for r in (desk_more.load_more(tmp).get("near_miss") or [])
+                if r.get("ticker") == "KXGOLD15M-NOBUF"
+            )
+            self.assertIsNone(no_buf.get("ask"))
+            self.assertIsNone(no_buf.get("ask_densify"))
+
+            desk_more.record_near_miss(
+                tmp,
+                {
+                    "bot": "commodity-15m",
+                    "ticker": "KXGOLD15M-BUF",
+                    "side": "YES",
+                    "soft": ["p"],
+                    "p": p,
+                    "edge": edge,
+                    "edge_buf": buf,
+                    "note": "stored historical edge_buf",
+                },
+            )
+            state = desk_more.load_more(tmp)
+            for row in state["near_miss"]:
+                if row.get("ticker") == "KXGOLD15M-BUF":
+                    row.pop("ask", None)
+                    row.pop("entry_price", None)
+            desk_more.save_more(state, tmp)
+            out2 = desk_roi_plan.densify_near_miss_ask_catchup(tmp)
+            self.assertTrue(out2["ok"])
+            self.assertGreaterEqual(out2["stamped"], 1)
             row = next(
                 r for r in (desk_more.load_more(tmp).get("near_miss") or [])
                 if r.get("ticker") == "KXGOLD15M-BUF"
             )
             self.assertEqual(row.get("ask_densify"), "p_edge")
             self.assertAlmostEqual(float(row["ask"]), ask, places=3)
+
+        # Forward densify: commodity bot records edge_buf on near-miss.
+        with open(os.path.join(HERE, "commodity-15m-paper", "bot.py"), encoding="utf-8") as handle:
+            src = handle.read()
+        self.assertIn('"edge_buf": round(float(edge_buf), 4)', src)
 
     def test_near_miss_catchup_cli_labels_pending(self):
         with tempfile.TemporaryDirectory() as tmp:

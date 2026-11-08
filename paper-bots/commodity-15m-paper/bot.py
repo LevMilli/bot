@@ -1142,6 +1142,8 @@ def main() -> int:
                         "z": ev.get("z"),
                         "p": ev.get("p"),
                         "edge": ev.get("edge"),
+                        # Historical buf for ask catch-up invert (never live guess).
+                        "edge_buf": round(float(edge_buf), 4),
                         "ask": ev.get("ask"),
                         "series": m.get("series"),
                         "note": f"commodity {nm.get('note')}",
