@@ -186,6 +186,46 @@ class CommodityCardSkipDensify(unittest.TestCase):
         card = cmd._card_sentence(buys=0, open_windows=False)
         self.assertIn("No open windows", card)
 
+    def test_card_spot_failed_beats_empty_windows_invent(self):
+        """Prefer-1: all Yahoo down must not false-friend as No open windows (#433)."""
+        cmd = _load(CMD, "commodity_card_spot_fail_under_test")
+        card = cmd._card_sentence(
+            buys=0,
+            open_windows=False,
+            skip_reasons=["spot failed (yahoo)"],
+        )
+        self.assertIn("spot failed", card)
+        self.assertNotIn("No open windows", card)
+
+    def test_all_spot_fail_path_densifies_not_empty_windows(self):
+        """Empty windows + no spots densifies spot failed into CARD/brain."""
+        src = CMD.read_text(encoding="utf-8")
+        empty_idx = src.find("if not windows:")
+        self.assertGreater(empty_idx, 0)
+        chunk = src[empty_idx:empty_idx + 1600]
+        self.assertIn("if not spots:", chunk)
+        self.assertIn("spot failed (yahoo)", chunk)
+        self.assertIn("commodity spot densify", chunk)
+        self.assertIn("_densify_evaluate_skip", chunk)
+        self.assertIn("skip_reasons=spot_skip_reasons", chunk)
+        cmd = _load(CMD, "commodity_spot_fail_brain_under_test")
+        import desk_brain
+        import desk_more
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cmd.DESK_ROOT = tmp
+            cmd._densify_evaluate_skip(
+                reasons=["spot failed (yahoo)"],
+                note="commodity spot densify",
+            )
+            journal = desk_brain.load_journal(tmp)
+            last = (journal.get("decisions") or [])[-1]
+            self.assertEqual(last.get("bot"), "commodity-15m")
+            self.assertEqual(last.get("action"), "skip")
+            self.assertIn("spot failed", " ".join(last.get("reasons") or []))
+            board = desk_more.skip_leaderboard(tmp)
+            self.assertIn("commodity-15m", board.get("by_bot") or {})
+
     def test_evaluate_skip_densifies_brain_skip_board(self):
         cmd = _load(CMD, "commodity_brain_skip_under_test")
         import desk_brain

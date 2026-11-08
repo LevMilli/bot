@@ -839,13 +839,17 @@ def paper_buy(state: dict, ev: dict) -> str:
 
 
 def _card_sentence(*, buys: int, skip_reasons=None, open_windows: bool = True) -> str:
-    """CARD body only. Prefer first evaluate skip over generic no-buy (#396 sibling)."""
+    """CARD body only. Prefer first evaluate skip over generic no-buy (#396 sibling).
+
+    Prefer-1: skip_reasons (incl. spot failed) must beat empty-window invent —
+    all-Yahoo-down must not false-friend as "No open windows" (#433 sibling).
+    """
+    skips = [str(s).strip() for s in (skip_reasons or []) if str(s).strip()]
+    if buys <= 0 and skips:
+        return skips[0]
     if not open_windows:
         return "Checked commodity 15m markets. No open windows."
     if buys <= 0:
-        skips = [str(s).strip() for s in (skip_reasons or []) if str(s).strip()]
-        if skips:
-            return skips[0]
         return "Checked commodity 15m markets. No paper buy."
     if buys == 1:
         return "Checked commodity 15m markets. Paper buy."
@@ -946,7 +950,27 @@ def main() -> int:
             windows.append((series, spot, m))
     if not windows:
         elapsed = time.perf_counter() - t0
-        print("CARD: " + _card_sentence(buys=0, open_windows=False))
+        # Prefer-1/2: all Yahoo spots missing ≠ empty Kalshi windows (#433 sibling).
+        # Without this, CARD invents "No open windows" and skip_board stays empty.
+        spot_skip_reasons: list[str] = []
+        empty_note = "no open commodity windows"
+        if not spots:
+            spot_reason = "spot failed (yahoo)"
+            spot_skip_reasons.append(spot_reason)
+            empty_note = spot_reason
+            _densify_evaluate_skip(
+                reasons=[spot_reason],
+                note="commodity spot densify",
+            )
+            print(f"SKIP densify: {spot_reason}")
+        print(
+            "CARD: "
+            + _card_sentence(
+                buys=0,
+                skip_reasons=spot_skip_reasons or None,
+                open_windows=False,
+            )
+        )
         try:
             import desk_roi_plan
             for series in SERIES:
@@ -956,15 +980,21 @@ def main() -> int:
                     seconds=elapsed,
                     markets_n=0,
                     series=series,
-                    note="no open commodity windows",
+                    note=empty_note,
                 )
             desk_roi_plan.record_latency(
                 DESK_ROOT, bot="commodity-15m", seconds=spot_secs,
-                note="commodity spot (empty)", stage="spot",
+                note=(
+                    "commodity spot failed"
+                    if not spots
+                    else "commodity spot (empty)"
+                ),
+                stage="spot",
             )
             desk_roi_plan.record_latency(
                 DESK_ROOT, bot="commodity-15m", seconds=elapsed,
-                note="empty card", stage="evaluate",
+                note="empty card" if spots else "spot failed card",
+                stage="evaluate",
             )
         except Exception:
             pass
