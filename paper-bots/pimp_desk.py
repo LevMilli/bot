@@ -1455,6 +1455,29 @@ def _btc_skip(summary: str) -> str:
     return "The last run did not include a skip line."
 
 
+def _sports_skip(summary: str) -> str:
+    """Tower skip strip for sports-gap. Prefer densified CARD evaluate reason (#400 sibling)."""
+    if not summary:
+        return "No check yet. Skip and news status show up after a run."
+    for line in str(summary).splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("CARD: "):
+            continue
+        body = _clean(stripped[6:], 220)
+        if not body:
+            continue
+        low = body.lower()
+        # Boilerplate empty/buy CARDs are not skip densify.
+        if "lanes clear" in low:
+            continue
+        if low.startswith("no paper buy") or low.startswith("paper buy"):
+            continue
+        if "no live or tip-soon" in low:
+            continue
+        return body[:400]
+    return "The last run did not include a skip line."
+
+
 def _fill_row(pos: dict, title: str, detail: str, cost: float, when: str) -> dict:
     ask = pos.get("ask")
     if ask in (None, "") and pos.get("entry_price") not in (None, ""):
@@ -1820,6 +1843,9 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
     view["open_count"] = count
     summary = str(run.get("summary") or "")
     view["why"] = card_copy(summary) if summary.strip() else ""
+    # Sports: why already densifies CARD; skip stayed "" forever (#400 sibling).
+    if spec["kind"] == "sports" and not view.get("skip"):
+        view["skip"] = _sports_skip(summary)
     view["outside"] = _outside(root, spec["id"], stamp)
     _save_good_bot(root, spec["id"], view)
     return _finish_bot(view, spec, root)
