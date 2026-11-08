@@ -199,7 +199,7 @@ def step_scan(args, state, day):
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_inx
-        chosen = desk_inx.pick_by_fair(
+        chosen = desk_inx.rank_by_fair(
             cands,
             venue_edge=venue_edge,
             now=now,
@@ -207,37 +207,97 @@ def step_scan(args, state, day):
         )
     except Exception as exc:
         chosen = {"ok": False, "reason": f"inx fair pick unavailable ({type(exc).__name__})"}
-    if not chosen.get("ok") or not chosen.get("pick"):
+    if not chosen.get("ok") or not (chosen.get("picks") or chosen.get("pick")):
         reason = str(chosen.get("reason") or "no candidate cleared inx fair venue edge")
         print(alerts.format_skip_note(day, reason))
         if not args.dry_run:
             logger.learn(f"{day}: no trade - {reason}", "skip")
         return
-    pick = chosen["pick"]
-    pick, ob = confirm_with_orderbook(pick)
-    if not pick:
-        print(alerts.format_skip_note(day, "chosen contract moved out of the band on the order-book re-check"))
-        return
-    # Anti-double: refuse same ticker already open on kalshi-sp twin.
+    ranked = list(chosen.get("picks") or [])
+    if not ranked and chosen.get("pick"):
+        ranked = [{"pick": chosen["pick"], "fair": chosen.get("fair")}]
+    pick = None
+    ob = None
+    fair = None
+    edge_proxy = 0.0
+    fair_p = None
+    fee_one = 0.0
+    n = 0
+    last_ob_miss = False
+    last_reason = ""
+    spot_px = chosen.get("spot")
+    sp_state = {}
+    sp_path = os.path.join(SIBLING, "paper_state.json")
     try:
-        if DESK_ROOT not in sys.path:
-            sys.path.insert(0, DESK_ROOT)
-        import desk_inx
-        sp_path = os.path.join(SIBLING, "paper_state.json")
-        sp_state = {}
         if os.path.isfile(sp_path):
             with open(sp_path, encoding="utf-8") as handle:
                 sp_state = json.load(handle) or {}
+    except Exception:
+        sp_state = {}
+    try:
+        desk = _desk()
+        cfg = desk.load_settings(DESK_ROOT)
+        venue_edge = float(desk.venue_min_edge("kalshi_inx", cfg))
+    except Exception:
+        cfg = {}
+    if DESK_ROOT not in sys.path:
+        sys.path.insert(0, DESK_ROOT)
+    import desk_inx
+    for row in ranked:
+        cand = row.get("pick") if isinstance(row, dict) else None
+        if not isinstance(cand, dict):
+            continue
+        confirmed, ob_try = confirm_with_orderbook(cand)
+        if not confirmed:
+            last_ob_miss = True
+            continue
         blocked_dbl = desk_inx.anti_double_blocks(
-            ticker=str(pick.get("ticker") or ""), sp_state=sp_state,
+            ticker=str(confirmed.get("ticker") or ""), sp_state=sp_state,
         )
         if blocked_dbl:
-            print(alerts.format_skip_note(day, blocked_dbl))
-            if not args.dry_run:
-                logger.learn(f"{day}: no trade - {blocked_dbl}", "skip")
-            return
-    except Exception:
-        pass
+            last_reason = blocked_dbl
+            continue
+        fee_try = paper_sim.taker_fee(1, confirmed["ask"])
+        try:
+            fair_try = desk_inx.fair_evaluate(
+                confirmed,
+                venue_edge=venue_edge,
+                spot=spot_px,
+                now=now,
+                settle_time_ct=str(CFG.get("settle_time_ct") or "15:00"),
+            )
+        except Exception as exc:
+            last_reason = f"inx fair unavailable ({type(exc).__name__})"
+            continue
+        if not fair_try.get("ok"):
+            last_reason = str(
+                fair_try.get("reason") or desk_inx.refuse_residual_as_edge()
+            )
+            continue
+        edge_try = float(fair_try.get("edge") or 0.0)
+        twin_block = desk_inx.twin_edge_blocks(
+            sized_edge=edge_try, venue_edge=venue_edge, extra=0.01,
+        )
+        if twin_block:
+            last_reason = twin_block
+            continue
+        pick = confirmed
+        ob = ob_try
+        fair = fair_try
+        edge_proxy = edge_try
+        fair_p = fair_try.get("p")
+        fee_one = float(fair_try.get("fee") if fair_try.get("fee") is not None else fee_try)
+        break
+    if not pick or not fair:
+        reason = last_reason or (
+            "chosen contract moved out of the band on the order-book re-check"
+            if last_ob_miss
+            else "no candidate cleared inx fair venue edge"
+        )
+        print(alerts.format_skip_note(day, reason))
+        if not args.dry_run:
+            logger.learn(f"{day}: no trade - {reason}", "skip")
+        return
     try:
         desk = _desk()
         hour_ct = dt.datetime.now(CT).hour
@@ -261,54 +321,9 @@ def step_scan(args, state, day):
         except Exception:
             pass
         return
-    # Independent Φ fair (same as kalshi-sp) — residual payout is never edge.
-    edge_proxy = 0.0
-    fair_p = None
-    fee_one = paper_sim.taker_fee(1, pick["ask"])
-    n = 0
     try:
         desk = _desk()
         cfg = desk.load_settings(DESK_ROOT)
-        venue_edge = float(desk.venue_min_edge("kalshi_inx", cfg))
-        if DESK_ROOT not in sys.path:
-            sys.path.insert(0, DESK_ROOT)
-        import desk_inx
-        fair = desk_inx.fair_evaluate(
-            pick,
-            venue_edge=venue_edge,
-            now=now,
-            settle_time_ct=str(CFG.get("settle_time_ct") or "15:00"),
-        )
-        if not fair.get("ok"):
-            reason = str(fair.get("reason") or desk_inx.refuse_residual_as_edge())
-            print(alerts.format_skip_note(day, reason))
-            if not args.dry_run:
-                logger.learn(f"{day}: no trade - {reason}", "skip")
-            try:
-                import desk_living
-                desk_living.record_eval_features(
-                    DESK_ROOT, bot="kalshi-sized", action="skip",
-                    series=CFG.get("series") or "KXINXU",
-                    ticker=str(pick.get("ticker") or ""),
-                    ev={"side": pick.get("side"), "ask": pick.get("ask"),
-                        "edge": fair.get("edge"), "fee": fee_one,
-                        "confidence": fair.get("p") or pick.get("ask")},
-                    reasons=[reason], note=reason[:160],
-                )
-            except Exception:
-                pass
-            return
-        edge_proxy = float(fair.get("edge") or 0.0)
-        fair_p = fair.get("p")
-        fee_one = float(fair.get("fee") if fair.get("fee") is not None else fee_one)
-        twin_block = desk_inx.twin_edge_blocks(
-            sized_edge=edge_proxy, venue_edge=venue_edge, extra=0.01,
-        )
-        if twin_block:
-            print(alerts.format_skip_note(day, twin_block))
-            if not args.dry_run:
-                logger.learn(f"{day}: no trade - {twin_block}", "skip")
-            return
         blocked = desk.correlation_blocks(DESK_ROOT, "kalshi-sized", pick["side"], edge_proxy)
         if blocked:
             print(blocked)
