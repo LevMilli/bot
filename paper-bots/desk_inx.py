@@ -391,6 +391,73 @@ def twin_edge_blocks(
     return ""
 
 
+def inx_learn_corr_reason(
+    desk,
+    root: str | None,
+    *,
+    market: str,
+    bot_id: str,
+    pick: dict,
+    edge,
+    hour_ct,
+) -> str:
+    """Learn / correlation skip for one INX pick. Empty = ok.
+
+    Callers must `continue` to the next fair-ranked sibling on a non-empty
+    reason — do not day-skip while another fee-clear side/bucket may clear.
+    Desk-wide entry_gate stays outside the sibling walk.
+    """
+    if desk is None or not isinstance(pick, dict):
+        return ""
+    try:
+        skip = desk.learning_skip(
+            desk.load_learning(root),
+            market,
+            desk.prob_bucket(pick.get("ask")),
+            side=pick.get("side"),
+            hour_ct=hour_ct,
+        )
+    except Exception:
+        skip = ""
+    if skip:
+        return str(skip)
+    try:
+        blocked = desk.correlation_blocks(root, bot_id, pick.get("side"), edge)
+    except Exception:
+        blocked = ""
+    return str(blocked or "")
+
+
+def first_policy_ok_pick(
+    ranked: list | None,
+    *,
+    policy_reason,
+) -> dict | None:
+    """Walk fair-ranked rows; return first pick where policy_reason(pick, edge) is empty.
+
+    `ranked` items are `{pick, fair, edge}` from `rank_by_fair`. Used by scans and tests
+    so learn/corr cold buckets cannot starve a fee-clear sibling.
+    """
+    for row in ranked or []:
+        if not isinstance(row, dict):
+            continue
+        pick = row.get("pick")
+        if not isinstance(pick, dict):
+            continue
+        edge = _finite(row.get("edge"))
+        if edge is None:
+            edge = _finite(pick.get("fair_edge"))
+        reason = ""
+        try:
+            reason = str(policy_reason(pick, edge) or "")
+        except Exception:
+            reason = ""
+        if reason:
+            continue
+        return {**row, "pick": pick, "edge": edge}
+    return None
+
+
 def _reasons_for_day(skip_days: dict, day: date) -> list[str]:
     raw = skip_days.get(str(day)) if isinstance(skip_days, dict) else None
     if not raw:

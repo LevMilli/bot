@@ -226,6 +226,7 @@ def step_scan(args, state, day):
     last_ob_miss = False
     last_reason = ""
     spot_px = chosen.get("spot")
+    hour_ct = dt.datetime.now(CT).hour
     sp_state = {}
     sp_path = os.path.join(SIBLING, "paper_state.json")
     try:
@@ -239,6 +240,7 @@ def step_scan(args, state, day):
         cfg = desk.load_settings(DESK_ROOT)
         venue_edge = float(desk.venue_min_edge("kalshi_inx", cfg))
     except Exception:
+        desk = None
         cfg = {}
     if DESK_ROOT not in sys.path:
         sys.path.insert(0, DESK_ROOT)
@@ -281,6 +283,15 @@ def step_scan(args, state, day):
         if twin_block:
             last_reason = twin_block
             continue
+        # Learn/corr are side×bucket keyed — continue to next fair sibling.
+        policy = desk_inx.inx_learn_corr_reason(
+            desk, DESK_ROOT,
+            market="S&P-sized", bot_id="kalshi-sized",
+            pick=confirmed, edge=edge_try, hour_ct=hour_ct,
+        )
+        if policy:
+            last_reason = policy
+            continue
         pick = confirmed
         ob = ob_try
         fair = fair_try
@@ -300,34 +311,8 @@ def step_scan(args, state, day):
         return
     try:
         desk = _desk()
-        hour_ct = dt.datetime.now(CT).hour
-        skip = desk.learning_skip(
-            desk.load_learning(DESK_ROOT), "S&P-sized", desk.prob_bucket(pick["ask"]),
-            side=pick.get("side"), hour_ct=hour_ct,
-        )
-    except Exception:
-        skip = ""
-    if skip:
-        print(skip)
-        try:
-            import desk_living
-            desk_living.record_eval_features(
-                DESK_ROOT, bot="kalshi-sized", action="skip",
-                series=CFG.get("series") or "KXINXU",
-                ticker=str(pick.get("ticker") or ""),
-                ev={"side": pick.get("side"), "ask": pick.get("ask"), "confidence": pick.get("ask")},
-                reasons=[skip], note=str(skip)[:160],
-            )
-        except Exception:
-            pass
-        return
-    try:
-        desk = _desk()
         cfg = desk.load_settings(DESK_ROOT)
-        blocked = desk.correlation_blocks(DESK_ROOT, "kalshi-sized", pick["side"], edge_proxy)
-        if blocked:
-            print(blocked)
-            return
+        # Desk-wide entry_gate — sibling retry cannot clear it.
         gate = desk.entry_gate(DESK_ROOT)
         if gate:
             print(gate)
