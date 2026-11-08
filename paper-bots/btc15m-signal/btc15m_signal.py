@@ -1910,6 +1910,34 @@ def main():
     eth_price = statistics.mean(eth_spots.values()) if eth_spots else None
     if eth_price is not None:
         print(f"\nETH spot avg ${eth_price:,.2f}  open KXETH15M windows: {len(eth_markets)}")
+    # Prefer-1/2: #436 early densify only fires when `not eth_markets`. Open ETH
+    # windows + all ETH spots down must not silent-break into a clean "Checked…
+    # No paper buy" CARD (dual BTC/ETH spot-down invent; commodity #434 sibling).
+    if eth_markets and eth_price is None:
+        eth_spot_reason = "spot failed (eth)"
+        print(
+            f"SKIP densify: {eth_spot_reason} "
+            f"({len(eth_markets)} open ETH window(s), no ETH spot)"
+        )
+        skip_reasons.append(eth_spot_reason)
+        skips += 1
+        _densify_skip_brain(
+            reasons=[eth_spot_reason],
+            note="btc eth spot densify",
+        )
+        if not IS_SHADOW:
+            try:
+                import desk_roi_plan
+                desk_roi_plan.record_empty_card(
+                    DESK_ROOT,
+                    bot="btc15m",
+                    seconds=time.perf_counter() - t0,
+                    markets_n=len(eth_markets),
+                    series="KXETH15M",
+                    note=eth_spot_reason,
+                )
+            except Exception:
+                pass
     eth_closes = []
     try:
         eth_closes = [c for _, c in candles_1m("ETH-USD")]
