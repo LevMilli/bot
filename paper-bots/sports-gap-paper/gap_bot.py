@@ -370,6 +370,33 @@ def espn_fair_home(summary, game):
         return espn_pregame_fair_home(summary)
     return None
 
+
+def _line_clv_fair_home(fair):
+    """Line CLV fair for green_boost — refuse exact 0/1 wipe as binary.
+
+    Hold-to-settle must densify a non-wipe close fair. Exact 0.0/1.0 is Kalshi
+    settle autopsy only and is excluded from green_boost n.
+    """
+    if fair is None:
+        return None
+    try:
+        f = float(fair)
+    except (TypeError, ValueError):
+        return None
+    if not (0.0 < f < 1.0):
+        return None
+    return f
+
+
+def _post_settle_fair_home(path, game, src, summary=None):
+    """Densify ESPN/model fair_home for a finalized open hold (green CLV)."""
+    try:
+        summ = summary if summary is not None else espn_summary(path, game["id"])
+        fair = nhl_model(summ, game) if src != "espn" else espn_fair_home(summ, game)
+        return _line_clv_fair_home(fair)
+    except Exception:
+        return None
+
 def ml_to_prob(ml):
     ml = float(ml)
     return 100 / (ml + 100) if ml > 0 else -ml / (-ml + 100)
@@ -759,7 +786,12 @@ def run():
     espn_secs = 0.0
     kalshi_secs = 0.0
     for league, (path, series, src) in SPORTS.items():
-        if league_cached_idle(path):
+        # Prefer-3: idle scoreboard must not skip a league we still hold open —
+        # post settles need to reach fair_home densify for green line CLV.
+        league_has_open = any(
+            str(k).startswith(f"{league}:") for k in open_by_game
+        )
+        if league_cached_idle(path) and not league_has_open:
             summary_out["leagues"][league] = "no live games"
             continue
         try:
@@ -820,7 +852,22 @@ def run():
             if g["state"] == "in":
                 summary_out["live_games"] += 1
             if g["state"] == "post":
-                live_info[key] = {"final": True, "game": g, "name": name, "score": score}
+                # Prefer-3: bare post was starving green line CLV (binary wipe).
+                # When we hold this game open, densify fair_home (+ pair) before settle.
+                entry = {
+                    "final": True, "game": g, "name": name, "score": score,
+                }
+                if key in open_by_game:
+                    fair_home = _post_settle_fair_home(path, g, src)
+                    if fair_home is not None:
+                        entry["fair_home"] = fair_home
+                    try:
+                        pair_post = match_event(g, markets)
+                        if pair_post:
+                            entry["pair"] = pair_post
+                    except Exception:
+                        pass
+                live_info[key] = entry
                 continue
             pair = match_event(g, markets)
             try:
@@ -1021,9 +1068,29 @@ def run():
                 summ = espn_summary(p["espn_path"], p["espn_id"])
                 comp = summ["header"]["competitions"][0]
                 if comp["status"]["type"]["state"] == "post":
-                    info = {"final": True, "game": {"home": next(c for c in comp["competitors"] if c["homeAway"] == "home"),
-                                                    "away": next(c for c in comp["competitors"] if c["homeAway"] == "away")},
-                            "name": p["game"], "score": comp["status"]["type"].get("shortDetail", "Final")}
+                    home = next(c for c in comp["competitors"] if c["homeAway"] == "home")
+                    away = next(c for c in comp["competitors"] if c["homeAway"] == "away")
+                    game_blob = {
+                        "id": p.get("espn_id"),
+                        "home": home,
+                        "away": away,
+                        "state": "post",
+                        "status": comp.get("status") or {},
+                    }
+                    # Prefer-3: densify line fair_home so green CLV is not binary wipe.
+                    league = str(p.get("league") or "")
+                    src = (SPORTS.get(league) or (None, None, "espn"))[2]
+                    fair_home = _post_settle_fair_home(
+                        p["espn_path"], game_blob, src, summary=summ,
+                    )
+                    info = {
+                        "final": True,
+                        "game": {"home": home, "away": away},
+                        "name": p["game"],
+                        "score": comp["status"]["type"].get("shortDetail", "Final"),
+                    }
+                    if fair_home is not None:
+                        info["fair_home"] = fair_home
             except Exception:
                 pass
         if info and info["final"]:
