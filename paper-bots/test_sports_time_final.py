@@ -75,6 +75,55 @@ class SportsTimeFinal(unittest.TestCase):
         self.assertTrue(hit["near_final"])
         self.assertTrue(hit["hit"])
 
+    def test_junk_display_clock_falls_through_to_short_detail(self):
+        """Unparseable displayClock must not invent rem=0 when shortDetail has mm:ss."""
+        # Pre-fix: except→0.0 poisoned t-final (rem=0) despite honest shortDetail.
+        for junk in ("N/A", "--", ":", "FINAL-ISH"):
+            clock_s = desk_roi_plan._sports_clock_seconds(
+                {
+                    "period": 4,
+                    "displayClock": junk,
+                    "type": {
+                        "name": "STATUS_IN_PROGRESS",
+                        "shortDetail": "3:42 - 4th",
+                    },
+                },
+            )
+            self.assertAlmostEqual(clock_s, 3 * 60 + 42, places=2, msg=junk)
+            rem = desk_roi_plan.sports_minutes_remaining(
+                {
+                    "period": 4,
+                    "displayClock": junk,
+                    "type": {
+                        "name": "STATUS_IN_PROGRESS",
+                        "shortDetail": "3:42 - 4th",
+                    },
+                },
+                league="NFL",
+            )
+            self.assertAlmostEqual(rem, 3.0 + 42 / 60.0, places=2, msg=junk)
+        # Empty displayClock still means end-of-slice (#416) — not junk fallthrough.
+        self.assertEqual(
+            desk_roi_plan._sports_clock_seconds({"period": 4, "displayClock": ""}),
+            0.0,
+        )
+        # Junk + End token (no mm:ss) → honest 0s via End densify, not period_min.
+        self.assertEqual(
+            desk_roi_plan._sports_clock_seconds(
+                {
+                    "period": 4,
+                    "displayClock": "N/A",
+                    "type": {"name": "STATUS_END_PERIOD", "detail": "End of 4th"},
+                },
+            ),
+            0.0,
+        )
+        # Junk + no shortDetail/End → None → period_min (conservative DROP).
+        rem_miss = desk_roi_plan.sports_minutes_remaining(
+            {"period": 4, "displayClock": "N/A"}, league="NFL",
+        )
+        self.assertAlmostEqual(rem_miss, 15.0, places=2)
+
     def test_short_detail_mmss_densifies_when_display_clock_absent(self):
         """ESPN often puts live clock only in shortDetail — must not invent rem=period."""
         self.assertAlmostEqual(
