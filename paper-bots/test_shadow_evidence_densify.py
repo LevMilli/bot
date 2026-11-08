@@ -226,6 +226,58 @@ class ShadowEvidenceDensify(unittest.TestCase):
             self.assertFalse(out2["auto_promote"])
             self.assertFalse(out2["live"])
 
+    def test_repair_clv_upgrades_wipe_from_time_final_mark(self):
+        """WVUTTU-shaped: binary fair_close=1.0 + t-final bid 0.83 → line CLV."""
+        with tempfile.TemporaryDirectory() as tmp:
+            desk_more.record_sports_clv(
+                tmp,
+                ticker="KXNCAAFGAME-26NOV07WVUTTU-TTU",
+                side="home",
+                fair_entry=0.9271,
+                close_fair=1.0,
+                pnl=3.45,
+                league="NCAAF",
+                exit_reason="settled",
+            )
+            # Untagged wipe close is excluded from green_boost.
+            state = desk_more.load_clv(tmp)
+            state["rows"][0]["clv_kind"] = None
+            desk_more.save_clv(state, tmp)
+            before = desk_more.clv_summary(tmp)
+            self.assertEqual(before["n"], 0)
+            self.assertEqual(before["binary_excluded_n"], 1)
+            # Organic mid-open mark already on time-final journal.
+            desk_roi_plan._save(
+                desk_roi_plan._path(desk_roi_plan.SPORTS_TIME_FINAL_SHADOW, tmp),
+                {
+                    "paper_only": True,
+                    "version": 1,
+                    "live": False,
+                    "rows": [{
+                        "ticker": "KXNCAAFGAME-26NOV07WVUTTU-TTU",
+                        "side": "home",
+                        "bid": 0.83,
+                        "minutes_left": 1.4,
+                        "shadow_only": True,
+                    }],
+                },
+            )
+            out = desk_roi_plan.repair_clv_completeness(tmp)
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out.get("mark_upgraded"), 1)
+            self.assertGreaterEqual(out["repaired"], 1)
+            again = desk_more.load_clv(tmp)
+            row = again["rows"][0]
+            self.assertEqual(row.get("clv_kind"), "line")
+            self.assertAlmostEqual(float(row["fair_close"]), 0.83, places=4)
+            self.assertAlmostEqual(float(row["clv"]), 0.9271 - 0.83, places=4)
+            after = desk_more.clv_summary(tmp)
+            self.assertEqual(after["n"], 1)
+            self.assertEqual(after["binary_excluded_n"], 0)
+            # Idempotent — second pass does not re-upgrade.
+            out2 = desk_roi_plan.repair_clv_completeness(tmp)
+            self.assertEqual(out2.get("mark_upgraded"), 0)
+
     def test_exports_observe_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             nm = desk_roi_plan.export_near_miss_shadow_csv(tmp)
