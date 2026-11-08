@@ -1899,6 +1899,18 @@ def main():
             break
         key = (m["ticker"], "YES" if eth_price > m["target"] else "NO")
         if key in eth_errs:
+            # BTC densifies prefetch book failures into scored reasons → CARD/brain;
+            # ETH must not silent-continue (skip_board / CARD lie).
+            eth_ob = f"orderbook failed ({eth_errs[key]})"
+            print(f"--- ETH {m['ticker']} SKIP -> {eth_ob}")
+            skips += 1
+            skip_reasons.append(eth_ob)
+            _densify_skip_brain(
+                reasons=[eth_ob],
+                ticker=str(m.get("ticker") or ""),
+                side=str(key[1] or ""),
+                note="ETH orderbook densify",
+            )
             continue
         ev_early = evaluate_window(
             m, eth_price, eth_closes, dvol, False, edge_buf,
