@@ -895,7 +895,7 @@ def run():
                 })
             # Closing-line value: entry fair vs last model/market fair — never binary 0/1.
             # Binary settle proxies invert beat-close (wins always "lose" CLV) and starve green_boost.
-            # Prefer stashed last_fair from mid-open ticks; refuse Kalshi wipe 0/1 as line.
+            # Prefer stashed last_fair / last_mark from mid-open ticks; refuse Kalshi wipe 0/1 as line.
             try:
                 if DESK_ROOT not in sys.path:
                     sys.path.insert(0, DESK_ROOT)
@@ -908,13 +908,17 @@ def run():
                         else 1.0 - float(info["fair_home"])
                     )
                 if close_fair is None:
-                    for key in ("last_fair", "fair_at_exit"):
+                    for key in ("last_fair", "fair_at_exit", "last_mark"):
                         if p.get(key) is not None:
                             try:
                                 close_fair = float(p.get(key))
                             except (TypeError, ValueError):
                                 close_fair = None
                             if close_fair is not None:
+                                # last_mark is a market bid — only accept non-wipe line.
+                                if key == "last_mark" and not (0.0 < float(close_fair) < 1.0):
+                                    close_fair = None
+                                    continue
                                 break
                 if close_fair is None:
                     pair_clv = info.get("pair") if isinstance(info, dict) else None
@@ -1062,6 +1066,15 @@ def run():
                     p["last_fair"] = round(float(fair), 4)
                 except (TypeError, ValueError):
                     pass
+            # When model fair is absent, stash mid-open Kalshi mark (non-wipe) so
+            # settle CLV can stay line — HS/t-final already densify from bid alone.
+            if bid is not None:
+                try:
+                    bid_f = float(bid)
+                except (TypeError, ValueError):
+                    bid_f = None
+                if bid_f is not None and 0.0 < bid_f < 1.0:
+                    p["last_mark"] = round(bid_f, 4)
             exit_reason = None
             # Hard-stop / time-final shadow need a bid; live sell stays off until promote.
             if bid is not None:

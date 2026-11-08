@@ -107,7 +107,9 @@ class TradeWinClvCushionTests(unittest.TestCase):
         with open(gap_path, encoding="utf-8") as fh:
             src = fh.read()
         self.assertIn('p["last_fair"]', src)
+        self.assertIn('p["last_mark"]', src)
         self.assertIn("last_fair", src)
+        self.assertIn("last_mark", src)
         self.assertIn('clv_kind = "binary"', src)
         self.assertIn("refuse kalshi wipe 0/1 as line", src.lower())
         # last_fair line close counts toward green_boost; wipe binary does not.

@@ -5203,11 +5203,50 @@ def clv_completeness(root: str | None = None) -> dict:
     }
 
 
+def _shadow_exit_mark_by_ticker(root: str | None = None) -> dict[str, dict]:
+    """Ticker → organic mid-open bid from time-final then hard-stop journals (non-wipe only)."""
+    out: dict[str, dict] = {}
+    for name, src in (
+        (SPORTS_TIME_FINAL_SHADOW, "time_final"),
+        (SPORTS_HARD_STOP_SHADOW, "hard_stop"),
+    ):
+        try:
+            store = _load(_path(name, root), {"rows": []})
+        except Exception:
+            continue
+        for row in store.get("rows") or []:
+            if not isinstance(row, dict):
+                continue
+            ticker = str(row.get("ticker") or "").strip()
+            if not ticker or ticker in out:
+                continue
+            bid = _finite(row.get("bid"))
+            if bid is None or not (0.0 < float(bid) < 1.0):
+                continue
+            out[ticker] = {
+                "bid": float(bid),
+                "source": src,
+                "side": row.get("side"),
+            }
+    return out
+
+
+def _clv_close_is_binary_proxy(row: dict) -> bool:
+    """True when close is an exact 0/1 settle wipe (or tagged binary)."""
+    kind = str(row.get("clv_kind") or "").strip().lower()
+    if kind == "binary":
+        return True
+    fc = _finite(row.get("fair_close"))
+    if fc is None:
+        fc = _finite(row.get("close_fair"))
+    return fc is not None and (abs(float(fc) - 0.0) < 1e-12 or abs(float(fc) - 1.0) < 1e-12)
+
+
 def repair_clv_completeness(root: str | None = None) -> dict:
-    """Observe repair: recompute clv when both fairs exist; never invent binary close.
+    """Observe repair: recompute clv when both fairs exist; upgrade wipe closes from exit journals.
 
     Fail-closed when fair_entry or close_fair is missing. Never arms green_boost. Never LIVE.
-    Binary 0/1 settle proxies invert beat-close — do not synthesize them here.
+    Never invents marks — only rewrites binary 0/1 closes when HS/t-final journals hold bid ∈ (0,1).
     """
     try:
         import desk_more
@@ -5223,7 +5262,9 @@ def repair_clv_completeness(root: str | None = None) -> dict:
             "auto_promote": False,
             "fee_floors_locked": True,
         }
+    marks = _shadow_exit_mark_by_ticker(root)
     repaired = 0
+    mark_upgraded = 0
     skipped = 0
     out: list = []
     for row in rows:
@@ -5234,7 +5275,30 @@ def repair_clv_completeness(root: str | None = None) -> dict:
         if not _clv_is_settled_row(item):
             out.append(item)
             continue
-        if clv_row_complete(item):
+        # Upgrade binary wipe closes from organic HS/t-final mid-open marks.
+        if _clv_has_entry(item) and _clv_close_is_binary_proxy(item):
+            ticker = str(item.get("ticker") or "").strip()
+            mark = marks.get(ticker) if ticker else None
+            if mark and 0.0 < float(mark["bid"]) < 1.0:
+                fe = _finite(item.get("fair_entry"))
+                if fe is None:
+                    fe = _finite(item.get("entry_fair"))
+                fc = float(mark["bid"])
+                item["fair_close"] = round(fc, 4)
+                item["close_fair"] = round(fc, 4)
+                if fe is not None:
+                    item["clv"] = round(float(fe) - fc, 4)
+                item["clv_kind"] = "line"
+                item["repaired_at"] = _now()
+                item["repair_note"] = (
+                    f"clv catch-up from {mark['source']} mark "
+                    f"(replaced wipe close; never invent)"
+                )
+                repaired += 1
+                mark_upgraded += 1
+                out.append(item)
+                continue
+        if clv_row_complete(item) and not _clv_close_is_binary_proxy(item):
             out.append(item)
             continue
         if not _clv_has_entry(item):
@@ -5284,6 +5348,7 @@ def repair_clv_completeness(root: str | None = None) -> dict:
     return {
         "ok": True,
         "repaired": repaired,
+        "mark_upgraded": mark_upgraded,
         "skipped": skipped,
         "completeness": board,
         "paper_only": True,
@@ -5291,7 +5356,10 @@ def repair_clv_completeness(root: str | None = None) -> dict:
         "auto_promote": False,
         "fee_floors_locked": True,
         "live": False,
-        "note": "CLV completeness repair — observe only; never arms green_boost.",
+        "note": (
+            "CLV completeness repair — observe only; upgrades wipe closes from "
+            "HS/t-final marks; never arms green_boost; never invents."
+        ),
     }
 
 
