@@ -5345,9 +5345,24 @@ def sports_green_boost_status(
                 if neg else f"weeks {len(sports_weeks)}/{SPORTS_GREEN_BOOST_WEEKS}"
             )
     if not hist_ok:
-        missing.append(f"sports_m1_n {sports_n}/{SPORTS_M1_MIN_N}")
+        # Same board-truth class as weeks (#428): "sports_m1_n 30/20" reads as
+        # the n bar cleared when hist actually fails on expectancy<0 / missing.
+        if sports_n < SPORTS_M1_MIN_N:
+            missing.append(f"sports_m1_n {sports_n}/{SPORTS_M1_MIN_N}")
+        elif sports_exp is None:
+            missing.append(f"sports_m1_exp missing (n={sports_n})")
+        else:
+            missing.append(f"sports_m1<0 ({sports_exp})")
     if not clv_ok:
-        missing.append(f"clv {clv_n}/{SPORTS_CLV_MIN_N} rate={clv_rate}")
+        # Mirror weeks/hist: n-met + rate fail must not look like clv 25/20 cleared.
+        if clv_n < SPORTS_CLV_MIN_N:
+            missing.append(f"clv {clv_n}/{SPORTS_CLV_MIN_N} rate={clv_rate}")
+        elif clv_rate is None:
+            missing.append(f"clv_rate missing (n={clv_n})")
+        else:
+            missing.append(
+                f"clv_rate<{SPORTS_CLV_BAR:g} ({clv_rate} n={clv_n})"
+            )
     evidence_thin = not ready
     return {
         "paper_only": True,

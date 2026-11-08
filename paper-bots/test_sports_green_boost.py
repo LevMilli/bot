@@ -187,6 +187,47 @@ class SportsGreenBoost(unittest.TestCase):
             self.assertIn("2026-11-08", miss)
             self.assertNotIn("weeks 2/2", miss)
 
+    def test_green_missing_names_underwater_hist_not_n_bar_cleared(self):
+        """n≥bar with expectancy_taxed<0 must not emit false-friend sports_m1_n 30/20."""
+        with tempfile.TemporaryDirectory() as tmp:
+            # Heavy losers → firm_taxed_m1 expectancy < 0 with n≥20.
+            hist = [{"pnl": -1.0, "contracts": 1} for _ in range(25)]
+            hist += [{"pnl": 0.1, "contracts": 1} for _ in range(5)]
+            bots = [{"id": "sports-gap", "history": hist, "gate_a": {"ready": True}}]
+            st = desk_roi_plan.sports_green_boost_status(tmp, bots=bots)
+            self.assertFalse(st["hist_ok"])
+            self.assertGreaterEqual(int(st["sports_m1_n"]), desk_roi_plan.SPORTS_M1_MIN_N)
+            self.assertIsNotNone(st["sports_m1"])
+            self.assertLess(float(st["sports_m1"]), 0.0)
+            miss = " ".join(st.get("missing") or [])
+            self.assertIn("sports_m1<0", miss)
+            self.assertNotIn(
+                f"sports_m1_n {st['sports_m1_n']}/{desk_roi_plan.SPORTS_M1_MIN_N}",
+                miss,
+            )
+
+    def test_green_missing_names_clv_rate_fail_not_n_bar_cleared(self):
+        """CLV n≥bar with beat-close below bar must not emit false-friend clv 25/20."""
+        with tempfile.TemporaryDirectory() as tmp:
+            for i in range(25):
+                desk_more.record_sports_clv(
+                    tmp,
+                    ticker=f"KX-{i}",
+                    side="home",
+                    fair_entry=0.60,
+                    close_fair=0.50 if i < 10 else 0.70,  # 10/25 = 0.40 beat
+                    pnl=0.05,
+                )
+            st = desk_roi_plan.sports_green_boost_status(tmp, bots=[])
+            self.assertFalse(st["clv_ok"])
+            self.assertGreaterEqual(int(st["clv_n"]), desk_roi_plan.SPORTS_CLV_MIN_N)
+            miss = " ".join(st.get("missing") or [])
+            self.assertIn("clv_rate<", miss)
+            self.assertNotIn(
+                f"clv {st['clv_n']}/{desk_roi_plan.SPORTS_CLV_MIN_N}",
+                miss,
+            )
+
     def test_ready_when_weeks_hist_clv(self):
         with tempfile.TemporaryDirectory() as tmp:
             hist = [{"pnl": 0.10, "contracts": 1} for _ in range(20)]
