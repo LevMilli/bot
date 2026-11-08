@@ -236,31 +236,121 @@ def step_scan(args, state, day):
         except Exception:
             pass
         return
-    # Same structural pause as kalshi-sp: residual payout is not independent edge.
+    # Independent Φ fair (same as kalshi-sp) — residual payout is never edge.
+    edge_proxy = 0.0
+    fair_p = None
     fee_one = paper_sim.taker_fee(1, pick["ask"])
+    n = 0
     try:
+        desk = _desk()
+        cfg = desk.load_settings(DESK_ROOT)
+        venue_edge = float(desk.venue_min_edge("kalshi_inx", cfg))
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_inx
-        reason = desk_inx.refuse_residual_as_edge()
+        fair = desk_inx.fair_evaluate(
+            pick,
+            venue_edge=venue_edge,
+            now=now,
+            settle_time_ct=str(CFG.get("settle_time_ct") or "15:00"),
+        )
+        if not fair.get("ok"):
+            reason = str(fair.get("reason") or desk_inx.refuse_residual_as_edge())
+            print(alerts.format_skip_note(day, reason))
+            if not args.dry_run:
+                logger.learn(f"{day}: no trade - {reason}", "skip")
+            try:
+                import desk_living
+                desk_living.record_eval_features(
+                    DESK_ROOT, bot="kalshi-sized", action="skip",
+                    series=CFG.get("series") or "KXINXU",
+                    ticker=str(pick.get("ticker") or ""),
+                    ev={"side": pick.get("side"), "ask": pick.get("ask"),
+                        "edge": fair.get("edge"), "fee": fee_one,
+                        "confidence": fair.get("p") or pick.get("ask")},
+                    reasons=[reason], note=reason[:160],
+                )
+            except Exception:
+                pass
+            return
+        edge_proxy = float(fair.get("edge") or 0.0)
+        fair_p = fair.get("p")
+        fee_one = float(fair.get("fee") if fair.get("fee") is not None else fee_one)
+        twin_block = desk_inx.twin_edge_blocks(
+            sized_edge=edge_proxy, venue_edge=venue_edge, extra=0.01,
+        )
+        if twin_block:
+            print(alerts.format_skip_note(day, twin_block))
+            if not args.dry_run:
+                logger.learn(f"{day}: no trade - {twin_block}", "skip")
+            return
+        blocked = desk.correlation_blocks(DESK_ROOT, "kalshi-sized", pick["side"], edge_proxy)
+        if blocked:
+            print(blocked)
+            return
+        gate = desk.entry_gate(DESK_ROOT)
+        if gate:
+            print(gate)
+            return
+        open_risk = _desk_open_risk(desk)
+        dollars = desk.stake_dollars_for(
+            "kalshi-sized",
+            pick["ask"],
+            edge=edge_proxy,
+            cfg=cfg,
+            open_risk_used=open_risk,
+            ask=pick["ask"],
+            root=DESK_ROOT,
+        )
+        n = desk.contracts_for_stake(pick["ask"], dollars)
+        while n >= 1 and n * pick["ask"] + paper_sim.taker_fee(n, pick["ask"]) > float(state["bankroll"]) + 1e-9:
+            n -= 1
+    except Exception as exc:
+        print(f"Desk sizing / fair unavailable ({exc}); falling back to local max stake.")
+        n = risk_manager.stake_contracts(pick["ask"], bankroll=state["bankroll"])
+    if n < 1:
+        print(alerts.format_skip_note(day, "not enough paper bankroll / stake for 1 contract after fee"))
+        if not args.dry_run:
+            logger.learn(f"{day}: no trade - bankroll/stake too small after fee", "skip")
+        return
+    fee = paper_sim.taker_fee(n, pick["ask"])
+    preview = {
+        "ticker": pick["ticker"],
+        "side": pick["side"],
+        "ask": pick["ask"],
+        "contracts": n,
+        "cost": round(n * pick["ask"], 2),
+        "fee": fee,
+    }
+    if args.dry_run:
+        print(alerts.format_trade_note(preview, state["bankroll"] - preview["cost"] - fee, dry_run=True))
+        return
+    pos = paper_sim.open_position(state, day, ev, pick, n, now.isoformat(timespec="seconds"))
+    pos["why"] = (
+        f"Sized paper buy (Φ fair). Ask in band; desk Kelly-lite sized {n} contracts."
+    )
+    try:
+        import desk_profit
+        pos["risk_factor"] = desk_profit.risk_factor_for("kalshi-sized", pick["side"])
+        pos["gap_at_entry"] = round(float(edge_proxy), 4)
+        pos["fair_at_entry"] = round(float(fair_p if fair_p is not None else pick["ask"]), 4)
     except Exception:
-        reason = "no independent fair — residual payout is not edge"
-    print(alerts.format_skip_note(day, reason))
+        pass
     try:
         import desk_living
         desk_living.record_eval_features(
-            DESK_ROOT, bot="kalshi-sized", action="skip",
+            DESK_ROOT, bot="kalshi-sized", action="buy",
             series=CFG.get("series") or "KXINXU",
             ticker=str(pick.get("ticker") or ""),
-            ev={"side": pick.get("side"), "ask": pick.get("ask"), "edge": 0.0,
-                "fee": fee_one, "confidence": pick.get("ask")},
-            reasons=[reason], note=reason[:160],
+            ev={"side": pick.get("side"), "ask": pick.get("ask"), "fee": fee_one,
+                "edge": edge_proxy, "confidence": fair_p or pick.get("ask")},
+            note="paper buy kalshi-sized (Φ fair)",
         )
     except Exception:
         pass
-    if not args.dry_run:
-        logger.learn(f"{day}: no trade - {reason}", "skip")
-    return
+    paper_sim.save_state(state)
+    logger.ledger_open(pos, state["bankroll"])
+    print(alerts.format_trade_note(pos, state["bankroll"]))
 
 
 def step_settle(args, state, day):
