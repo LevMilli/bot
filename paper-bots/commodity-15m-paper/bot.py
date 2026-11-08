@@ -1443,12 +1443,14 @@ def main() -> int:
             except Exception:
                 pass
         else:
+            block_note = str(msg)[:160] or "desk/account blocked fill"
+            skip_reasons.append(block_note)  # CARD densify parity with BTC
             try:
                 import desk_roi_plan
                 desk_roi_plan.record_fit(
                     DESK_ROOT, bot="commodity-15m", outcome="block",
                     ticker=str(ev.get("ticker") or ""), side=str(ev.get("side") or ""),
-                    edge=ev.get("edge"), note=msg[:160],
+                    edge=ev.get("edge"), note=block_note,
                 )
                 why = str(msg or "").lower()
                 if any(
@@ -1464,6 +1466,15 @@ def main() -> int:
                     )
             except Exception:
                 pass
+            _densify_evaluate_skip(
+                reasons=[block_note],
+                ticker=str(ev.get("ticker") or ""),
+                side=str(ev.get("side") or ""),
+                edge=ev.get("edge"),
+                confidence=ev.get("p"),
+                depth=ev.get("depth"),
+                note="commodity desk-block densify",
+            )
     save_account(account)
     try:
         import desk_roi_plan
