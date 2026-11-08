@@ -714,9 +714,12 @@ def run():
                     "final": False, "game": g, "pair": None, "fair_home": fair_home,
                     "name": name, "score": score,
                 }
+                miss = "no Kalshi match - skip"
                 lines.append(
-                    f"| {ts} | {league} | {name} | {score} | | | | | no Kalshi match - skip |"
+                    f"| {ts} | {league} | {name} | {score} | | | | | {miss} |"
                 )
+                # Densify match-miss into CARD skips (buy path stays off).
+                summary_out["skips"].append(miss)
                 continue
             summary_out["matched"] += 1
             hb, ha = px(pair["home"], "yes_bid_dollars"), px(pair["home"], "yes_ask_dollars")
@@ -727,14 +730,20 @@ def run():
                   f" | {hb}/{ha} | {ab}/{aa} | "
             live_info[key] = {"final": False, "game": g, "pair": pair, "fair_home": fair_home, "name": name, "score": score}
             if fair_home is None:
-                lines.append(row + " | no fair prob - skip |"); continue
+                reason = "no fair prob - skip"
+                lines.append(row + f" | {reason} |")
+                summary_out["skips"].append(reason)
+                continue
             # best side
             cands = []
             for side, m, fair, bid, ask in (("home", pair["home"], fair_home, hb, ha), ("away", pair["away"], 1 - fair_home, ab, aa)):
                 if ask is None or bid is None: continue
                 cands.append((fair - ask - fee(ask), side, m, fair, bid, ask))
             if not cands:
-                lines.append(row + " | no prices - skip |"); continue
+                reason = "no prices - skip"
+                lines.append(row + f" | {reason} |")
+                summary_out["skips"].append(reason)
+                continue
             gap, side, m, fair, bid, ask = max(cands, key=lambda c: c[0])
             gtxt = f"{gap*100:+.1f} pts on {m.get('yes_sub_title')} (fair {fair:.1%} vs ask {ask:.2f})"
             base_need = need_edge if src == "espn" else round(need_edge + 0.02, 4)
@@ -776,7 +785,6 @@ def run():
                 )
                 if skip:
                     reason = skip
-                    summary_out["skips"].append(skip)
             alarm = tip_alarm_band(g) if g.get("state") == "pre" else None
             tip_window = alarm is not None or (
                 g.get("state") == "pre" and tip_within_minutes(g)
@@ -835,7 +843,10 @@ def run():
                 except Exception:
                     pass
             if reason:
-                lines.append(row + gtxt + f" | {reason} |"); continue
+                lines.append(row + gtxt + f" | {reason} |")
+                # Densify evaluate rejects into CARD skips (was learning_skip-only).
+                summary_out["skips"].append(reason)
+                continue
             if alarm is not None:
                 print(f"  TIP-ALARM T−{alarm}: {league} {name} (fee-aware priority, edge still required)")
             buy_candidates.append({
@@ -1637,6 +1648,7 @@ def run():
                     )
         if reason:
             lines.append(row + gtxt + f" | {reason} |")
+            summary_out["skips"].append(reason)
             # Soft near-miss on late buy-path skips (mirror early eval path).
             try:
                 if DESK_ROOT not in sys.path:
@@ -1859,11 +1871,11 @@ def run():
     except Exception:
         pass
     print(_card_line(summary_out))
-    if before_book == after_book:
-        print(json.dumps(summary_out, indent=2))
-        return
+    # Always densify evaluate rows into paper_trades — book-unchanged ticks used
+    # to return before log(), leaving matched>0 with skips=[] and a stale md log.
     log(lines)
-    save_state(s)
+    if before_book != after_book:
+        save_state(s)
     print(json.dumps(summary_out, indent=2))
 
 if __name__ == "__main__":
