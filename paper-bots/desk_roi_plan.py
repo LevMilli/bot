@@ -3563,6 +3563,7 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
     """
     labeled = {"ok": False, "labeled": 0, "labeled_n": 0}
     backfilled = {"ok": False, "recorded": 0}
+    fee_ledger_bf = {"ok": False, "recorded": 0}
     repaired = {"ok": False, "repaired": 0}
     sports_exit = {"ok": False, "recorded": 0}
     hs_repair = {"ok": False, "removed": 0}
@@ -3578,6 +3579,11 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
     except Exception as exc:  # noqa: BLE001
         errors.append(f"helper:{type(exc).__name__}")
         backfilled = {"ok": False, "recorded": 0, "error": type(exc).__name__}
+    try:
+        fee_ledger_bf = backfill_fee_ledger_from_closed(root)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"fee_ledger:{type(exc).__name__}")
+        fee_ledger_bf = {"ok": False, "recorded": 0, "error": type(exc).__name__}
     try:
         repaired = repair_clv_completeness(root)
     except Exception as exc:  # noqa: BLE001
@@ -3637,6 +3643,7 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
         "labeled_n": status.get("labeled_n"),
         "labeled": int(labeled.get("labeled") or 0),
         "backfilled": int(backfilled.get("recorded") or 0),
+        "fee_ledger_recorded": int(fee_ledger_bf.get("recorded") or 0),
         "repaired": int(repaired.get("repaired") or 0),
         "sports_exit_shadow": int(sports_exit.get("recorded") or 0),
         "commodity_tstop_shadow": int(commodity_tstop.get("recorded") or 0),
@@ -3646,6 +3653,7 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
         "journals_created": list(journals_ensured.get("created") or []),
         "near_miss_label": labeled,
         "helper_backfill": backfilled,
+        "fee_ledger_backfill": fee_ledger_bf,
         "clv_repair": repaired,
         "hard_stop_repair": hs_repair,
         "time_final_repair": tf_repair,
@@ -8634,7 +8642,24 @@ def record_fee_ledger(
     kind: str = "fill",
     note: str = "",
 ) -> dict:
-    """Persist fee + fill-tax row so firm ROI can be audited."""
+    """Persist fee + fill-tax row so firm ROI can be audited.
+
+    Idempotent on non-empty fill_id (catchup / re-settle safe). Never invents
+    fee rows without a caller; fee floors stay locked.
+    """
+    path = _path(FEE_LEDGER_NAME, root)
+    store = _load(path, {"paper_only": True, "rows": [], "by_bot": {}})
+    rows = list(store.get("rows") or [])
+    fid = str(fill_id or "")[:80]
+    if fid:
+        for existing in rows:
+            if isinstance(existing, dict) and str(existing.get("fill_id") or "") == fid:
+                return {
+                    "recorded": False,
+                    "reason": "fill_id already present",
+                    "row": existing,
+                    "idempotent": True,
+                }
     n = _finite(contracts) or 1.0
     px = _finite(price)
     fee_n = _finite(fee)
@@ -8656,14 +8681,11 @@ def record_fee_ledger(
         "fee_plus_tax": round(float(fee_n) + tax_n, 4),
         "pnl": pnl_n,
         "pnl_taxed": taxed_pnl,
-        "fill_id": str(fill_id or "")[:80],
+        "fill_id": fid,
         "note": str(note or "")[:160],
         "paper_only": True,
         "fee_floors_locked": True,
     }
-    path = _path(FEE_LEDGER_NAME, root)
-    store = _load(path, {"paper_only": True, "rows": [], "by_bot": {}})
-    rows = list(store.get("rows") or [])
     rows.append(row)
     store["rows"] = rows[-MAX_FEE_LEDGER_ROWS:]
     by = store.get("by_bot") if isinstance(store.get("by_bot"), dict) else {}
@@ -8674,6 +8696,164 @@ def record_fee_ledger(
     store["last_at"] = row["at"]
     _save(path, store)
     return {"recorded": True, "row": row}
+
+
+def backfill_fee_ledger_from_closed(root: str | None = None) -> dict:
+    """Catch-up: densify fee ledger from tower closed[] / history.
+
+    Uses stored fee or price→estimate only — never invents closes or fee
+    amounts without a price/fee on the source row. Idempotent by fill_id
+    (and skips bot+ticker already in ledger). Observe densify only.
+    """
+    base = _root(root)
+    sources = (
+        (os.path.join(base, "btc15m-signal", "paper_account.json"), "btc15m", "btc"),
+        (
+            os.path.join(base, "btc15m-signal", "shadow_edge08_account.json"),
+            "btc15m",
+            "edge08",
+        ),
+        (
+            os.path.join(base, "commodity-15m-paper", "paper_account.json"),
+            "commodity-15m",
+            "cmd",
+        ),
+        (os.path.join(base, "sports-gap-paper", "state.json"), "sports-gap", "sports"),
+        (
+            os.path.join(base, "kalshi-sp500-paper", "paper_state.json"),
+            "kalshi-sp",
+            "inx",
+        ),
+        (
+            os.path.join(base, "kalshi-sized-paper", "paper_state.json"),
+            "kalshi-sized",
+            "sized",
+        ),
+    )
+    store = _load(_path(FEE_LEDGER_NAME, root), {"paper_only": True, "rows": []})
+    ledger = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    ledger_keys: set = set()
+    for r in ledger:
+        fid = str(r.get("fill_id") or "").strip()
+        if fid:
+            ledger_keys.add(("id", fid))
+        tick = str(r.get("ticker") or "").strip()
+        bot = str(r.get("bot") or "").strip()
+        if tick and bot:
+            ledger_keys.add(("bt", bot, tick))
+
+    recorded = 0
+    skipped = 0
+    closed_n = 0
+    samples: list[dict] = []
+    sources_seen: list[str] = []
+    hist_bots: list[dict] = []
+
+    for acct_path, bot_id, id_prefix in sources:
+        try:
+            with open(acct_path, encoding="utf-8") as handle:
+                acct = json.load(handle)
+        except Exception:
+            acct = {}
+        if not isinstance(acct, dict):
+            acct = {}
+        closed = [
+            c
+            for c in list(acct.get("closed") or []) + list(acct.get("history") or [])
+            if isinstance(c, dict)
+        ]
+        if closed:
+            sources_seen.append(os.path.basename(acct_path))
+        closed_n += len(closed)
+        hist_rows: list[dict] = []
+        for pos in closed:
+            pnl = _finite(pos.get("pnl") if pos.get("pnl") is not None else pos.get("pnl_usd"))
+            if pnl is None:
+                skipped += 1
+                continue
+            tick = str(pos.get("ticker") or pos.get("what") or "").strip()
+            fee_n = _finite(pos.get("fee"))
+            px = None
+            for key in ("ask", "entry", "entry_price", "price", "exit_price"):
+                px = _finite(pos.get(key))
+                if px is not None:
+                    break
+            # Never invent fee without a stored fee or a price to estimate from.
+            if fee_n is None and px is None:
+                skipped += 1
+                continue
+            fill_id = str(pos.get("fill_id") or "").strip()
+            if not fill_id:
+                fill_id = (
+                    f"{id_prefix}:{tick}:"
+                    f"{pos.get('closed') or pos.get('at') or pos.get('day') or ''}"
+                )[:80]
+            if fill_id and ("id", fill_id) in ledger_keys:
+                skipped += 1
+                hist_rows.append({"ticker": tick, "pnl": pnl, "fill_id": fill_id})
+                continue
+            if tick and ("bt", bot_id, tick) in ledger_keys:
+                skipped += 1
+                hist_rows.append({"ticker": tick, "pnl": pnl, "fill_id": fill_id})
+                continue
+            out = record_fee_ledger(
+                root,
+                bot=bot_id,
+                ticker=tick,
+                side=str(pos.get("side") or "")[:20],
+                price=px,
+                contracts=pos.get("contracts"),
+                fee=fee_n,
+                pnl=pnl,
+                fill_id=fill_id,
+                kind="catchup",
+                note=f"catchup from {os.path.basename(acct_path)}",
+            )
+            hist_rows.append({"ticker": tick, "pnl": pnl, "fill_id": fill_id})
+            if out.get("recorded"):
+                recorded += 1
+                ledger_keys.add(("id", fill_id))
+                if tick:
+                    ledger_keys.add(("bt", bot_id, tick))
+                if len(samples) < 8:
+                    samples.append({
+                        "bot": bot_id,
+                        "ticker": tick,
+                        "fill_id": fill_id,
+                        "source": os.path.basename(acct_path),
+                        "fee": (out.get("row") or {}).get("fee"),
+                    })
+            else:
+                skipped += 1
+        if hist_rows:
+            hist_bots.append({"id": bot_id, "history": hist_rows})
+
+    complete = fee_ledger_completeness(root, bots=hist_bots) if hist_bots else {
+        "history_n": 0, "matched": 0, "rate": None,
+    }
+    return {
+        "ok": True,
+        "recorded": recorded,
+        "skipped": skipped,
+        "closed_n": closed_n,
+        "sources": sources_seen,
+        "samples": samples,
+        "completeness": {
+            "history_n": complete.get("history_n"),
+            "matched": complete.get("matched"),
+            "rate": complete.get("rate"),
+        },
+        "paper_only": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "fee_floors_locked": True,
+        "places_orders": False,
+        "live": False,
+        "note": (
+            "Fee ledger catchup from tower closed[]/history with fee or price. "
+            "Idempotent by fill_id / bot+ticker. Never LIVE; never invents closes."
+        ),
+    }
 
 
 def fee_ledger_summary(root: str | None = None) -> dict:

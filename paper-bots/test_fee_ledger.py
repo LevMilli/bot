@@ -112,6 +112,80 @@ class FeeLedger(unittest.TestCase):
         self.assertTrue(floors["locked"])
         self.assertTrue(floors["all_ok"])
 
+    def test_record_fill_id_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a = desk_roi_plan.record_fee_ledger(
+                tmp, bot="btc15m", ticker="KX-1", price=0.5,
+                fee=0.02, pnl=0.1, fill_id="same-id", kind="sell",
+            )
+            b = desk_roi_plan.record_fee_ledger(
+                tmp, bot="btc15m", ticker="KX-1", price=0.5,
+                fee=0.02, pnl=0.1, fill_id="same-id", kind="sell",
+            )
+            self.assertTrue(a["recorded"])
+            self.assertFalse(b["recorded"])
+            self.assertTrue(b.get("idempotent"))
+            self.assertEqual(desk_roi_plan.fee_ledger_summary(tmp)["n"], 1)
+
+    def test_backfill_fee_ledger_from_closed(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            btc_dir = os.path.join(tmp, "btc15m-signal")
+            os.makedirs(btc_dir)
+            closed = [
+                {
+                    "ticker": "KXBTC-CATCH-1",
+                    "side": "YES",
+                    "ask": 0.55,
+                    "fee": 0.02,
+                    "contracts": 1,
+                    "pnl": 0.12,
+                    "fill_id": "catch-f1",
+                    "closed": "2026-11-08T12:00:00Z",
+                },
+                {
+                    "ticker": "KXBTC-CATCH-2",
+                    "ask": 0.40,
+                    "fee": 0.01,
+                    "pnl": -0.05,
+                    "fill_id": "catch-f2",
+                    "closed": "2026-11-08T13:00:00Z",
+                },
+                # No fee and no price → must skip (never invent).
+                {"ticker": "KXBTC-SKIP", "pnl": 0.01, "closed": "2026-11-08T14:00:00Z"},
+            ]
+            with open(os.path.join(btc_dir, "paper_account.json"), "w", encoding="utf-8") as fh:
+                json.dump({"cash": 1000, "open": [], "closed": closed}, fh)
+
+            out = desk_roi_plan.backfill_fee_ledger_from_closed(tmp)
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["recorded"], 2)
+            self.assertFalse(out["live"])
+            self.assertTrue(out["fee_floors_locked"])
+            summ = desk_roi_plan.fee_ledger_summary(tmp)
+            self.assertEqual(summ["n"], 2)
+
+            bots = [{"id": "btc15m", "history": [
+                {"ticker": "KXBTC-CATCH-1", "pnl": 0.12, "fill_id": "catch-f1"},
+                {"ticker": "KXBTC-CATCH-2", "pnl": -0.05, "fill_id": "catch-f2"},
+            ]}]
+            c = desk_roi_plan.fee_ledger_completeness(tmp, bots=bots)
+            self.assertEqual(c["matched"], 2)
+            self.assertEqual(c["rate"], 1.0)
+
+            again = desk_roi_plan.backfill_fee_ledger_from_closed(tmp)
+            self.assertEqual(again["recorded"], 0)
+            self.assertEqual(desk_roi_plan.fee_ledger_summary(tmp)["n"], 2)
+
+    def test_catchup_surfaces_fee_ledger_backfill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = desk_roi_plan.run_shadow_catchup(tmp)
+            self.assertTrue(out["ok"])
+            self.assertIn("fee_ledger_recorded", out)
+            self.assertIn("fee_ledger_backfill", out)
+            self.assertEqual(out["fee_ledger_recorded"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
