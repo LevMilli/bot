@@ -41,6 +41,47 @@ class SportsGapSkipDensify(unittest.TestCase):
         })
         self.assertIn("lanes clear", card)
 
+    def test_card_data_error_not_false_friend_empty(self):
+        """ESPN/Kalshi down must not CARD as 'No live or tip-soon' (#432 leftover)."""
+        gap = _load_gap()
+        # Skips path (primary densify): first skip wins.
+        card_skip = gap._card_line({
+            "trades": [],
+            "skips": ["data error: ESPN down (NHL)"],
+            "data_errors": [{"league": "NHL", "source": "ESPN", "error": "failed"}],
+            "live_games": 0,
+            "matched": 0,
+        })
+        self.assertIn("data error", card_skip)
+        self.assertIn("ESPN", card_skip)
+        self.assertNotIn("No live or tip-soon", card_skip)
+        # Defense: data_errors alone still beat empty-market false-friend.
+        card_err = gap._card_line({
+            "trades": [],
+            "skips": [],
+            "data_errors": [{"league": "NBA", "source": "Kalshi", "error": "failed"}],
+            "live_games": 0,
+            "matched": 0,
+        })
+        self.assertIn("data error", card_err)
+        self.assertIn("Kalshi", card_err)
+        self.assertNotIn("No live or tip-soon", card_err)
+        self.assertNotIn("lanes clear", card_err)
+
+    def test_data_error_paths_call_early_densify(self):
+        """ESPN/Kalshi except blocks densify skips + brain (match-miss sibling)."""
+        src = GAP.read_text(encoding="utf-8")
+        for needle in (
+            'miss = f"data error: ESPN down ({league})"',
+            'miss = f"data error: Kalshi down ({league})"',
+        ):
+            idx = src.find(needle)
+            self.assertGreater(idx, 0, msg=needle)
+            chunk = src[idx:idx + 650]
+            self.assertIn('summary_out["skips"].append(miss)', chunk)
+            self.assertIn("_densify_early_eval_skip", chunk)
+            self.assertIn('ticker=""', chunk)
+
     def test_early_eval_skip_densifies_brain_and_features(self):
         gap = _load_gap()
         with tempfile.TemporaryDirectory() as tmp:
