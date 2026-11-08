@@ -264,13 +264,22 @@ def league_url(path):
 
 
 def league_cached_idle(path):
-    """A league with no live games stays cached for a minute, so we do not fetch it again."""
+    """Skip re-fetch only when cache has neither live nor tip-soon games.
+
+    Prefer-1: live-only idle was a tip-soon false-friend. Pre-tip warm (and any
+    prior tick) caches scoreboards with ``pre`` games; treating "no ``in``" as
+    idle then skipped tip-soon evaluate and CARD-invented
+    "No live or tip-soon games" while tip-soon sat in cache (#433 sibling).
+    """
     body = _cache_get(league_url(path))
     if not isinstance(body, dict):
         return False
     for event in body.get("events") or []:
         try:
-            if event["status"]["type"]["state"] == "in":
+            state = event["status"]["type"]["state"]
+            if state == "in":
+                return False
+            if state == "pre" and tip_within_minutes({"date": event.get("date")}):
                 return False
         except Exception:
             continue

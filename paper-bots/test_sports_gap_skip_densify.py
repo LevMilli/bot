@@ -148,6 +148,66 @@ class SportsGapSkipDensify(unittest.TestCase):
             board = desk_more.skip_leaderboard(tmp)
             self.assertIn("sports-gap", board.get("by_bot") or {})
 
+    def test_cached_idle_not_when_tip_soon_pre_in_cache(self):
+        """Prefer-1: tip-soon in ESPN cache must not look idle / invent empty (#433)."""
+        from datetime import datetime, timedelta, timezone
+
+        gap = _load_gap()
+        path = "basketball/nba"
+        url = gap.league_url(path)
+        tip_iso = (datetime.now(timezone.utc) + timedelta(minutes=45)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        # Seed cache like pre-tip warm: pre games only (no live ``in``).
+        gap._cache_put(
+            url,
+            {
+                "events": [
+                    {
+                        "id": "tip1",
+                        "date": tip_iso,
+                        "status": {"type": {"state": "pre", "shortDetail": "45'"}},
+                    }
+                ]
+            },
+        )
+        self.assertFalse(
+            gap.league_cached_idle(path),
+            msg="tip-soon pre in cache must not idle-skip the league",
+        )
+        # Truly idle: only final/post games in cache → idle ok.
+        gap._cache_put(
+            url,
+            {
+                "events": [
+                    {
+                        "id": "done1",
+                        "date": tip_iso,
+                        "status": {"type": {"state": "post", "shortDetail": "Final"}},
+                    }
+                ]
+            },
+        )
+        self.assertTrue(gap.league_cached_idle(path))
+        # Live in cache → not idle.
+        gap._cache_put(
+            url,
+            {
+                "events": [
+                    {
+                        "id": "live1",
+                        "date": tip_iso,
+                        "status": {"type": {"state": "in", "shortDetail": "Q2"}},
+                    }
+                ]
+            },
+        )
+        self.assertFalse(gap.league_cached_idle(path))
+        src = GAP.read_text(encoding="utf-8")
+        idle_fn = src.split("def league_cached_idle", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("tip_within_minutes", idle_fn)
+        self.assertIn('state == "pre"', idle_fn)
+
 
 if __name__ == "__main__":
     unittest.main()
