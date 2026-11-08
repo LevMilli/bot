@@ -13,6 +13,7 @@ if HERE not in sys.path:
 import desk_master
 import desk_more
 import desk_roi_plan
+import desk_roi_staff
 import desk_top25
 
 
@@ -136,10 +137,14 @@ class NearMissPromote(unittest.TestCase):
 
     def test_soft_p_requires_z_and_m1(self):
         with tempfile.TemporaryDirectory() as tmp:
-            # No z → soft-p blocked
+            # No evidence → soft-p blocked
             denied = desk_roi_plan.staff_promote_near_miss_soft(tmp, "p")
             self.assertFalse(denied["ok"])
-            self.assertIn("z", (denied.get("reason") or "").lower())
+            reason0 = (denied.get("reason") or "").lower()
+            self.assertTrue(
+                "soft-p" in reason0 or "z" in reason0,
+                denied.get("reason"),
+            )
             # Arm z with force (thin evidence), still no M1 / promote_ready
             desk_roi_plan.staff_promote_near_miss_soft(
                 tmp, "z", note="force z", force=True,
@@ -149,8 +154,8 @@ class NearMissPromote(unittest.TestCase):
             self.assertFalse(soft_p["soft_p_ready"])
             denied2 = desk_roi_plan.staff_promote_near_miss_soft(tmp, "p")
             self.assertFalse(denied2["ok"])
-            # Seed labeled + M1-holding weekly scorecards + z already live
-            _seed_labeled(tmp, 30, would_pnl=0.10)
+            # Seed labeled z-band + M1-holding weekly scorecards + z already live
+            _seed_labeled(tmp, 30, would_pnl=0.10, soft="z")
             desk_roi_plan.capture_weekly_scorecard(
                 tmp,
                 bots=[{
@@ -178,6 +183,8 @@ class NearMissPromote(unittest.TestCase):
             }]
             ready = desk_roi_plan.near_miss_soft_p_status(tmp, bots=bots)
             self.assertTrue(ready["soft_p_ready"], ready)
+            # Soft-p second arm still needs its own band OR force — seed p-band too
+            _seed_labeled(tmp, 30, would_pnl=0.10, soft="p")
             armed_p = desk_roi_plan.staff_promote_near_miss_soft(
                 tmp, "p", note="second arm after z+M1", bots=bots,
             )
@@ -187,6 +194,48 @@ class NearMissPromote(unittest.TestCase):
             self.assertAlmostEqual(relax["p_relax"], desk_roi_plan.NEAR_MISS_P_RELAX)
             self.assertEqual(relax["z_relax"], 0.0)
             self.assertEqual(relax["edge_relax"], 0.0)
+
+    def test_evidence_led_first_arm_soft_p(self):
+        """When only soft-p has n≥30 EV≥0, batch arms p — never phantom soft-z."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _seed_labeled(tmp, 30, would_pnl=0.12, soft="p")
+            pref = desk_roi_plan.near_miss_preferred_first_soft(tmp)
+            self.assertEqual(pref["preferred"], "p")
+            self.assertFalse(pref["z"]["promote_ready"])
+            self.assertTrue(pref["p"]["promote_ready"])
+            denied_z = desk_roi_plan.staff_promote_near_miss_soft(tmp, "z")
+            self.assertFalse(denied_z["ok"])
+            armed_p = desk_roi_plan.staff_promote_near_miss_soft(
+                tmp, "p", note="evidence-led first arm soft-p",
+            )
+            self.assertTrue(armed_p["ok"], armed_p)
+            self.assertEqual(desk_roi_plan.near_miss_soft_live(tmp), "p")
+            relax = desk_roi_plan.effective_near_miss_relax(tmp)
+            self.assertAlmostEqual(relax["p_relax"], desk_roi_plan.NEAR_MISS_P_RELAX)
+            self.assertEqual(relax["z_relax"], 0.0)
+
+    def test_batch_ready_matches_soft_band(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _seed_labeled(tmp, 30, would_pnl=0.15, soft="p")
+            out = desk_roi_staff.staff_batch_arm_promotes_ready(tmp, force=False)
+            self.assertGreaterEqual(out["armed_n"], 1)
+            armed_gates = {a.get("gate") for a in (out.get("armed") or [])}
+            self.assertIn("near_miss", armed_gates)
+            self.assertEqual(desk_roi_plan.near_miss_soft_live(tmp), "p")
+
+    def test_switch_wrong_soft_z_to_evidence_p(self):
+        """Wrongly armed soft-z (no z-band samples) may switch to evidence soft-p."""
+        with tempfile.TemporaryDirectory() as tmp:
+            desk_roi_plan.staff_promote_near_miss_soft(
+                tmp, "z", note="phantom z", force=True,
+            )
+            self.assertEqual(desk_roi_plan.near_miss_soft_live(tmp), "z")
+            _seed_labeled(tmp, 30, would_pnl=0.11, soft="p")
+            switched = desk_roi_plan.staff_promote_near_miss_soft(
+                tmp, "p", note="correct to evidence soft-p",
+            )
+            self.assertTrue(switched["ok"], switched)
+            self.assertEqual(desk_roi_plan.near_miss_soft_live(tmp), "p")
 
 
 if __name__ == "__main__":
