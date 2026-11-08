@@ -5330,7 +5330,20 @@ def sports_green_boost_status(
     boost = 1 if (ready or staff_armed) else 0
     missing = []
     if not weeks_ok:
-        missing.append(f"weeks {len(sports_weeks)}/{SPORTS_GREEN_BOOST_WEEKS}")
+        # Distinguish thin week count vs enough weeks but sports_m1<0 —
+        # "weeks 2/2" falsely reads as the weeks bar already cleared.
+        if len(sports_weeks) < SPORTS_GREEN_BOOST_WEEKS:
+            missing.append(f"weeks {len(sports_weeks)}/{SPORTS_GREEN_BOOST_WEEKS}")
+        else:
+            neg = [
+                f"{c.get('label')}:{_finite(c.get('sports_m1'))}"
+                for c in sports_weeks
+                if (_finite(c.get("sports_m1")) or -1) + 1e-12 < 0.0
+            ]
+            missing.append(
+                f"weeks_m1<0 ({','.join(neg)})"
+                if neg else f"weeks {len(sports_weeks)}/{SPORTS_GREEN_BOOST_WEEKS}"
+            )
     if not hist_ok:
         missing.append(f"sports_m1_n {sports_n}/{SPORTS_M1_MIN_N}")
     if not clv_ok:
