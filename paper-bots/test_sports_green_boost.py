@@ -1,6 +1,7 @@
 """Sports green_boost gate + green-or-gone Masters flags."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -27,6 +28,79 @@ class SportsGreenBoost(unittest.TestCase):
             self.assertEqual(st["green_boost"], 0)
             self.assertFalse(st["auto_promote"])
             self.assertEqual(desk_roi_plan.sports_green_boost(tmp), 0)
+
+    def test_hydrates_sports_m1_from_account_without_bots(self):
+        """gap_bot calls green_boost(root) with no bots — must see closed fills."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sports_dir = os.path.join(tmp, "sports-gap-paper")
+            os.makedirs(sports_dir, exist_ok=True)
+            closed = [
+                {
+                    "ticker": f"KX-{i}",
+                    "pnl": 0.50,
+                    "contracts": 2,
+                    "closed": f"2026-11-08 12:0{i % 10}:00 CT",
+                }
+                for i in range(20)
+            ]
+            with open(os.path.join(sports_dir, "state.json"), "w", encoding="utf-8") as fh:
+                json.dump({"cash": 100, "open": [], "closed": closed, "paper_only": True}, fh)
+            st = desk_roi_plan.sports_green_boost_status(tmp)  # bots=None
+            self.assertEqual(st["sports_m1_n"], 20)
+            self.assertTrue(st["hist_ok"])
+            self.assertGreaterEqual(float(st["sports_m1"]), 0.0)
+            # Still thin on weeks/CLV — never force-arms.
+            self.assertFalse(st["ready"])
+            self.assertEqual(st["green_boost"], 0)
+            self.assertFalse(st["auto_promote"])
+
+    def test_repair_weekly_sports_m1_from_day_closes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sports_dir = os.path.join(tmp, "sports-gap-paper")
+            os.makedirs(sports_dir, exist_ok=True)
+            with open(os.path.join(sports_dir, "state.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "cash": 100,
+                    "open": [],
+                    "closed": [
+                        {
+                            "ticker": "KX-A",
+                            "pnl": 2.0,
+                            "contracts": 10,
+                            "closed": "2026-11-06 18:00:00 CT",
+                        },
+                        {
+                            "ticker": "KX-B",
+                            "pnl": 1.0,
+                            "contracts": 5,
+                            "closed": "2026-11-07 19:00:00 CT",
+                        },
+                    ],
+                    "paper_only": True,
+                }, fh)
+            # Seed cards missing sports_m1 (capture without sports history).
+            path = os.path.join(tmp, desk_roi_plan.WEEKLY_SCORECARD)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({
+                    "paper_only": True,
+                    "cards": [
+                        {"label": "2026-11-06", "sports_m1": None, "m1": 0.1},
+                        {"label": "2026-11-07", "sports_m1": None, "m1": 0.2},
+                        {"label": "2026-11-08", "sports_m1": 1.5, "m1": 0.3},
+                    ],
+                }, fh)
+            out = desk_roi_plan.repair_weekly_sports_m1(tmp)
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out["repaired"], 2)
+            with open(path, encoding="utf-8") as fh:
+                cards = json.load(fh)["cards"]
+            by = {c["label"]: c for c in cards}
+            self.assertIsNotNone(by["2026-11-06"]["sports_m1"])
+            self.assertIsNotNone(by["2026-11-07"]["sports_m1"])
+            self.assertEqual(by["2026-11-08"]["sports_m1"], 1.5)
+            st = desk_roi_plan.sports_green_boost_status(tmp)
+            self.assertTrue(st["weeks_ok"])
+            self.assertEqual(st["weeks_n"], 2)
 
     def test_ready_when_weeks_hist_clv(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -227,6 +227,7 @@ Interactive: Positive ROI Master Plan canvas.
 | Sports +1 gate | `sports_green_boost_status` — 2w M1≥0 + CLV≥52% n≥20 |
 | Staff arm | `staff_set_sports_green_boost` → `desk_sports_green_boost_promote.json` |
 | Runtime boost | `gap_bot` uses `sports_green_boost()` (ready **or** staff arm; default 0) |
+| Sports M1 hydrate | `_bots_with_sports_history` — account closed → history when bots omit sports-gap; `repair_weekly_sports_m1` day-slices missing card sports_m1 (catch-up) |
 | Green-or-gone flags | `green_or_gone_status` — red+risk / loser Gate A |
 | Masters board | `roi_plan.sports_green_boost` + `green_or_gone` |
 
