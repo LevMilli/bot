@@ -58,6 +58,38 @@ class SportsTimeFinal(unittest.TestCase):
         )
         self.assertAlmostEqual(rem_miss, 15.0, places=2)
 
+    def test_short_detail_mmss_densifies_when_display_clock_absent(self):
+        """ESPN often puts live clock only in shortDetail — must not invent rem=period."""
+        self.assertAlmostEqual(
+            desk_roi_plan._sports_clock_seconds(
+                {"period": 4, "type": {"shortDetail": "3:42 - 4th"}},
+            ),
+            3 * 60 + 42,
+            places=2,
+        )
+        rem = desk_roi_plan.sports_minutes_remaining(
+            {"period": 4, "type": {"shortDetail": "3:42 - 4th"}},
+            league="NFL",
+        )
+        self.assertAlmostEqual(rem, 3.0 + 42 / 60.0, places=2)
+        hit = desk_roi_plan.sports_time_final_hit(
+            rem, bid=0.50, entry_price=0.80, cost=16.0, contracts=20,
+        )
+        self.assertTrue(hit["near_final"])
+        self.assertTrue(hit["hit"])
+        # Prose without a leading clock must not invent seconds.
+        self.assertIsNone(
+            desk_roi_plan._sports_clock_seconds(
+                {"period": 4, "type": {"shortDetail": "In Progress"}},
+            ),
+        )
+        # nhl_model must not treat empty displayClock as full 20:00.
+        gap_path = os.path.join(HERE, "sports-gap-paper", "gap_bot.py")
+        with open(gap_path, encoding="utf-8") as handle:
+            src = handle.read()
+        self.assertNotIn('displayClock") or "20:00"', src)
+        self.assertIn("_sports_clock_seconds", src)
+
     def test_hit_near_final_underwater(self):
         hit = desk_roi_plan.sports_time_final_hit(
             4.0,

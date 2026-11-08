@@ -404,9 +404,19 @@ def nhl_model(summary, game):
     st = game["status"]
     period = int(st.get("period") or 1)
     clock = st.get("clock")
-    if clock is None:
-        mm, ss = (st.get("displayClock") or "20:00").split(":")
-        clock = int(mm) * 60 + float(ss)
+    if not isinstance(clock, (int, float)):
+        # Prefer shared ESPN clock densify (#416/#shortDetail) — empty displayClock
+        # must not invent a full 20:00 period (same lie as t-final DROP).
+        clock = None
+        try:
+            if DESK_ROOT not in sys.path:
+                sys.path.insert(0, DESK_ROOT)
+            import desk_roi_plan as _clk
+            clock = _clk._sports_clock_seconds(st if isinstance(st, dict) else {})
+        except Exception:
+            clock = None
+        if clock is None:
+            clock = 20 * 60  # truly missing clock → period-start guess for fair only
     if period <= 3:
         rem_min = (3 - period) * 20 + float(clock) / 60
     else:
