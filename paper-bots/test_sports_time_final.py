@@ -75,6 +75,52 @@ class SportsTimeFinal(unittest.TestCase):
         self.assertTrue(hit["near_final"])
         self.assertTrue(hit["hit"])
 
+    def test_decimal_display_clock_is_minutes_not_seconds(self):
+        """NBA ``displayClock=13.5`` must not invent near-final as 13.5 seconds."""
+        # Proven PHI@CHI cache: displayClock "13.5" / shortDetail "13.5 - 4th".
+        self.assertAlmostEqual(
+            desk_roi_plan._sports_clock_seconds(
+                {"period": 4, "displayClock": "13.5"},
+            ),
+            13.5 * 60.0,
+            places=2,
+        )
+        rem_far = desk_roi_plan.sports_minutes_remaining(
+            {"period": 4, "displayClock": "13.5"}, league="NBA",
+        )
+        self.assertAlmostEqual(rem_far, 13.5, places=2)
+        hit_far = desk_roi_plan.sports_time_final_hit(
+            rem_far, bid=0.50, entry_price=0.80, cost=16.0, contracts=20,
+        )
+        self.assertFalse(hit_far["near_final"])
+        # True near-final decimal minutes still densifies.
+        rem_near = desk_roi_plan.sports_minutes_remaining(
+            {"period": 4, "displayClock": "3.5"}, league="NBA",
+        )
+        self.assertAlmostEqual(rem_near, 3.5, places=2)
+        hit_near = desk_roi_plan.sports_time_final_hit(
+            rem_near, bid=0.50, entry_price=0.80, cost=16.0, contracts=20,
+        )
+        self.assertTrue(hit_near["near_final"])
+        # shortDetail-only decimal minutes (no displayClock) densifies.
+        self.assertAlmostEqual(
+            desk_roi_plan._sports_clock_seconds(
+                {"period": 4, "type": {"shortDetail": "3.5 - 4th"}},
+            ),
+            3.5 * 60.0,
+            places=2,
+        )
+        rem_sd = desk_roi_plan.sports_minutes_remaining(
+            {"period": 4, "type": {"shortDetail": "3.5 - 4th"}},
+            league="NBA",
+        )
+        self.assertAlmostEqual(rem_sd, 3.5, places=2)
+        # Regression: whole-second string clock stays seconds (#425).
+        self.assertEqual(
+            desk_roi_plan._sports_clock_seconds({"period": 4, "clock": "90"}),
+            90.0,
+        )
+
     def test_junk_display_clock_falls_through_to_short_detail(self):
         """Unparseable displayClock must not invent rem=0 when shortDetail has mm:ss."""
         # Pre-fix: except→0.0 poisoned t-final (rem=0) despite honest shortDetail.
