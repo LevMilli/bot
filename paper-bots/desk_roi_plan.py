@@ -3137,6 +3137,10 @@ def _sports_account_path(root: str | None = None) -> str:
     return os.path.join(_root(root), "sports-gap-paper", "state.json")
 
 
+def _commodity_account_path(root: str | None = None) -> str:
+    return os.path.join(_root(root), "commodity-15m-paper", "paper_account.json")
+
+
 def _kalshi_yes_bid_from_market(market: dict | None):
     """Parse yes bid dollars from a Kalshi market dict (0.0 is a real quote)."""
     if not isinstance(market, dict):
@@ -3294,6 +3298,122 @@ def backfill_sports_exit_shadow_from_closed(
             "(API wipe on losers / exit_bid|mark|exit_price; never entry bid). "
             "Time-final settle-retro disabled — mid-open clock only. "
             "Never LIVE; never arms."
+        ),
+    }
+
+
+def _parse_commodity_closed_at(raw):
+    """Parse commodity paper_sell closed stamp → aware UTC datetime."""
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        from datetime import datetime, timezone
+        cleaned = text.replace(" UTC", "").replace("Z", "").strip()
+        # "2026-11-08 12:00:00" or ISO
+        if "T" in cleaned:
+            dt = datetime.fromisoformat(cleaned.replace("Z", "+00:00"))
+        else:
+            dt = datetime.strptime(cleaned[:19], "%Y-%m-%d %H:%M:%S")
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def backfill_commodity_time_stop_from_closed(
+    root: str | None = None,
+    *,
+    limit: int = 80,
+) -> dict:
+    """Catch-up densify: closed commodity → time-stop shadow when near-close underwater.
+
+    Honest clock from closed_at vs close_time — never force rem=0 (sports t-final
+    poison lesson). Covers model-flip sells that raced ahead of mid-open densify.
+    Observe only; never LIVE; never arms.
+    """
+    path = _commodity_account_path(root)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            state = json.load(handle)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {
+            "ok": True,
+            "recorded": 0,
+            "scanned": 0,
+            "paper_only": True,
+            "observe_only": True,
+            "auto_promote": False,
+            "live": False,
+            "note": "no commodity account",
+        }
+    closed = [r for r in (state.get("closed") or []) if isinstance(r, dict)]
+    shadow_path = _path(COMMODITY_TIME_STOP_SHADOW, root)
+    shadow = _load(shadow_path, {"paper_only": True, "version": 1, "rows": [], "live": False})
+    seen = {
+        str(r.get("ticker") or "")
+        for r in (shadow.get("rows") or [])
+        if isinstance(r, dict) and r.get("ticker")
+    }
+    recorded = 0
+    scanned = 0
+    for row in closed[-int(limit) :]:
+        tick = str(row.get("ticker") or "").strip()
+        if not tick or tick in seen:
+            continue
+        if row.get("time_stop_shadowed"):
+            # Already densified mid-open / settle-retro — skip duplicate catchup.
+            continue
+        close_time = row.get("close_time")
+        if not close_time:
+            continue
+        scanned += 1
+        closed_at = _parse_commodity_closed_at(row.get("closed") or row.get("closed_at"))
+        bid = None
+        for key in ("exit_price", "exit_bid", "mark_bid", "bid"):
+            if row.get(key) is not None:
+                bid = _finite(row.get(key))
+                break
+        if bid is None:
+            continue
+        # Winner wipe invent guard (same spirit as sports HS).
+        settle_pnl = _finite(row.get("pnl"))
+        if bid <= 0 and (settle_pnl is None or settle_pnl + 1e-12 >= 0.0):
+            continue
+        entry = (
+            row.get("entry") if row.get("entry") is not None
+            else row.get("price") if row.get("price") is not None
+            else row.get("ask") if row.get("ask") is not None
+            else row.get("entry_price")
+        )
+        rec = record_commodity_time_stop_shadow(
+            root,
+            ticker=tick,
+            side=str(row.get("side") or ""),
+            series=str(row.get("series") or ""),
+            close_time=str(close_time),
+            entry_price=entry,
+            bid=bid,
+            contracts=row.get("contracts"),
+            cost=row.get("cost"),
+            note="catchup closed time-stop — no live sell",
+            now=closed_at,
+        )
+        if rec.get("recorded"):
+            recorded += 1
+            seen.add(tick)
+    return {
+        "ok": True,
+        "recorded": recorded,
+        "scanned": scanned,
+        "paper_only": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live": False,
+        "note": (
+            "Commodity time-stop catch-up from closed[] with honest closed_at clock. "
+            "Never LIVE; never arms; never forces rem=0."
         ),
     }
 
@@ -3478,6 +3598,12 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
     except Exception as exc:  # noqa: BLE001
         errors.append(f"sports_exit:{type(exc).__name__}")
         sports_exit = {"ok": False, "recorded": 0, "error": type(exc).__name__}
+    commodity_tstop = {"ok": False, "recorded": 0}
+    try:
+        commodity_tstop = backfill_commodity_time_stop_from_closed(root)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"commodity_tstop:{type(exc).__name__}")
+        commodity_tstop = {"ok": False, "recorded": 0, "error": type(exc).__name__}
     weekly_m1 = {"ok": False, "repaired": 0}
     try:
         weekly_m1 = repair_weekly_sports_m1(root)
@@ -3507,6 +3633,7 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
         "backfilled": int(backfilled.get("recorded") or 0),
         "repaired": int(repaired.get("repaired") or 0),
         "sports_exit_shadow": int(sports_exit.get("recorded") or 0),
+        "commodity_tstop_shadow": int(commodity_tstop.get("recorded") or 0),
         "hard_stop_poison_removed": int(hs_repair.get("removed") or 0),
         "time_final_poison_removed": int(tf_repair.get("removed") or 0),
         "weekly_sports_m1_repaired": int(weekly_m1.get("repaired") or 0),
@@ -3516,6 +3643,7 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
         "hard_stop_repair": hs_repair,
         "time_final_repair": tf_repair,
         "sports_exit": sports_exit,
+        "commodity_tstop": commodity_tstop,
         "weekly_sports_m1_repair": weekly_m1,
         "errors": errors[:8],
         "note": (
