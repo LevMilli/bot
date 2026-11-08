@@ -1416,14 +1416,43 @@ def next_inx_scan_line(bot_id: str, now: dt.datetime | None = None) -> str:
     return f"Next {label} tomorrow {s['at_ct']} CT."
 
 
+def _btc_skip_card_body(summary: str) -> str:
+    """Prefer densified evaluate CARD (#397) over generic no-buy boilerplate."""
+    for line in str(summary or "").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("CARD: "):
+            continue
+        body = _clean(stripped[6:], 220)
+        if not body:
+            continue
+        low = body.lower()
+        # Empty-market / buy-count boilerplate is not a skip reason.
+        if low.startswith("checked ") and (
+            "no paper buy" in low
+            or "paper buy" in low
+            or "no open windows" in low
+        ):
+            continue
+        if low in ("no paper buy.", "paper buy."):
+            continue
+        return body
+    return ""
+
+
 def _btc_skip(summary: str) -> str:
+    """Tower skip strip for BTC/commodity (kind=btc). Prefer SIGNAL, else densified CARD."""
     if not summary:
         return "No check yet. Skip and news status show up after a run."
     lines = [_clean(line, 240) for line in summary.splitlines()]
     news = next((line for line in lines if line.lower().startswith("news")), "")
     signal = next((line for line in lines if line.upper().startswith("SIGNAL:")), "")
     picked = [line for line in (news, signal) if line]
-    return " ".join(picked)[:400] or "The last run did not include a skip line."
+    if picked:
+        return " ".join(picked)[:400]
+    card_skip = _btc_skip_card_body(summary)
+    if card_skip:
+        return card_skip[:400]
+    return "The last run did not include a skip line."
 
 
 def _fill_row(pos: dict, title: str, detail: str, cost: float, when: str) -> dict:
