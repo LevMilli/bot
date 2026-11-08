@@ -295,7 +295,7 @@ class CommodityCardSkipDensify(unittest.TestCase):
         src = CMD.read_text(encoding="utf-8")
         empty_idx = src.find("if not windows:")
         self.assertGreater(empty_idx, 0)
-        chunk = src[empty_idx:empty_idx + 2200]
+        chunk = src[empty_idx:empty_idx + 2800]
         self.assertIn("if not spots:", chunk)
         self.assertIn("spot failed (yahoo)", chunk)
         self.assertIn("commodity spot densify", chunk)
@@ -316,6 +316,44 @@ class CommodityCardSkipDensify(unittest.TestCase):
             self.assertEqual(last.get("bot"), "commodity-15m")
             self.assertEqual(last.get("action"), "skip")
             self.assertIn("spot failed", " ".join(last.get("reasons") or []))
+            board = desk_more.skip_leaderboard(tmp)
+            self.assertIn("commodity-15m", board.get("by_bot") or {})
+
+    def test_partial_spot_fail_empty_windows_densifies_not_invent(self):
+        """Prefer-1: some Yahoo down + empty windows densifies — not clean empty (#434 leftover)."""
+        src = CMD.read_text(encoding="utf-8")
+        empty_idx = src.find("if not windows:")
+        self.assertGreater(empty_idx, 0)
+        chunk = src[empty_idx:empty_idx + 3200]
+        self.assertIn("missing_spots", chunk)
+        self.assertIn("elif missing_spots:", chunk)
+        self.assertIn("commodity partial spot densify", chunk)
+        self.assertIn("spot incomplete (yahoo", chunk)
+        self.assertIn("_densify_evaluate_skip", chunk)
+        # Partial must beat invent: CARD prefers densified skip over No open windows.
+        # Incomplete (not total "spot failed") — spotted series may be true empty.
+        cmd = _load(CMD, "commodity_partial_spot_card_under_test")
+        card = cmd._card_sentence(
+            buys=0,
+            open_windows=False,
+            skip_reasons=["spot incomplete (yahoo 2/6 missing)"],
+        )
+        self.assertIn("spot incomplete", card)
+        self.assertNotIn("No open windows", card)
+        import desk_brain
+        import desk_more
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cmd.DESK_ROOT = tmp
+            cmd._densify_evaluate_skip(
+                reasons=["spot incomplete (yahoo 2/6 missing)"],
+                note="commodity partial spot densify",
+            )
+            journal = desk_brain.load_journal(tmp)
+            last = (journal.get("decisions") or [])[-1]
+            self.assertEqual(last.get("bot"), "commodity-15m")
+            self.assertEqual(last.get("action"), "skip")
+            self.assertIn("spot incomplete", " ".join(last.get("reasons") or []))
             board = desk_more.skip_leaderboard(tmp)
             self.assertIn("commodity-15m", board.get("by_bot") or {})
 
