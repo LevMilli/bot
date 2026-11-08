@@ -3097,6 +3097,21 @@ def label_near_miss_from_result(
     ]
     if not rows:
         return {"labeled": 0, "ticker": tick, "reason": "no unlabeled near-miss"}
+    # Prefer organic ask∈(0,1) from any unlabeled sibling before defaulting to 0.5.
+    # Pre-#402 ask-less rows often precede post-#402 siblings for the same ticker;
+    # first-row-only entry wiped honest settle labels.
+    organic_ask: dict[tuple, float] = {}
+    for row in rows:
+        side = str(row.get("side") or "YES").strip().upper() or "YES"
+        bot_id = str(row.get("bot") or "")
+        key = (tick, side, bot_id)
+        if key in organic_ask:
+            continue
+        for field in ("ask", "entry_price"):
+            a = _finite(row.get(field))
+            if a is not None and 0.0 < float(a) < 1.0:
+                organic_ask[key] = float(a)
+                break
     labeled = 0
     done: set[tuple] = set()
     for row in rows:
@@ -3106,11 +3121,14 @@ def label_near_miss_from_result(
         if key in done:
             continue
         done.add(key)
+        entry = organic_ask.get(key)
+        if entry is None:
+            entry = row.get("ask") or row.get("entry_price")
         pnl = near_miss_would_pnl(
             side=side,
             result=res,
             stake=row.get("stake"),
-            entry_price=row.get("ask") or row.get("entry_price"),
+            entry_price=entry,
         )
         if pnl is None:
             continue

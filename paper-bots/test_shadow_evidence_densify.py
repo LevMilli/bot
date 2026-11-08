@@ -96,6 +96,59 @@ class ShadowEvidenceDensify(unittest.TestCase):
                 desk_roi_plan.near_miss_promote_status(tmp).get("auto_promote")
             )
 
+    def test_label_near_miss_prefers_sibling_organic_ask(self):
+        """Pre-#402 ask-less rows precede post-#402 siblings — use sibling ask."""
+        with tempfile.TemporaryDirectory() as tmp:
+            desk_more.record_near_miss(
+                tmp,
+                {
+                    "bot": "sports-gap",
+                    "ticker": "KXNFLGAME-26NOV08ARISEA-SEA",
+                    "side": "YES",
+                    "soft": ["p"],
+                    "p": 0.76,
+                    "edge": 0.01,
+                    "note": "legacy ask-less",
+                },
+            )
+            # Force ask absent on legacy row (pre-#402 shape).
+            state = desk_more.load_more(tmp)
+            state["near_miss"][0].pop("ask", None)
+            state["near_miss"][0].pop("entry_price", None)
+            desk_more.save_more(state, tmp)
+            desk_more.record_near_miss(
+                tmp,
+                {
+                    "bot": "sports-gap",
+                    "ticker": "KXNFLGAME-26NOV08ARISEA-SEA",
+                    "side": "YES",
+                    "soft": ["p"],
+                    "p": 0.76,
+                    "edge": 0.01,
+                    "ask": 0.79,
+                    "league": "NFL",
+                    "note": "post-402 organic ask",
+                },
+            )
+            out = desk_roi_plan.label_near_miss_from_result(
+                tmp,
+                ticker="KXNFLGAME-26NOV08ARISEA-SEA",
+                result="yes",
+                bot="sports-gap",
+                note="sibling ask densify",
+            )
+            self.assertGreaterEqual(out["labeled"], 1)
+            labeled = [
+                r for r in (desk_more.load_more(tmp).get("near_miss") or [])
+                if r.get("ticker") == "KXNFLGAME-26NOV08ARISEA-SEA"
+                and r.get("would_pnl") is not None
+            ]
+            self.assertTrue(labeled)
+            # stake 2 / ask 0.79 → win pnl ≈ +0.5316 (not +2.0 from entry 0.5)
+            for row in labeled:
+                self.assertAlmostEqual(float(row["would_pnl"]), 0.5316, places=3)
+                self.assertNotAlmostEqual(float(row["would_pnl"]), 2.0, places=2)
+
     def test_near_miss_catchup_cli_labels_pending(self):
         with tempfile.TemporaryDirectory() as tmp:
             desk_more.record_near_miss(
