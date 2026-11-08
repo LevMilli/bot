@@ -3231,30 +3231,35 @@ def backfill_sports_exit_shadow_from_closed(
         except Exception:
             market = None
         api_bid = _kalshi_yes_bid_from_market(market)
-        # Finalized Kalshi markets often return yes_bid=null → parsed 0. Prefer the
-        # closed row's last mark/bid so time-final settle-retro can densify real
-        # underwater trims instead of always hitting settle_wipe_not_trim.
-        row_bid = None
-        for key in ("bid", "exit_bid", "mark_bid"):
+        # gap_bot stores entry companion `bid`≈ask at open — never use it as an
+        # exit mark. Prefer true exit marks; honor API wipe 0 on settle losers.
+        exit_mark = None
+        for key in ("exit_bid", "mark_bid", "exit_price"):
             if row.get(key) is not None:
-                row_bid = _finite(row.get(key))
+                exit_mark = _finite(row.get(key))
                 break
+        settle_pnl = _finite(row.get("pnl"))
+        is_loser = settle_pnl is not None and settle_pnl + 1e-12 < 0.0
         if api_bid is not None and api_bid > 0:
             bid = api_bid
-        elif row_bid is not None and row_bid >= 0:
-            bid = row_bid
-        else:
+        elif api_bid is not None and api_bid <= 0 and is_loser:
+            # Finalized wipe on a loser — honest settle-retro densify.
             bid = api_bid
+        elif exit_mark is not None and exit_mark >= 0:
+            bid = exit_mark
+        elif api_bid is not None:
+            bid = api_bid
+        else:
+            bid = None
         if bid is None:
             continue
         entry = row.get("entry_price")
-        settle_pnl = _finite(row.get("pnl"))
         if need_hs:
             # Finalized API bid=0 always "hits" via threshold pricing. That invents
             # hard-stops on winners that never traded through entry−drop. Only
             # invent threshold wipe stops for known settle losers.
             wipe_quote = bool(bid is not None and bid <= 0)
-            if wipe_quote and (settle_pnl is None or settle_pnl + 1e-12 >= 0.0):
+            if wipe_quote and not is_loser:
                 pass  # skip — no mid-game stop evidence
             else:
                 rec = record_sports_hard_stop_shadow(
@@ -3286,7 +3291,7 @@ def backfill_sports_exit_shadow_from_closed(
         "recorded": hard_n + tfinal_n,
         "note": (
             "Sports exit-shadow catch-up: hard-stop from closed "
-            "(closed-row bid fallback; no winner wipe invent). "
+            "(API wipe on losers / exit_bid|mark|exit_price; never entry bid). "
             "Time-final settle-retro disabled — mid-open clock only. "
             "Never LIVE; never arms."
         ),
@@ -3383,22 +3388,27 @@ def repair_sports_hard_stop_settle_poison(root: str | None = None) -> dict:
         if settle_retro and settle_pnl is not None and settle_pnl + 1e-12 >= 0.0:
             drop_row = True
         elif priced_thr and crow is not None:
-            row_bid = None
-            for key in ("bid", "exit_bid", "mark_bid"):
-                if crow.get(key) is not None:
-                    row_bid = _finite(crow.get(key))
-                    break
-            entry = crow.get("entry_price")
-            if entry is None:
-                entry = row.get("entry_price")
             # Winner + threshold invent → poison.
             if settle_pnl is not None and settle_pnl + 1e-12 >= 0.0:
                 drop_row = True
-            # Closed mark never crossed the stop → poison.
-            elif row_bid is not None:
-                hit = sports_hard_stop_hit(entry, row_bid)
-                if not hit.get("hit"):
-                    drop_row = True
+            elif settle_pnl is not None and settle_pnl + 1e-12 < 0.0:
+                # Honest wipe densify on settle losers — keep. Do not use
+                # entry companion `bid` as a "never crossed" check.
+                drop_row = False
+            else:
+                # Unknown settle pnl: only drop when a true exit mark never hit.
+                exit_mark = None
+                for key in ("exit_bid", "mark_bid", "exit_price"):
+                    if crow.get(key) is not None:
+                        exit_mark = _finite(crow.get(key))
+                        break
+                entry = crow.get("entry_price")
+                if entry is None:
+                    entry = row.get("entry_price")
+                if exit_mark is not None:
+                    hit = sports_hard_stop_hit(entry, exit_mark)
+                    if not hit.get("hit"):
+                        drop_row = True
         if drop_row:
             removed += 1
             continue
