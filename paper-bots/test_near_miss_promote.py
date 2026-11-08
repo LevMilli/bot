@@ -213,6 +213,19 @@ class NearMissPromote(unittest.TestCase):
             relax = desk_roi_plan.effective_near_miss_relax(tmp)
             self.assertAlmostEqual(relax["p_relax"], desk_roi_plan.NEAR_MISS_P_RELAX)
             self.assertEqual(relax["z_relax"], 0.0)
+            # Armed soft-p must not read as THIN on distance/SLA boards.
+            soft_p = desk_roi_plan.near_miss_soft_p_status(tmp, bots=[])
+            self.assertTrue(soft_p["soft_p_armed"])
+            self.assertFalse(soft_p["soft_p_ready"])
+            self.assertFalse(soft_p["evidence_thin"], soft_p)
+            self.assertEqual(soft_p["label"], "soft-p armed")
+            sla = desk_roi_plan.promote_gate_sla(tmp, refresh=True)
+            soft_row = next(
+                g for g in sla["gates"] if g.get("gate") == "near_miss_soft_p"
+            )
+            self.assertTrue(soft_row["armed"], soft_row)
+            self.assertFalse(soft_row["evidence_thin"], soft_row)
+            self.assertFalse(soft_row["ready_but_unarmed"], soft_row)
 
     def test_batch_ready_matches_soft_band(self):
         with tempfile.TemporaryDirectory() as tmp:
