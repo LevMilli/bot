@@ -4016,14 +4016,35 @@ def _kalshi_fee_per_contract(ask: float) -> float:
 # p+edge invert is Kalshi fee-clear shape only (BTC/ETH under btc15m, commodity,
 # sports). Memecoin stores residual conf−0.5 as "edge" — inverting invents ask.
 NEAR_MISS_ASK_EDGE_BOTS = frozenset({"btc15m", "commodity-15m", "sports-gap"})
+# Commodity evaluate stores edge = p − ask − fee − edge_buf (venue floor).
+COMMODITY_NEAR_MISS_EDGE_BUF_DEFAULT = 0.05
 
 
-def recover_near_miss_ask_from_edge(p, edge, *, bot: str | None = None) -> float | None:
+def _near_miss_ask_edge_buf(root: str | None, bot: str) -> float:
+    """Venue edge_buf baked into stored commodity edge (0 for BTC/sports)."""
+    if str(bot or "").strip() != "commodity-15m":
+        return 0.0
+    try:
+        import pimp_desk
+        cfg = pimp_desk.load_settings(root) if root else pimp_desk.load_settings()
+        return float(pimp_desk.venue_min_edge("kalshi_commodity15m", cfg))
+    except Exception:
+        return float(COMMODITY_NEAR_MISS_EDGE_BUF_DEFAULT)
+
+
+def recover_near_miss_ask_from_edge(
+    p,
+    edge,
+    *,
+    bot: str | None = None,
+    edge_buf: float | None = None,
+) -> float | None:
     """Recover organic ask from stored soft-p + edge when ask was dropped.
 
-    evaluate_window stores edge = p − ask − fee(ask). Pre-#408 BTC/ETH rows
-    kept edge but dropped ask; invert on a 0.1¢ grid. Never invents a quote
-    without both p and edge. Returns ask∈(0,1) or None.
+    BTC/ETH/sports: edge = p − ask − fee(ask). Commodity: edge = p − ask − fee
+    − edge_buf — pass venue ``edge_buf`` so invert does not drift ask high by
+    the buffer. Pre-#408 rows kept edge but dropped ask; invert on a 0.1¢ grid.
+    Never invents a quote without both p and edge. Returns ask∈(0,1) or None.
 
     When ``bot`` is set, refuse non-fee-clear towers (esp. memecoin residual).
     """
@@ -4033,7 +4054,13 @@ def recover_near_miss_ask_from_edge(p, edge, *, bot: str | None = None) -> float
     e_n = _finite(edge)
     if p_n is None or e_n is None:
         return None
-    target = float(p_n) - float(e_n)  # ask + fee
+    buf = _finite(edge_buf)
+    if buf is None:
+        buf = 0.0
+    if buf < 0:
+        return None
+    # ask + fee = p − edge − edge_buf (buf=0 for BTC/sports).
+    target = float(p_n) - float(e_n) - float(buf)
     if not (0.0 < target < 2.0):
         return None
     best: float | None = None
@@ -4125,8 +4152,12 @@ def densify_near_miss_ask_catchup(root: str | None = None) -> dict:
         source = "sibling" if ask is not None else None
         if ask is None:
             # Fee-clear invert only — memecoin residual must not mint a fake ask.
+            # Commodity edge embeds venue edge_buf; subtract so ask does not drift.
             ask = recover_near_miss_ask_from_edge(
-                item.get("p"), item.get("edge"), bot=bot_id,
+                item.get("p"),
+                item.get("edge"),
+                bot=bot_id,
+                edge_buf=_near_miss_ask_edge_buf(root, bot_id),
             )
             if ask is not None:
                 source = "p_edge"
@@ -4186,8 +4217,9 @@ def densify_near_miss_ask_catchup(root: str | None = None) -> dict:
         "live": False,
         "note": (
             "Near-miss ask catch-up: sibling organic ask, else fee-clear p+edge "
-            "invert (never memecoin residual). Repairs ±stake default-entry "
-            "poison when ask recovered. Never LIVE."
+            "invert (commodity subtracts venue edge_buf; never memecoin "
+            "residual). Repairs ±stake default-entry poison when ask recovered. "
+            "Never LIVE."
         ),
     }
 
