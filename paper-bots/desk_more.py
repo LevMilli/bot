@@ -1015,6 +1015,11 @@ def record_near_miss(root: str | None, row: dict) -> dict:
     if ask is not None and 0.0 < float(ask) < 1.0:
         item["ask"] = round(float(ask), 4)
         item["entry_price"] = item["ask"]
+    # Commodity stores edge = p − ask − fee − edge_buf; keep historical buf for
+    # ask catch-up invert (never invent from live venue settings).
+    edge_buf = _finite(row.get("edge_buf"))
+    if edge_buf is not None and float(edge_buf) >= 0:
+        item["edge_buf"] = round(float(edge_buf), 4)
     league = str(row.get("league") or "").strip()
     if league:
         item["league"] = league
