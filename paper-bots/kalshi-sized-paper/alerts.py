@@ -48,4 +48,5 @@ def format_settle_note(pos, bankroll_after):
 
 
 def format_skip_note(day, reason):
-    return f"NO TRADE {day}: {reason}"
+    # CARD line densifies desk why/skip (pimp_desk card_copy / _kalshi_skip).
+    return f"NO TRADE {day}: {reason}\nCARD: {reason}"
