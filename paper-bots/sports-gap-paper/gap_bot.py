@@ -538,6 +538,16 @@ def _card_line(summary_out):
     skips = summary_out.get("skips") or []
     if skips:
         return "CARD: " + str(skips[0])
+    # Prefer-1: feed failures must not false-friend as empty/no-edge (#432 leftover).
+    data_errors = summary_out.get("data_errors") or []
+    if data_errors:
+        err0 = data_errors[0] if isinstance(data_errors[0], dict) else {}
+        src = str(err0.get("source") or "feed")
+        league = str(err0.get("league") or "")
+        reason = f"data error: {src} down"
+        if league:
+            reason = f"{reason} ({league})"
+        return "CARD: " + reason
     if trades:
         word = "trade" if len(trades) == 1 else "trades"
         return f"CARD: Paper buy. {len(trades)} paper {word} this check."
@@ -748,8 +758,20 @@ def run():
             games = espn_games(path)
             espn_secs += time.perf_counter() - t_espn
         except Exception:
-            lines.append(f"| {ts} | {league} | - | data error: ESPN down | | | | | data error |")
-            summary_out.setdefault("data_errors", []).append({"league": league, "source": "ESPN", "error": "failed"})
+            miss = f"data error: ESPN down ({league})"
+            lines.append(f"| {ts} | {league} | - | {miss} | | | | | data error |")
+            summary_out.setdefault("data_errors", []).append(
+                {"league": league, "source": "ESPN", "error": "failed"}
+            )
+            # Prefer-1/2: densify feed fail into CARD skips + brain (match-miss sibling).
+            # Without this, all-league ESPN down false-friends as "No live or tip-soon".
+            summary_out["skips"].append(miss)
+            _densify_early_eval_skip(
+                reason=miss,
+                ticker="",
+                series=series,
+                league=league,
+            )
             continue
         relevant = []
         for g in games:
@@ -767,8 +789,19 @@ def run():
             markets = kalshi_markets(series)
             kalshi_secs += time.perf_counter() - t_kalshi
         except Exception:
-            lines.append(f"| {ts} | {league} | - | data error: Kalshi down | | | | | data error |")
-            summary_out.setdefault("data_errors", []).append({"league": league, "source": "Kalshi", "error": "failed"})
+            miss = f"data error: Kalshi down ({league})"
+            lines.append(f"| {ts} | {league} | - | {miss} | | | | | data error |")
+            summary_out.setdefault("data_errors", []).append(
+                {"league": league, "source": "Kalshi", "error": "failed"}
+            )
+            # Prefer-1/2: densify feed fail into CARD skips + brain (match-miss sibling).
+            summary_out["skips"].append(miss)
+            _densify_early_eval_skip(
+                reason=miss,
+                ticker="",
+                series=series,
+                league=league,
+            )
             continue
         summary_out["leagues"][league] = f"{sum(g['state']=='in' for g in relevant)} live, series {series} ({len(markets)} open mkts)"
         for g in relevant:
