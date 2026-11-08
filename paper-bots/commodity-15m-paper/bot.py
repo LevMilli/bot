@@ -1342,7 +1342,9 @@ def main() -> int:
         pass
     for row in ranked:
         if buys >= max_buys_eff:
-            print(f"  → skip: max buys this check ({max_buys_eff})")
+            max_note = f"max buys this check ({max_buys_eff})"
+            print(f"  → skip: {max_note}")
+            skip_reasons.append(max_note)  # CARD densify parity with BTC
             ev_skip = (row.get("_ev") if isinstance(row, dict) else None) or row or {}
             try:
                 import desk_roi_plan
@@ -1351,10 +1353,19 @@ def main() -> int:
                     bot="commodity-15m",
                     ticker=str(ev_skip.get("ticker") or ""),
                     edge=ev_skip.get("edge"),
-                    reason=f"max buys this check ({max_buys_eff})",
+                    reason=max_note,
                 )
             except Exception:
                 pass
+            _densify_evaluate_skip(
+                reasons=[max_note],
+                ticker=str(ev_skip.get("ticker") or ""),
+                side=str(ev_skip.get("side") or ""),
+                edge=ev_skip.get("edge"),
+                confidence=ev_skip.get("p"),
+                depth=ev_skip.get("depth"),
+                note="commodity max-buys densify",
+            )
             break
         ev = row.get("_ev") or row
         try:
