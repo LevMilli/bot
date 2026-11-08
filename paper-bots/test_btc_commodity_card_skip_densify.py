@@ -240,6 +240,52 @@ class CommodityCardSkipDensify(unittest.TestCase):
         cmd_src = CMD.read_text(encoding="utf-8")
         self.assertIn('"ask": ev.get("ask")', cmd_src)
 
+    def test_prefetch_book_errs_densify_not_depth_zero(self):
+        """Prefetch OB fails densify as orderbook failed — not silent depth 0 (#431 sibling)."""
+        src = CMD.read_text(encoding="utf-8")
+        self.assertIn("commodity orderbook densify", src)
+        self.assertIn("orderbook failed", src)
+        # Return signature must surface errs (BTC books, book_errs parity).
+        self.assertIn("books, book_errs = prefetch_commodity_books", src)
+        self.assertIn("if tick in book_errs:", src)
+        prefetch_fn = src.split("def prefetch_commodity_books", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("errs", prefetch_fn)
+        self.assertNotIn("raw_ok, _errs", prefetch_fn)
+        err_chunk = src.split("if tick in book_errs:", 1)[1].split("else:", 1)[0]
+        self.assertIn("commodity orderbook densify", err_chunk)
+        self.assertIn("skip_reasons.append", err_chunk)
+        self.assertIn("_densify_evaluate_skip", err_chunk)
+        self.assertIn("orderbook failed", err_chunk)
+        # Runtime: failed fetch → errs map, not (None, 0) book.
+        cmd = _load(CMD, "commodity_ob_errs_under_test")
+
+        def _boom(_ticker):
+            raise RuntimeError("kalshi 503")
+
+        cmd._fetch_orderbook_raw = _boom
+        books, errs = cmd.prefetch_commodity_books([("KXGOLD-OB", "YES", 0.55)])
+        self.assertEqual(books, {})
+        self.assertIn("KXGOLD-OB", errs)
+        self.assertIn("503", str(errs["KXGOLD-OB"]))
+        import desk_brain
+        import desk_more
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cmd.DESK_ROOT = tmp
+            cmd._densify_evaluate_skip(
+                reasons=[f"orderbook failed ({errs['KXGOLD-OB']})"],
+                ticker="KXGOLD-OB",
+                side="YES",
+                note="commodity orderbook densify",
+            )
+            journal = desk_brain.load_journal(tmp)
+            last = (journal.get("decisions") or [])[-1]
+            self.assertEqual(last.get("action"), "skip")
+            self.assertEqual(last.get("ticker"), "KXGOLD-OB")
+            self.assertIn("orderbook failed", " ".join(last.get("reasons") or []))
+            board = desk_more.skip_leaderboard(tmp)
+            self.assertIn("commodity-15m", board.get("by_bot") or {})
+
 
 if __name__ == "__main__":
     unittest.main()

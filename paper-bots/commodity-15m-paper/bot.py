@@ -270,32 +270,40 @@ def book_depth(ticker: str, side: str, ask: float) -> tuple[float | None, int]:
     return depth_from_book(data, side, ask)
 
 
-def prefetch_commodity_books(jobs: list[tuple[str, str, float]]) -> dict:
+def prefetch_commodity_books(jobs: list[tuple[str, str, float]]) -> tuple[dict, dict]:
     """Parallel orderbook fetch. jobs = [(ticker, side, ask), ...].
 
-    Returns {ticker: (spread, depth)}.
+    Returns ({ticker: (spread, depth)}, {ticker: error_str}).
+    Prefetch failures must not look like thin depth — callers densify
+    ``orderbook failed`` into CARD/brain (BTC/ETH #431 sibling).
     """
     if not jobs:
-        return {}
+        return {}, {}
+    errs: dict = {}
     try:
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_more
         tickers = sorted({str(t) for t, _s, _a in jobs if t})
-        raw_ok, _errs = desk_more.prefetch_map(tickers, _fetch_orderbook_raw, max_workers=8)
+        raw_ok, errs = desk_more.prefetch_map(tickers, _fetch_orderbook_raw, max_workers=8)
     except Exception:
         raw_ok = {}
         for ticker, _side, _ask in jobs:
-            if ticker in raw_ok:
+            key = str(ticker)
+            if key in raw_ok or key in errs:
                 continue
             try:
-                raw_ok[ticker] = _fetch_orderbook_raw(str(ticker))
-            except Exception:
-                raw_ok[ticker] = None
+                raw_ok[key] = _fetch_orderbook_raw(key)
+            except Exception as exc:  # noqa: BLE001
+                raw_ok[key] = None
+                errs[key] = str(exc)
     out = {}
     for ticker, side, ask in jobs:
-        out[str(ticker)] = depth_from_book(raw_ok.get(str(ticker)), side, ask)
-    return out
+        key = str(ticker)
+        if key in errs:
+            continue  # caller densifies orderbook failed — not depth 0
+        out[key] = depth_from_book(raw_ok.get(key), side, ask)
+    return out, {str(k): str(v) for k, v in (errs or {}).items()}
 
 
 def kalshi_fee(price: float) -> float:
@@ -971,19 +979,52 @@ def main() -> int:
             continue
         book_jobs.append((str(m["ticker"]), side0, float(ask0)))
     t_book = time.perf_counter()
-    books = prefetch_commodity_books(book_jobs)
+    books, book_errs = prefetch_commodity_books(book_jobs) if book_jobs else ({}, {})
     book_secs = time.perf_counter() - t_book
     print(f"Prefetched {len(books)} commodity orderbook(s) in parallel")
     candidates = []
     buys = 0
     skip_reasons = []  # first evaluate skip → CARD densify (#396 sibling)
     for series, spot, m in windows:
-        ev = evaluate(m, spot, edge_buf, book=books.get(str(m["ticker"])))
+        tick = str(m["ticker"])
+        # BTC/ETH densify prefetch book failures into scored reasons → CARD/brain;
+        # commodity must not silent-map errs to depth 0 (board-truth lie).
+        if tick in book_errs:
+            side_ob = "YES" if float(spot) > float(m["target"]) else "NO"
+            ask_ob = m["yes_ask"] if side_ob == "YES" else m["no_ask"]
+            bid_ob = m["yes_bid"] if side_ob == "YES" else m["no_bid"]
+            ob_reason = f"orderbook failed ({book_errs[tick]})"
+            print(f"--- {series} {tick} SKIP -> {ob_reason}")
+            skip_reasons.append(ob_reason)
+            _densify_evaluate_skip(
+                reasons=[ob_reason],
+                ticker=tick,
+                side=side_ob,
+                note="commodity orderbook densify",
+            )
+            # Keep listing bid for time-stop / flip observe; buy path stays off.
+            ev = {
+                "reasons": [ob_reason],
+                "side": side_ob,
+                "ask": ask_ob,
+                "bid": bid_ob,
+                "p": None,
+                "z": None,
+                "edge": None,
+                "depth": 0,
+                "ticker": tick,
+                "series": series,
+                "close_time": m.get("close_time"),
+                "target": m.get("target"),
+                "spot": spot,
+            }
+        else:
+            ev = evaluate(m, spot, edge_buf, book=books.get(tick))
         print(
             f"  {series} {m['ticker']} spot={spot:.5f} target={m['target']} "
             f"side={ev.get('side')} p={ev.get('p')} reasons={ev.get('reasons')}"
         )
-        if ev.get("reasons"):
+        if ev.get("reasons") and tick not in book_errs:
             skip_reasons.append("; ".join(str(r) for r in (ev.get("reasons") or [])[:3]))
         # Phase 3 densify BEFORE model-flip — near-close underwater flips otherwise
         # leave open[] and never hit mid-open / all-opens time-stop shadow.
@@ -1110,7 +1151,8 @@ def main() -> int:
         except Exception:
             pass
         # skip_board / hologram densify (#401 sibling) — features alone leave chips blank.
-        if ev.get("reasons"):
+        # Prefetch book_errs already densified above (commodity orderbook densify).
+        if ev.get("reasons") and tick not in book_errs:
             _densify_evaluate_skip(
                 reasons=list(ev.get("reasons") or []),
                 ticker=str(ev.get("ticker") or m.get("ticker") or ""),
@@ -1121,7 +1163,8 @@ def main() -> int:
                 note="commodity evaluate densify",
             )
         # Soft z|p near-miss densify on skips (mirror sports/btc). Never LIVE.
-        if ev.get("reasons"):
+        # OB fetch fail is not a soft z|p near-miss — skip invent.
+        if ev.get("reasons") and tick not in book_errs:
             try:
                 if DESK_ROOT not in sys.path:
                     sys.path.insert(0, DESK_ROOT)
