@@ -101,6 +101,44 @@ class TradeWinClvCushionTests(unittest.TestCase):
             self.assertEqual(summ["n"], 0)
             self.assertEqual(summ["binary_excluded_n"], 1)
 
+    def test_gap_bot_settle_clv_prefers_last_fair_not_wipe(self):
+        """Hold-to-settle densify: stash last_fair; refuse Kalshi wipe 0/1 as line."""
+        gap_path = os.path.join(ROOT, "sports-gap-paper", "gap_bot.py")
+        with open(gap_path, encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertIn('p["last_fair"]', src)
+        self.assertIn("last_fair", src)
+        self.assertIn('clv_kind = "binary"', src)
+        self.assertIn("refuse kalshi wipe 0/1 as line", src.lower())
+        # last_fair line close counts toward green_boost; wipe binary does not.
+        with tempfile.TemporaryDirectory() as tmp:
+            desk_more.record_sports_clv(
+                tmp,
+                ticker="KX-LAST-FAIR",
+                side="home",
+                fair_entry=0.82,
+                close_fair=0.91,
+                pnl=3.0,
+                league="NCAAF",
+                exit_reason="settled",
+                clv_kind="line",
+            )
+            desk_more.record_sports_clv(
+                tmp,
+                ticker="KX-WIPE",
+                side="home",
+                fair_entry=0.82,
+                close_fair=1.0,
+                pnl=3.0,
+                league="NCAAF",
+                exit_reason="settled",
+                clv_kind="binary",
+            )
+            summ = desk_more.clv_summary(tmp)
+            self.assertEqual(summ["n"], 1)
+            self.assertEqual(summ["binary_excluded_n"], 1)
+            self.assertAlmostEqual(summ["beat_close_rate"], 0.0, places=4)
+
     def test_repair_does_not_invent_binary_close(self):
         with tempfile.TemporaryDirectory() as tmp:
             desk_more.record_sports_clv(

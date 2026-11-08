@@ -875,16 +875,27 @@ def run():
                 })
             # Closing-line value: entry fair vs last model/market fair — never binary 0/1.
             # Binary settle proxies invert beat-close (wins always "lose" CLV) and starve green_boost.
+            # Prefer stashed last_fair from mid-open ticks; refuse Kalshi wipe 0/1 as line.
             try:
                 if DESK_ROOT not in sys.path:
                     sys.path.insert(0, DESK_ROOT)
                 import desk_more
                 close_fair = None
+                clv_kind = "line"
                 if info.get("fair_home") is not None:
                     close_fair = (
                         float(info["fair_home"]) if p["side"] == "home"
                         else 1.0 - float(info["fair_home"])
                     )
+                if close_fair is None:
+                    for key in ("last_fair", "fair_at_exit"):
+                        if p.get(key) is not None:
+                            try:
+                                close_fair = float(p.get(key))
+                            except (TypeError, ValueError):
+                                close_fair = None
+                            if close_fair is not None:
+                                break
                 if close_fair is None:
                     pair_clv = info.get("pair") if isinstance(info, dict) else None
                     m_clv = None
@@ -895,7 +906,12 @@ def run():
                         m_clv = fetch_kalshi_market(p.get("ticker"))
                         bid_clv = market_yes_bid(m_clv) if m_clv else None
                     if bid_clv is not None:
-                        close_fair = float(bid_clv)
+                        # Finalized wipe 0/1 is binary — autopsy only, not green_boost line.
+                        if abs(float(bid_clv) - 0.0) < 1e-12 or abs(float(bid_clv) - 1.0) < 1e-12:
+                            close_fair = float(bid_clv)
+                            clv_kind = "binary"
+                        else:
+                            close_fair = float(bid_clv)
                 if close_fair is not None:
                     desk_more.record_sports_clv(
                         DESK_ROOT,
@@ -906,7 +922,7 @@ def run():
                         pnl=pnl,
                         league=str(p.get("league") or ""),
                         exit_reason="settled",
-                        clv_kind="line",
+                        clv_kind=clv_kind,
                     )
             except Exception:
                 pass
@@ -1019,6 +1035,13 @@ def run():
             fair = None
             if fair_home is not None:
                 fair = fair_home if p["side"] == "home" else 1 - fair_home
+            # Stash rolling model fair for hold-to-settle line CLV densify.
+            # ESPN finals strip fair_home; without this, settle falls back to wipe 0/1.
+            if fair is not None:
+                try:
+                    p["last_fair"] = round(float(fair), 4)
+                except (TypeError, ValueError):
+                    pass
             exit_reason = None
             # Hard-stop / time-final shadow need a bid; live sell stays off until promote.
             if bid is not None:
