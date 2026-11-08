@@ -1406,6 +1406,19 @@ def main():
                     )
                 except Exception:
                     pass
+            # Mirror sticky/firm densify (#405 sibling) — CARD already has max_note;
+            # skip_board needs desk_brain → record_skip_codes.
+            if desk_brain and not IS_SHADOW:
+                try:
+                    desk_brain.record_decision(
+                        DESK_ROOT, bot="btc15m", action="skip",
+                        ticker=ev.get("ticker") or "", side=ev.get("side") or "",
+                        edge=ev.get("edge"), confidence=ev.get("confidence") or ev.get("p"),
+                        depth=ev.get("depth"), reasons=[max_note],
+                        score=ev.get("_brain_score"),
+                    )
+                except Exception:
+                    pass
             continue
         m = ev.get("market") or {"ticker": ev.get("ticker"), "target": 0, "close_time": ev.get("close_time"),
                                  "yes_bid": None, "yes_ask": None, "no_bid": None, "no_ask": None}
