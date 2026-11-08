@@ -315,7 +315,7 @@ class ShadowEvidenceDensify(unittest.TestCase):
             )
             self.assertTrue(out["ok"])
             self.assertEqual(out["hard_stop"], 1)
-            # time-final skips settle wipe (bid=0 + rem=0) — not a trim quote.
+            # No closed-row bid → time-final still skips settle wipe (API bid=0).
             self.assertEqual(out["time_final"], 0)
             hs = desk_roi_plan.sports_hard_stop_shadow_summary(tmp)
             self.assertEqual(hs["n"], 1)
@@ -326,6 +326,45 @@ class ShadowEvidenceDensify(unittest.TestCase):
                 tmp, fetch_market=fake_market,
             )
             self.assertEqual(again["recorded"], 0)
+
+    def test_catchup_prefers_closed_row_bid_for_time_final(self):
+        """API bid=0 on finalized markets must fall back to closed-row mark bid."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sports_dir = os.path.join(tmp, "sports-gap-paper")
+            os.makedirs(sports_dir, exist_ok=True)
+            state = {
+                "cash": 100.0,
+                "open": [],
+                "closed": [
+                    {
+                        "ticker": "KX-CLOSED-MARK",
+                        "side": "home",
+                        "league": "NCAAF",
+                        "entry_price": 0.72,
+                        "bid": 0.55,  # underwater + past hard-stop drop
+                        "ask": 0.56,
+                        "contracts": 27,
+                        "cost": 19.44,
+                        "pnl": -4.59,
+                    }
+                ],
+                "paper_only": True,
+            }
+            with open(os.path.join(sports_dir, "state.json"), "w", encoding="utf-8") as fh:
+                json.dump(state, fh)
+
+            def fake_market(ticker: str):
+                return {"ticker": ticker, "yes_bid": None, "status": "finalized", "result": "yes"}
+
+            out = desk_roi_plan.backfill_sports_exit_shadow_from_closed(
+                tmp, fetch_market=fake_market,
+            )
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out["hard_stop"], 1)
+            self.assertEqual(out["time_final"], 1)
+            tf = desk_roi_plan.sports_time_final_shadow_summary(tmp)
+            self.assertEqual(tf["n"], 1)
+            self.assertLess(tf["shadow_expectancy"], 0)
 
     def test_commodity_tstop_allows_bid_zero(self):
         hit = desk_roi_plan.commodity_time_stop_hit(

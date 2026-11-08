@@ -3230,7 +3230,21 @@ def backfill_sports_exit_shadow_from_closed(
             market = getter(tick)
         except Exception:
             market = None
-        bid = _kalshi_yes_bid_from_market(market)
+        api_bid = _kalshi_yes_bid_from_market(market)
+        # Finalized Kalshi markets often return yes_bid=null → parsed 0. Prefer the
+        # closed row's last mark/bid so time-final settle-retro can densify real
+        # underwater trims instead of always hitting settle_wipe_not_trim.
+        row_bid = None
+        for key in ("bid", "exit_bid", "mark_bid"):
+            if row.get(key) is not None:
+                row_bid = _finite(row.get(key))
+                break
+        if api_bid is not None and api_bid > 0:
+            bid = api_bid
+        elif row_bid is not None and row_bid >= 0:
+            bid = row_bid
+        else:
+            bid = api_bid
         if bid is None:
             continue
         entry = row.get("entry_price")
@@ -3276,8 +3290,8 @@ def backfill_sports_exit_shadow_from_closed(
         "time_final": tfinal_n,
         "recorded": hard_n + tfinal_n,
         "note": (
-            "Sports exit-shadow catch-up from closed settles (bid=0 losers count). "
-            "Never LIVE; never arms."
+            "Sports exit-shadow catch-up from closed settles "
+            "(closed-row bid fallback when API bid=0). Never LIVE; never arms."
         ),
     }
 
