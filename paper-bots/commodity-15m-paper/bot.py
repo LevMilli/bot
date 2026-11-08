@@ -1142,6 +1142,8 @@ def main() -> int:
                         "z": ev.get("z"),
                         "p": ev.get("p"),
                         "edge": ev.get("edge"),
+                        "ask": ev.get("ask"),
+                        "series": m.get("series"),
                         "note": f"commodity {nm.get('note')}",
                     })
             except Exception:

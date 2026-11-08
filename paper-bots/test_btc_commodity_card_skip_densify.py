@@ -137,6 +137,15 @@ class CommodityCardSkipDensify(unittest.TestCase):
             self.assertIsInstance(bot_codes, dict)
             self.assertGreaterEqual(sum(int(v) for v in bot_codes.values()), 1)
 
+    def test_btc_eth_commodity_near_miss_passes_ask(self):
+        """#402 persist is a no-op unless callers pass ask — densify entry honesty."""
+        btc_src = BTC.read_text(encoding="utf-8")
+        self.assertIn('"ask": ev.get("ask")', btc_src)
+        self.assertIn('"ask": ev_early.get("ask")', btc_src)
+        self.assertIn('"series": "KXBTC15M"', btc_src)
+        cmd_src = CMD.read_text(encoding="utf-8")
+        self.assertIn('"ask": ev.get("ask")', cmd_src)
+
 
 if __name__ == "__main__":
     unittest.main()
