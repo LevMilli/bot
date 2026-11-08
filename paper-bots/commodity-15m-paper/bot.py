@@ -844,6 +844,43 @@ def _card_sentence(*, buys: int, skip_reasons=None, open_windows: bool = True) -
     return f"Checked commodity 15m markets. {buys} paper buys."
 
 
+def _densify_evaluate_skip(
+    *,
+    reasons,
+    ticker: str = "",
+    side: str = "",
+    edge=None,
+    confidence=None,
+    depth=None,
+    note: str = "commodity evaluate densify",
+) -> None:
+    """Mirror btc15m / sports #401: evaluate skips → desk_brain → skip_board.
+
+    CARD + feature-store already densify (#397). Observe only; never LIVE.
+    """
+    why = [str(r) for r in (reasons or []) if str(r).strip()]
+    if not why:
+        return
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_brain
+        desk_brain.record_decision(
+            DESK_ROOT,
+            bot="commodity-15m",
+            action="skip",
+            ticker=str(ticker or ""),
+            side=str(side or ""),
+            edge=edge,
+            confidence=confidence,
+            depth=depth,
+            reasons=why,
+            note=str(note or "")[:160],
+        )
+    except Exception:
+        pass
+
+
 def main() -> int:
     print("commodity-15m paper check (no live orders)")
     t0 = time.perf_counter()
@@ -1072,6 +1109,17 @@ def main() -> int:
             )
         except Exception:
             pass
+        # skip_board / hologram densify (#401 sibling) — features alone leave chips blank.
+        if ev.get("reasons"):
+            _densify_evaluate_skip(
+                reasons=list(ev.get("reasons") or []),
+                ticker=str(ev.get("ticker") or m.get("ticker") or ""),
+                side=str(ev.get("side") or ""),
+                edge=ev.get("edge"),
+                confidence=ev.get("p"),
+                depth=ev.get("depth"),
+                note="commodity evaluate densify",
+            )
         # Soft z|p near-miss densify on skips (mirror sports/btc). Never LIVE.
         if ev.get("reasons"):
             try:
@@ -1327,6 +1375,15 @@ def main() -> int:
                 )
             except Exception:
                 pass
+            _densify_evaluate_skip(
+                reasons=[firm_block],
+                ticker=str(ev.get("ticker") or ""),
+                side=str(ev.get("side") or ""),
+                edge=ev.get("edge"),
+                confidence=ev.get("p"),
+                depth=ev.get("depth"),
+                note="commodity firm-queue densify",
+            )
             continue
         # E1 #136/#137 — red-day sticky opens exit-first before speculative buys.
         try:
@@ -1343,6 +1400,15 @@ def main() -> int:
             sticky_block = ""
         if sticky_block:
             print(f"  → skip: {sticky_block}")
+            _densify_evaluate_skip(
+                reasons=[sticky_block],
+                ticker=str(ev.get("ticker") or ""),
+                side=str(ev.get("side") or ""),
+                edge=ev.get("edge"),
+                confidence=ev.get("p"),
+                depth=ev.get("depth"),
+                note="commodity sticky densify",
+            )
             continue
         msg = paper_buy(account, ev)
         print(f"  → {msg}")
