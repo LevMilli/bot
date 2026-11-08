@@ -258,7 +258,22 @@ class ShadowEvidenceDensify(unittest.TestCase):
         self.assertIn("market_yes_bid", src)
         self.assertIn("settle-retro shadow hard-stop", src)
         self.assertIn("SETTLE-RETRO STOP", src)
+        # Live settle path must not re-invent t-final with forced rem=0.
+        self.assertIn("Time-final settle-retro disabled", src)
+        self.assertNotIn("rem = 0.0  # final → treat as 0 min left", src)
         self.assertNotIn("LIVE_ORDERS = True", src)
+
+    def test_gap_bot_skips_winner_wipe_hard_stop_source(self):
+        gap_path = os.path.join(HERE, "sports-gap-paper", "gap_bot.py")
+        with open(gap_path, encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertIn("wipe_quote", src)
+        self.assertIn("never invent threshold stops", src.lower())
+        cmd_path = os.path.join(HERE, "commodity-15m-paper", "bot.py")
+        with open(cmd_path, encoding="utf-8") as fh:
+            cmd = fh.read()
+        self.assertIn("bid_ts >= 0", cmd)
+        self.assertIn("wipe_quote", cmd)
         with tempfile.TemporaryDirectory() as tmp:
             # Simulate settle-retro path: no pair, bid from Kalshi market fetch.
             market = {"ticker": "KXNBA-RETRO-1", "yes_bid_dollars": "0.55"}
