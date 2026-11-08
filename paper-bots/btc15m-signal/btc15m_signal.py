@@ -984,11 +984,11 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         "confidence": None,
     }
     # Cheap gates first — fail fast before σ / news / book work when possible.
+    # Absolute cushion $ floor applied after z is known (see below) so tight-σ
+    # fee-clear Φ edges are not double-vetoed when z already clears.
     cheap = []
     if min_left < time_floor:
         cheap.append(f"only {min_left:.1f} min left (< {time_floor:g})")
-    if cushion < cush_floor:
-        cheap.append(f"cushion ${cushion:.2f} < ${cush_floor:g}")
     listing_ask = m["yes_ask"] if side == "YES" else m["no_ask"]
     if listing_ask is not None and not (ASK_MIN <= listing_ask <= ASK_MAX):
         # Still allow book to rescue a stale listing; only hard-fail if book also bad later.
@@ -1074,6 +1074,9 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
     zmin = max(0.40, float(zmin) - z_relax)
     if z < zmin:
         reasons.append(f"z {z:.2f} < {zmin}")
+    # Absolute cushion only when z does not already clear — distance is in Φ(z).
+    if cushion < cush_floor and z + 1e-12 < float(zmin):
+        reasons.append(f"cushion ${cushion:.2f} < ${cush_floor:g}")
     if not (ASK_MIN <= ask <= ASK_MAX):
         reasons.append(f"ask {ask:.2f} outside {ASK_MIN:.2f}-{ASK_MAX:.2f}")
     if spread > MAX_SPREAD + 1e-9:

@@ -4830,10 +4830,10 @@ def clv_completeness(root: str | None = None) -> dict:
 
 
 def repair_clv_completeness(root: str | None = None) -> dict:
-    """Observe repair: fill close_fair + clv on settled rows that already have entry.
+    """Observe repair: recompute clv when both fairs exist; never invent binary close.
 
-    Fail-closed when fair_entry is missing. Never arms green_boost. Never LIVE.
-    Uses pnl sign as settle binary proxy when close is absent (win→1.0 / loss→0.0).
+    Fail-closed when fair_entry or close_fair is missing. Never arms green_boost. Never LIVE.
+    Binary 0/1 settle proxies invert beat-close — do not synthesize them here.
     """
     try:
         import desk_more
@@ -4867,16 +4867,11 @@ def repair_clv_completeness(root: str | None = None) -> dict:
             skipped += 1
             out.append(item)
             continue
-        # Fill close from pnl binary when missing.
+        # Missing close → leave incomplete (fail-closed). Never invent binary 0/1.
         if not _clv_has_close(item):
-            pnl = _finite(item.get("pnl"))
-            if pnl is None:
-                skipped += 1
-                out.append(item)
-                continue
-            close = 1.0 if pnl > 0 else 0.0
-            item["fair_close"] = close
-            item["close_fair"] = close
+            skipped += 1
+            out.append(item)
+            continue
         fe = _finite(item.get("fair_entry"))
         if fe is None:
             fe = _finite(item.get("entry_fair"))
@@ -4890,7 +4885,9 @@ def repair_clv_completeness(root: str | None = None) -> dict:
         if item.get("clv") is None:
             item["clv"] = round(float(fe) - float(fc), 4)
         item["repaired_at"] = _now()
-        item["repair_note"] = "clv-completeness catch-up"
+        item["repair_note"] = "clv-completeness catch-up (line only)"
+        if not item.get("clv_kind"):
+            item["clv_kind"] = "line"
         repaired += 1
         out.append(item)
     if repaired:
