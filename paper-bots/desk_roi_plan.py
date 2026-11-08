@@ -3662,17 +3662,19 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
 
 
 def ensure_shadow_densify_journals(root: str | None = None) -> dict:
-    """Materialize empty sports/commodity/edge08 shadow journals if missing.
+    """Materialize empty densify journals / edge08 / fee ledger if missing.
 
     Distinguishes *missing* (never created) from *thin* (present, n=0) in
     shadow_ops_alerts. Tick already ensures edge08; catchup must too.
-    Never invents promote rows; never LIVE; never arms.
+    Never invents promote or fee rows; never LIVE; never arms.
     """
     created: list[str] = []
     specs = (
         (SPORTS_HARD_STOP_SHADOW, {"paper_only": True, "version": 1, "rows": [], "live": False}),
         (COMMODITY_TIME_STOP_SHADOW, {"paper_only": True, "version": 1, "rows": [], "live": False}),
         (SPORTS_TIME_FINAL_SHADOW, {"paper_only": True, "version": 1, "rows": [], "live": False}),
+        (FEE_LEDGER_NAME, {"paper_only": True, "rows": [], "by_bot": {}, "live": False}),
+        (HELPER_FILLS_NAME, {"paper_only": True, "rows": [], "by_helper": {}, "live": False}),
     )
     for name, blank in specs:
         path = _path(name, root)
@@ -3704,7 +3706,7 @@ def ensure_shadow_densify_journals(root: str | None = None) -> dict:
         "auto_promote": False,
         "live": False,
         "note": (
-            "Ensured empty densify journals + edge08 account exist (missing→thin). "
+            "Ensured empty densify journals + edge08 + fee ledger exist (missing→thin). "
             "Never invents evidence; never LIVE; never arms."
         ),
     }
