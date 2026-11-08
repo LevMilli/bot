@@ -4207,13 +4207,26 @@ def near_miss_soft_p_status(
             f"not promote_ready (need labeled n≥{NEAR_MISS_PROMOTE_N} "
             f"with shadow EV ≥ {NEAR_MISS_PROMOTE_MIN_EV})"
         )
+    # Evidence thin ≠ armability: armed soft-p must not look THIN on SLA boards.
+    p_band = near_miss_soft_band_status(root, "p")
+    evidence_ready = bool(p_band.get("promote_ready") or base.get("promote_ready"))
+    evidence_thin = (not already_p) and (not evidence_ready)
+    if already_p:
+        label = "soft-p armed"
+    elif ready:
+        label = "soft-p ready"
+    elif evidence_thin:
+        label = f"soft-p THIN — {reason[:72]}"
+    else:
+        label = f"soft-p deferred — {reason[:64]}"
     return {
         "paper_only": True,
         "fee_floors_locked": True,
         "observe_only": True,
         "auto_promote": False,
         "soft_p_ready": ready,
-        "evidence_thin": not ready,
+        "soft_p_armed": already_p,
+        "evidence_thin": evidence_thin,
         "promote_ready": bool(base.get("promote_ready")),
         "z_armed": z_armed,
         "soft_live": soft,
@@ -4223,11 +4236,7 @@ def near_miss_soft_p_status(
         "n_to_promote": base.get("n_to_promote"),
         "shadow_ev": base.get("shadow_ev"),
         "reason": reason,
-        "label": (
-            f"soft-p ready"
-            if ready
-            else f"soft-p THIN — {reason[:72]}"
-        ),
+        "label": label,
         "note": (
             "Soft-p is the second near-miss arm after soft-z holds M1. "
             "Never edge-relax; never softens floors; no force on money-path CLI."

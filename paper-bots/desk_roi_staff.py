@@ -1062,6 +1062,8 @@ def promote_gate_sla(
                 armed = plan.sports_hard_stop_is_live(root)
             elif gate == "near_miss":
                 armed = plan.near_miss_soft_live(root) is not None
+            elif gate == "near_miss_soft_p":
+                armed = plan.near_miss_soft_live(root) == "p"
             elif gate == "green_boost":
                 armed = bool(plan.sports_green_boost_status(root, bots=bots).get("staff_armed"))
             elif gate == "commodity_time_stop":
