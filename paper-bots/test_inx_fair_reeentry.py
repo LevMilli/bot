@@ -62,6 +62,21 @@ class InxFairReentryTests(unittest.TestCase):
         self.assertTrue(fair["ok"])
         self.assertGreaterEqual(float(fair["p"]), 0.80)
 
+    def test_pick_by_fair_prefers_value_over_rich_ask(self):
+        now = datetime(2026, 11, 10, 13, 0, tzinfo=CT)
+        # Highest ask RICH fails fair; VALUE clears — must pick VALUE.
+        board = [
+            {"ticker": "RICH", "side": "yes", "ask": 0.90, "strike": 7480},
+            {"ticker": "VALUE", "side": "yes", "ask": 0.82, "strike": 7200},
+        ]
+        chosen = desk_inx.pick_by_fair(
+            board, venue_edge=0.02, spot=7500.0, now=now,
+        )
+        self.assertTrue(chosen["ok"])
+        self.assertEqual(chosen["pick"]["ticker"], "VALUE")
+        self.assertGreaterEqual(int(chosen["n_ok"]), 1)
+        self.assertGreaterEqual(float(chosen["fair"]["edge"]), 0.02)
+
     def test_self_check(self):
         desk_inx.self_check()
 
