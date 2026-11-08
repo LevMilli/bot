@@ -107,6 +107,33 @@ class SportsTimeFinal(unittest.TestCase):
         self.assertNotIn('displayClock") or "20:00"', src)
         self.assertIn("_sports_clock_seconds", src)
 
+    def test_game_detail_densifies_when_status_type_omits_short_detail(self):
+        """gap_bot espn_games stores shortDetail on game['detail'] — use it for rem."""
+        # Status blob missing type.shortDetail + displayClock → would invent period_min
+        # without detail densify.
+        status = {"period": 4, "type": {"state": "in", "name": "STATUS_IN_PROGRESS"}}
+        self.assertAlmostEqual(
+            desk_roi_plan.sports_minutes_remaining(status, league="NFL"),
+            15.0,
+            places=2,
+        )
+        rem = desk_roi_plan.sports_minutes_remaining(
+            status, league="NFL", detail="2:10 - 4th",
+        )
+        self.assertAlmostEqual(rem, 2.0 + 10 / 60.0, places=2)
+        # Flattened shortDetail on status root also densifies.
+        self.assertAlmostEqual(
+            desk_roi_plan._sports_clock_seconds(
+                {"period": 4, "shortDetail": "1:05 - 4th"},
+            ),
+            65.0,
+            places=2,
+        )
+        gap_path = os.path.join(HERE, "sports-gap-paper", "gap_bot.py")
+        with open(gap_path, encoding="utf-8") as handle:
+            src = handle.read()
+        self.assertIn("detail=(game or {}).get(\"detail\")", src)
+
     def test_hit_near_final_underwater(self):
         hit = desk_roi_plan.sports_time_final_hit(
             4.0,

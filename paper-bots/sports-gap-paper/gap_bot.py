@@ -1224,8 +1224,12 @@ def run():
                     if exit_reason is None and not p.get("time_final_shadowed"):
                         game = info.get("game") if isinstance(info, dict) else None
                         status = (game or {}).get("status") if isinstance(game, dict) else None
+                        # espn_games densifies shortDetail onto game["detail"] —
+                        # pass through so rem does not invent full period_min.
                         rem = desk_roi_plan.sports_minutes_remaining(
-                            status, league=str(p.get("league") or ""),
+                            status,
+                            league=str(p.get("league") or ""),
+                            detail=(game or {}).get("detail") if isinstance(game, dict) else None,
                         )
                         tf = desk_roi_plan.sports_time_final_hit(
                             rem, bid,
