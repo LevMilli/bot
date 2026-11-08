@@ -1972,7 +1972,7 @@ Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers. Ne
 | --- | --- |
 | Near-miss would_pnl settle + catch-up | `label_near_miss_from_result` / `label_near_miss_catchup` · btc15m `settle_account` · `make living-near-miss-label` |
 | Durable shadow journals | `pimp_desk.SETTLEMENT_FILES` += hard-stop / commodity t-stop / sports t-final / helper fills / `shadow_edge08_account.json` |
-| Sports hard-stop + t-final densify | `gap_bot` records when pair+bid present (fair_home optional) + settle-retro |
+| Sports hard-stop + t-final densify | `gap_bot` mid-open when pair+bid present; hard-stop settle-retro only (t-final settle-retro disabled — rem=0 invents) |
 | Export CLIs | `make living-near-miss-export` / `living-edge08-export` / `living-green-boost-export` (+ existing `living-hard-stop-export`) |
 | Helper Gate A + CLV repair | `backfill_helper_fills_from_btc_closed` · `repair_clv_completeness` · `make living-helper-backfill` / `living-clv-repair` |
 | Tests | `test_shadow_evidence_densify.py` |
@@ -2000,7 +2000,7 @@ Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers. Ne
 
 | Ticket | Where |
 | --- | --- |
-| Sports settle-retro Kalshi bid fallback | `gap_bot.fetch_kalshi_market` / `market_yes_bid` when next-day finals rebuild has no pair → hard-stop + t-final shadow record; mid-open densify when pair missing |
+| Sports settle-retro Kalshi bid fallback | `gap_bot.fetch_kalshi_market` / `market_yes_bid` when next-day finals rebuild has no pair → hard-stop shadow only (skip winner wipe_quote); **t-final settle-retro disabled** (forced rem=0 invents) — mid-open clock densify only |
 | Money-pulse peers | `staff_living_status money-pulse` top-level `commodity_time_stop` + `sports_time_final` (mirror `hard_stop`) |
 | Doctor shadow-ops densify | `shadow_ops_alerts` += `catchup_stale` / `tick_stale` / `*_journal_missing` / `*_promote_thin` (observe; doctor does not hard-fail) |
 | Commodity in shadow tick | `pimp_desk.run_shadow_tick` smokes `commodity-15m` paper (`commodity_smoked`) alongside sports-gap |

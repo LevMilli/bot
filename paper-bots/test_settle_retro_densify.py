@@ -58,7 +58,10 @@ class SettleRetroDensify(unittest.TestCase):
         self.assertIn("fetch_kalshi_market", src)
         self.assertIn("bid_settle is None", src)
         self.assertIn("settle-retro shadow hard-stop — no live sell", src)
-        self.assertIn("settle-retro shadow time-final — no live sell", src)
+        # Time-final settle-retro disabled (forced rem=0 invents); mid-open only.
+        self.assertIn("Time-final settle-retro disabled", src)
+        self.assertNotIn("settle-retro shadow time-final — no live sell", src)
+        self.assertNotIn("rem = 0.0  # final → treat as 0 min left", src)
         # Mid-open also densifies when pair missing.
         self.assertIn("When pair missing but ticker known", src)
         self.assertNotIn("LIVE_ORDERS = True", src)

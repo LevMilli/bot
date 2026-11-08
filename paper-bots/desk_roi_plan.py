@@ -3335,10 +3335,11 @@ def repair_sports_time_final_settle_poison(root: str | None = None) -> dict:
 
 
 def repair_sports_hard_stop_settle_poison(root: str | None = None) -> dict:
-    """Drop settle-retro hard-stop rows invented from finalized bid=0 on winners.
+    """Drop settle-retro hard-stop rows invented on winners / non-hit marks.
 
-    priced_at_threshold + closed settle pnl≥0 (or closed mark never hit drop)
-    means the stop was never evidenced mid-game — keep journals honest.
+    - priced_at_threshold + closed settle pnl≥0 (or closed mark never hit)
+    - any settle-retro / catchup settle-retro note + closed settle pnl≥0
+      (finalize-path invents; mid-open shadow notes are kept)
     Observe only; never LIVE; never arms.
     """
     path = _path(SPORTS_HARD_STOP_SHADOW, root)
@@ -3373,9 +3374,15 @@ def repair_sports_hard_stop_settle_poison(root: str | None = None) -> dict:
         tick = str(row.get("ticker") or "").strip()
         crow = closed_by.get(tick) if tick else None
         priced_thr = bool(row.get("priced_at_threshold"))
+        note_l = str(row.get("note") or "").lower()
+        settle_retro = "settle-retro" in note_l
         drop_row = False
-        if priced_thr and crow is not None:
-            settle_pnl = _finite(crow.get("pnl"))
+        settle_pnl = _finite(crow.get("pnl")) if crow is not None else None
+        # Finalize / catch-up settle-retro on a winner is poison — mid-open
+        # notes ("shadow hard-stop") stay for honest underwater evidence.
+        if settle_retro and settle_pnl is not None and settle_pnl + 1e-12 >= 0.0:
+            drop_row = True
+        elif priced_thr and crow is not None:
             row_bid = None
             for key in ("bid", "exit_bid", "mark_bid"):
                 if crow.get(key) is not None:
@@ -3412,8 +3419,8 @@ def repair_sports_hard_stop_settle_poison(root: str | None = None) -> dict:
         "live": False,
         "summary": sports_hard_stop_shadow_summary(root),
         "note": (
-            "Removed settle-retro hard-stop poison (threshold invent on "
-            "winners / non-hit marks). Never LIVE; never arms."
+            "Removed settle-retro hard-stop poison (winners / threshold invent / "
+            "non-hit marks). Never LIVE; never arms."
         ),
     }
 
