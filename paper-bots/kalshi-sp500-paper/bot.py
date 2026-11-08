@@ -218,11 +218,13 @@ def step_scan(args, state, day):
     last_ob_miss = False
     last_fair_reason = ""
     spot_px = chosen.get("spot")
+    hour_ct = dt.datetime.now(CT).hour
     try:
         desk = _desk()
         cfg = desk.load_settings(DESK_ROOT)
         venue_edge = float(desk.venue_min_edge("kalshi_inx", cfg))
     except Exception:
+        desk = None
         cfg = {}
     if DESK_ROOT not in sys.path:
         sys.path.insert(0, DESK_ROOT)
@@ -252,11 +254,21 @@ def step_scan(args, state, day):
                 fair_try.get("reason") or desk_inx.refuse_residual_as_edge()
             )
             continue
+        edge_try = float(fair_try.get("edge") or 0.0)
+        # Learn/corr are side×bucket keyed — continue to next fair sibling.
+        policy = desk_inx.inx_learn_corr_reason(
+            desk, DESK_ROOT,
+            market="S&P", bot_id="kalshi-sp",
+            pick=confirmed, edge=edge_try, hour_ct=hour_ct,
+        )
+        if policy:
+            last_fair_reason = policy
+            continue
         pick = confirmed
         ob = ob_try
         fair = fair_try
         fee_one = float(fair_try.get("fee") if fair_try.get("fee") is not None else fee_try)
-        edge_proxy = float(fair_try.get("edge") or 0.0)
+        edge_proxy = edge_try
         fair_p = fair_try.get("p")
         break
     if not pick or not fair:
@@ -280,47 +292,6 @@ def step_scan(args, state, day):
         except Exception:
             pass
         return
-    try:
-        desk = _desk()
-        hour_ct = dt.datetime.now(CT).hour
-        skip = desk.learning_skip(
-            desk.load_learning(DESK_ROOT), "S&P", desk.prob_bucket(pick["ask"]),
-            side=pick.get("side"), hour_ct=hour_ct,
-        )
-    except Exception:
-        skip = ""
-    if skip:
-        print(skip)
-        try:
-            import desk_living
-            desk_living.record_eval_features(
-                DESK_ROOT, bot="kalshi-sp", action="skip", series=CFG.get("series") or "KXINXU",
-                ticker=str(pick.get("ticker") or ""),
-                ev={"side": pick.get("side"), "ask": pick.get("ask"), "confidence": pick.get("ask")},
-                reasons=[skip], note=str(skip)[:160],
-            )
-        except Exception:
-            pass
-        return
-    try:
-        desk = _desk()
-        blocked = desk.correlation_blocks(DESK_ROOT, "kalshi-sp", pick["side"], edge_proxy)
-        if blocked:
-            print(blocked)
-            try:
-                import desk_living
-                desk_living.record_eval_features(
-                    DESK_ROOT, bot="kalshi-sp", action="skip",
-                    series=CFG.get("series") or "KXINXU",
-                    ticker=str(pick.get("ticker") or ""),
-                    ev={"side": pick.get("side"), "ask": pick.get("ask"), "edge": edge_proxy},
-                    reasons=[blocked], note=str(blocked)[:160],
-                )
-            except Exception:
-                pass
-            return
-    except Exception:
-        pass
     n = risk_manager.stake_contracts(pick["ask"], bankroll=state["bankroll"])
     if n < 1:
         print(alerts.format_skip_note(day, "not enough paper bankroll for 1 contract after fee"))

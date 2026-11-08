@@ -97,6 +97,50 @@ class InxFairReentryTests(unittest.TestCase):
         self.assertEqual(tickers[0], "DEEP")
         self.assertGreaterEqual(int(ranked["n_ok"]), 2)
 
+    def test_learn_corr_continues_to_fee_clear_sibling(self):
+        # Cold YES bucket must not day-skip a fee-clear NO sibling.
+        ranked = [
+            {"pick": {"ticker": "YES-COLD", "side": "yes", "ask": 0.85}, "edge": 0.10},
+            {"pick": {"ticker": "NO-OK", "side": "no", "ask": 0.82}, "edge": 0.08},
+        ]
+
+        def policy(pick, edge):
+            if pick.get("side") == "yes":
+                return "learning: S&P yes cold bucket"
+            return ""
+
+        chosen = desk_inx.first_policy_ok_pick(ranked, policy_reason=policy)
+        self.assertIsNotNone(chosen)
+        self.assertEqual(chosen["pick"]["ticker"], "NO-OK")
+
+    def test_inx_learn_corr_reason_wires_desk(self):
+        class _Desk:
+            def load_learning(self, root):
+                return []
+
+            def prob_bucket(self, ask):
+                return "0.8-0.9"
+
+            def learning_skip(self, rows, market, bucket, side=None, hour_ct=None):
+                if str(side).lower() == "yes":
+                    return "learning: cold yes"
+                return ""
+
+            def correlation_blocks(self, root, bot_id, side, edge):
+                return ""
+
+        desk = _Desk()
+        yes = desk_inx.inx_learn_corr_reason(
+            desk, None, market="S&P", bot_id="kalshi-sp",
+            pick={"side": "yes", "ask": 0.85}, edge=0.05, hour_ct=13,
+        )
+        no = desk_inx.inx_learn_corr_reason(
+            desk, None, market="S&P", bot_id="kalshi-sp",
+            pick={"side": "no", "ask": 0.82}, edge=0.05, hour_ct=13,
+        )
+        self.assertIn("cold yes", yes)
+        self.assertEqual(no, "")
+
     def test_self_check(self):
         desk_inx.self_check()
 
