@@ -28,6 +28,36 @@ class SportsTimeFinal(unittest.TestCase):
         # 1Q left (15) + 5 = 20
         self.assertAlmostEqual(rem, 20.0, places=2)
 
+    def test_empty_display_clock_is_end_of_slice_not_full_period(self):
+        """Empty displayClock must not fall through to period_min (t-final DROP)."""
+        self.assertEqual(
+            desk_roi_plan._sports_clock_seconds({"period": 4, "displayClock": ""}),
+            0.0,
+        )
+        rem = desk_roi_plan.sports_minutes_remaining(
+            {"period": 4, "displayClock": ""}, league="NFL",
+        )
+        self.assertAlmostEqual(rem, 0.0, places=2)
+        hit = desk_roi_plan.sports_time_final_hit(
+            rem, bid=0.50, entry_price=0.80, cost=16.0, contracts=20,
+        )
+        self.assertTrue(hit["near_final"])
+        self.assertTrue(hit["hit"])
+        # End-of-period type with no clock fields → 0s in slice.
+        rem_end = desk_roi_plan.sports_minutes_remaining(
+            {
+                "period": 4,
+                "type": {"name": "STATUS_END_PERIOD", "detail": "End of 4th"},
+            },
+            league="NFL",
+        )
+        self.assertAlmostEqual(rem_end, 0.0, places=2)
+        # Truly missing clock (no key, no end detail) keeps period_min guess.
+        rem_miss = desk_roi_plan.sports_minutes_remaining(
+            {"period": 4}, league="NFL",
+        )
+        self.assertAlmostEqual(rem_miss, 15.0, places=2)
+
     def test_hit_near_final_underwater(self):
         hit = desk_roi_plan.sports_time_final_hit(
             4.0,
