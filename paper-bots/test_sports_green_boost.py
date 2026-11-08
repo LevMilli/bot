@@ -168,6 +168,25 @@ class SportsGreenBoost(unittest.TestCase):
             out2 = desk_roi_plan.repair_weekly_sports_m1(tmp)
             self.assertEqual(out2["repaired"], 0)
 
+    def test_green_missing_names_negative_week_m1_not_weeks_2_of_2(self):
+        """Enough week cards with sports_m1<0 must not emit false-friend weeks 2/2."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, desk_roi_plan.WEEKLY_SCORECARD)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({
+                    "paper_only": True,
+                    "cards": [
+                        {"label": "2026-11-07", "sports_m1": 3.1714, "sports_m1_n": 14},
+                        {"label": "2026-11-08", "sports_m1": -0.2667, "sports_m1_n": 3},
+                    ],
+                }, fh)
+            st = desk_roi_plan.sports_green_boost_status(tmp, bots=[])
+            self.assertFalse(st["weeks_ok"])
+            miss = " ".join(st.get("missing") or [])
+            self.assertIn("weeks_m1<0", miss)
+            self.assertIn("2026-11-08", miss)
+            self.assertNotIn("weeks 2/2", miss)
+
     def test_ready_when_weeks_hist_clv(self):
         with tempfile.TemporaryDirectory() as tmp:
             hist = [{"pnl": 0.10, "contracts": 1} for _ in range(20)]
