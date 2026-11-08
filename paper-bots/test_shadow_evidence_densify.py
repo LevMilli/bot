@@ -517,6 +517,87 @@ class ShadowEvidenceDensify(unittest.TestCase):
             summ = desk_roi_plan.sports_hard_stop_shadow_summary(tmp)
             self.assertEqual(summ["n"], 1)
 
+    def test_repair_drops_settle_retro_winner_even_without_threshold(self):
+        """Catch-up / settle-retro notes on winners are poison even if bid≠threshold."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sports_dir = os.path.join(tmp, "sports-gap-paper")
+            os.makedirs(sports_dir, exist_ok=True)
+            # Real underwater mid-open shadow — keep.
+            desk_roi_plan.record_sports_hard_stop_shadow(
+                tmp,
+                ticker="KX-MID",
+                entry_price=0.80,
+                bid=0.60,
+                contracts=10,
+                cost=8.0,
+                note="shadow hard-stop — no live sell",
+            )
+            # Settle-retro on a winner (exit 0.57 hits stop, settle pnl≥0) — drop.
+            desk_roi_plan.record_sports_hard_stop_shadow(
+                tmp,
+                ticker="KX-WIN-RETRO",
+                entry_price=0.75,
+                bid=0.57,
+                contracts=10,
+                cost=7.5,
+                note="catchup settle-retro hard-stop — no live sell",
+            )
+            # Settle-retro on a loser — keep (honest underwater finalize).
+            desk_roi_plan.record_sports_hard_stop_shadow(
+                tmp,
+                ticker="KX-LOSE-RETRO",
+                entry_price=0.70,
+                bid=0.50,
+                contracts=10,
+                cost=7.0,
+                note="settle-retro shadow hard-stop — no live sell",
+            )
+            with open(os.path.join(sports_dir, "state.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "cash": 100.0,
+                    "open": [],
+                    "closed": [
+                        {
+                            "ticker": "KX-MID",
+                            "entry_price": 0.80,
+                            "bid": 0.60,
+                            "pnl": -3.0,
+                            "contracts": 10,
+                            "cost": 8.0,
+                        },
+                        {
+                            "ticker": "KX-WIN-RETRO",
+                            "entry_price": 0.75,
+                            "bid": 0.90,
+                            "pnl": 3.0,
+                            "contracts": 10,
+                            "cost": 7.5,
+                        },
+                        {
+                            "ticker": "KX-LOSE-RETRO",
+                            "entry_price": 0.70,
+                            "bid": 0.50,
+                            "pnl": -4.0,
+                            "contracts": 10,
+                            "cost": 7.0,
+                        },
+                    ],
+                    "paper_only": True,
+                }, fh)
+            before = desk_roi_plan.sports_hard_stop_shadow_summary(tmp)["n"]
+            self.assertEqual(before, 3)
+            out = desk_roi_plan.repair_sports_hard_stop_settle_poison(tmp)
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out["removed"], 1)
+            self.assertEqual(out["kept"], 2)
+            with open(
+                os.path.join(tmp, desk_roi_plan.SPORTS_HARD_STOP_SHADOW),
+                encoding="utf-8",
+            ) as fh:
+                rows = json.load(fh).get("rows") or []
+            ticks = {r.get("ticker") for r in rows if isinstance(r, dict)}
+            self.assertEqual(ticks, {"KX-MID", "KX-LOSE-RETRO"})
+
     def test_commodity_tstop_allows_bid_zero(self):
         hit = desk_roi_plan.commodity_time_stop_hit(
             close_time=None,
