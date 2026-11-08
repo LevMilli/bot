@@ -109,8 +109,16 @@ class BtcCardSkipDensify(unittest.TestCase):
             "ETH volatile densify",
             "ETH parlay densify",
             "ETH evaluate densify",
+            "ETH orderbook densify",
         ):
             self.assertIn(note, src)
+        # Prefetch eth_errs must densify (BTC book_errs → reasons; not silent continue).
+        self.assertIn("if key in eth_errs:", src)
+        eth_err_chunk = src.split("if key in eth_errs:", 1)[1].split("ev_early = evaluate_window", 1)[0]
+        self.assertIn("ETH orderbook densify", eth_err_chunk)
+        self.assertIn("skip_reasons.append", eth_err_chunk)
+        self.assertIn("_densify_skip_brain", eth_err_chunk)
+        self.assertIn("orderbook failed", eth_err_chunk)
         import desk_brain
         import desk_more
 
