@@ -7509,7 +7509,10 @@ def _sports_clock_seconds(status) -> float | None:
     ``period_min`` fallback, DROPping time-final densify in the last period.
     Numeric ``clock`` wins when present. When displayClock key is absent,
     parse ``shortDetail``/``detail`` ``m:ss - Nth`` before the conservative
-    period_min guess. End/Halftime/Final detail still means 0s left in slice.
+    period_min guess. Empty/whitespace displayClock is end-of-slice 0s;
+    unparseable displayClock must NOT invent 0s — fall through to
+    shortDetail / End tokens (else None → period_min). End/Halftime/Final
+    detail still means 0s left in slice.
     """
     if not isinstance(status, dict):
         return None
@@ -7539,8 +7542,10 @@ def _sports_clock_seconds(status) -> float | None:
                 return int(mm) * 60.0 + float(ss)
             return float(text)
         except Exception:
-            return 0.0
-    # No clock fields — End/Halftime/Final detail still means 0s left in slice.
+            # Junk displayClock (N/A, --, lone ":") must not invent rem=0 /
+            # false t-final — fall through to shortDetail / End tokens.
+            pass
+    # No usable clock fields — End/Halftime/Final detail still means 0s left.
     typ = status.get("type") if isinstance(status.get("type"), dict) else {}
     blob = " ".join(
         str(typ.get(k) or "")
