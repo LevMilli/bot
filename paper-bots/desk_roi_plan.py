@@ -7564,15 +7564,43 @@ def _sports_clock_seconds(status) -> float | None:
         parsed = _parse_espn_mmss_prefix(typ.get(key) or "")
         if parsed is not None:
             return parsed
+    # Flattened feeds / gap_bot espn_games densify shortDetail onto status root
+    # (and game["detail"]) when type.shortDetail is absent.
+    for key in ("shortDetail", "detail", "description"):
+        if key in status and not isinstance(status.get(key), dict):
+            parsed = _parse_espn_mmss_prefix(status.get(key))
+            if parsed is not None:
+                return parsed
     return None
 
 
-def sports_minutes_remaining(status, league: str | None = None) -> float | None:
-    """Approx regulation minutes left from ESPN period + clock."""
+def sports_minutes_remaining(
+    status,
+    league: str | None = None,
+    *,
+    detail: str | None = None,
+) -> float | None:
+    """Approx regulation minutes left from ESPN period + clock.
+
+    ``detail`` densifies gap_bot ``espn_games`` game-level shortDetail when the
+    competition status blob omitted type.shortDetail (same mm:ss densify).
+    """
     if not isinstance(status, dict):
         return None
+    status_use = status
+    detail_s = str(detail or "").strip()
+    if detail_s:
+        # Inject into a shallow copy so callers' status dicts stay untouched.
+        status_use = dict(status)
+        typ = status_use.get("type") if isinstance(status_use.get("type"), dict) else {}
+        typ = dict(typ)
+        if not str(typ.get("shortDetail") or "").strip():
+            typ["shortDetail"] = detail_s
+            status_use["type"] = typ
+        if not str(status_use.get("shortDetail") or "").strip():
+            status_use["shortDetail"] = detail_s
     try:
-        period = int(status.get("period") or 0)
+        period = int(status_use.get("period") or 0)
     except Exception:
         period = 0
     if period <= 0:
@@ -7580,7 +7608,7 @@ def sports_minutes_remaining(status, league: str | None = None) -> float | None:
     lg = str(league or "").strip().upper()
     period_min = float(SPORTS_PERIOD_MIN.get(lg) or 15.0)
     reg_n = int(SPORTS_REG_PERIODS.get(lg) or 4)
-    clock_s = _sports_clock_seconds(status)
+    clock_s = _sports_clock_seconds(status_use)
     clock_min = (float(clock_s) / 60.0) if clock_s is not None else period_min
     if period > reg_n:
         # OT / extras — already at the final stretch.
