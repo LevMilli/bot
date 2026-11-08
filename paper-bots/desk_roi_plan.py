@@ -7497,22 +7497,59 @@ def staff_set_commodity_time_stop_live(
 
 # ---- Sports time-to-final trim shadow (Phase 3 P1) --------------------------
 
+def _espn_colonless_decimal_minutes_seconds(text) -> float | None:
+    """ESPN colon-less decimal clocks are minutes, not seconds.
+
+    NBA/NCAAB often emit ``displayClock="13.5"`` / shortDetail ``13.5 - 4th``.
+    Treating that as 13.5s invents near-final (rem≈0.2) while ~13.5m remain.
+    Cap at regulation period length (≤20). Whole-second strings like ``90``
+    stay seconds (no decimal point).
+    """
+    raw = str(text or "").strip()
+    if not raw or ":" in raw:
+        return None
+    head = raw.split()[0]
+    for sep in ("-", "–", "—"):
+        if sep in head:
+            left = head.split(sep, 1)[0]
+            if "." in left:
+                head = left
+            break
+    head = head.strip()
+    if "." not in head:
+        return None
+    left, _, right = head.partition(".")
+    if not left.isdigit() or not right.isdigit():
+        return None
+    try:
+        mins = float(head)
+    except Exception:
+        return None
+    if mins < 0.0 or mins > 20.0 + 1e-9:
+        return None
+    return mins * 60.0
+
+
 def _parse_espn_mmss_prefix(text) -> float | None:
     """Parse leading ``m:ss`` / ``mm:ss`` from ESPN shortDetail-style strings.
 
-    Examples: ``3:42 - 4th``, ``0:45-4th Quarter``. Refuses non-clock junk so
-    we never invent a near-final rem from prose alone.
+    Examples: ``3:42 - 4th``, ``0:45-4th Quarter``, ``3.5 - 4th`` (decimal
+    minutes). Refuses non-clock junk so we never invent a near-final rem from
+    prose alone.
     """
     raw = str(text or "").strip()
     if not raw:
         return None
     head = raw.split()[0]
     for sep in ("-", "–", "—"):
-        if sep in head and ":" in head.split(sep, 1)[0]:
+        if sep in head and (
+            ":" in head.split(sep, 1)[0] or "." in head.split(sep, 1)[0]
+        ):
             head = head.split(sep, 1)[0]
             break
     if ":" not in head:
-        return None
+        # Prefer-1: colon-less decimal minutes (NBA ``13.5 - 4th``) densify.
+        return _espn_colonless_decimal_minutes_seconds(head)
     try:
         mm_s, ss_s = head.split(":", 1)
         if not mm_s.isdigit():
@@ -7540,7 +7577,8 @@ def _sports_clock_seconds(status) -> float | None:
     period_min guess. Empty/whitespace displayClock is end-of-slice 0s;
     unparseable displayClock must NOT invent 0s — fall through to
     shortDetail / End tokens (else None → period_min). End/Halftime/Final
-    detail still means 0s left in slice.
+    detail still means 0s left in slice. Colon-less decimal ``displayClock``
+    (``13.5``) is minutes — never invent false t-final as seconds.
     """
     if not isinstance(status, dict):
         return None
@@ -7568,6 +7606,10 @@ def _sports_clock_seconds(status) -> float | None:
             if ":" in text:
                 mm, ss = text.split(":", 1)
                 return int(mm) * 60.0 + float(ss)
+            # Prefer-1: ``13.5`` is 13.5 minutes (NBA), not 13.5 seconds.
+            dec = _espn_colonless_decimal_minutes_seconds(text)
+            if dec is not None:
+                return dec
             return float(text)
         except Exception:
             # Junk displayClock (N/A, --, lone ":") must not invent rem=0 /
