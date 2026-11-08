@@ -536,6 +536,75 @@ def _card_line(summary_out):
     return "CARD: No paper buy (lanes clear, no fee-aware edge)."
 
 
+def _densify_early_eval_skip(
+    *,
+    reason: str,
+    ticker: str = "",
+    side: str = "",
+    series: str = "",
+    league: str = "",
+    fair=None,
+    gap=None,
+    ask=None,
+    bid=None,
+    lane: str = "",
+) -> None:
+    """Mirror buy-path skip densify for early evaluate rejects (#396 leftover).
+
+    CARD already gets `summary_out["skips"]`; this feeds desk_brain / skip_board
+    / feature-store consumers. Observe only — never LIVE / force-arm.
+    """
+    if not reason:
+        return
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_brain
+        desk_brain.record_decision(
+            DESK_ROOT,
+            bot="sports-gap",
+            action="skip",
+            ticker=str(ticker or ""),
+            side=str(side or ""),
+            edge=gap,
+            confidence=fair,
+            reasons=[reason],
+            note="early evaluate densify",
+        )
+    except Exception:
+        pass
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_living
+        fee_n = None
+        try:
+            fee_n = fee(ask) if ask is not None else None
+        except Exception:
+            fee_n = None
+        desk_living.record_eval_features(
+            DESK_ROOT,
+            bot="sports-gap",
+            action="skip",
+            ticker=str(ticker or ""),
+            series=str(series or league or ""),
+            ev={
+                "side": side,
+                "ask": ask,
+                "bid": bid,
+                "fee": fee_n,
+                "confidence": fair,
+                "edge": gap,
+                "lane": lane,
+                "ticker": ticker,
+            },
+            reasons=[reason],
+            note=str(reason)[:160],
+        )
+    except Exception:
+        pass
+
+
 def run():
     t0 = time.perf_counter()
     existed = os.path.exists(STATE)
@@ -733,6 +802,10 @@ def run():
                 reason = "no fair prob - skip"
                 lines.append(row + f" | {reason} |")
                 summary_out["skips"].append(reason)
+                tick0 = str((pair.get("home") or {}).get("ticker") or "")
+                _densify_early_eval_skip(
+                    reason=reason, ticker=tick0, series=series, league=league,
+                )
                 continue
             # best side
             cands = []
@@ -743,6 +816,14 @@ def run():
                 reason = "no prices - skip"
                 lines.append(row + f" | {reason} |")
                 summary_out["skips"].append(reason)
+                tick0 = str((pair.get("home") or {}).get("ticker") or "")
+                _densify_early_eval_skip(
+                    reason=reason,
+                    ticker=tick0,
+                    series=series,
+                    league=league,
+                    fair=fair_home,
+                )
                 continue
             gap, side, m, fair, bid, ask = max(cands, key=lambda c: c[0])
             gtxt = f"{gap*100:+.1f} pts on {m.get('yes_sub_title')} (fair {fair:.1%} vs ask {ask:.2f})"
@@ -846,6 +927,19 @@ def run():
                 lines.append(row + gtxt + f" | {reason} |")
                 # Densify evaluate rejects into CARD skips (was learning_skip-only).
                 summary_out["skips"].append(reason)
+                # Also densify brain / feature-store / skip_board (#396 leftover).
+                _densify_early_eval_skip(
+                    reason=reason,
+                    ticker=str(m.get("ticker") or ""),
+                    side=str(side or ""),
+                    series=series,
+                    league=league,
+                    fair=fair,
+                    gap=gap,
+                    ask=ask,
+                    bid=bid,
+                    lane=lane,
+                )
                 continue
             if alarm is not None:
                 print(f"  TIP-ALARM T−{alarm}: {league} {name} (fee-aware priority, edge still required)")

@@ -41,6 +41,45 @@ class SportsGapSkipDensify(unittest.TestCase):
         })
         self.assertIn("lanes clear", card)
 
+    def test_early_eval_skip_densifies_brain_and_features(self):
+        gap = _load_gap()
+        with tempfile.TemporaryDirectory() as tmp:
+            gap.DESK_ROOT = tmp
+            gap._densify_early_eval_skip(
+                reason="gap < 6 (accurate) - no trade",
+                ticker="KXNHL-TEST",
+                side="home",
+                series="KXNHLGAME",
+                league="NHL",
+                fair=0.62,
+                gap=0.04,
+                ask=0.55,
+                bid=0.52,
+                lane="accurate",
+            )
+            import desk_brain
+            journal = desk_brain.load_journal(tmp)
+            decisions = journal.get("decisions") or []
+            self.assertTrue(decisions)
+            last = decisions[-1]
+            self.assertEqual(last.get("action"), "skip")
+            self.assertEqual(last.get("bot"), "sports-gap")
+            self.assertEqual(last.get("ticker"), "KXNHL-TEST")
+            self.assertIn("gap < 6", str((last.get("reasons") or [""])[0]))
+            self.assertEqual(
+                int((journal.get("by_bot") or {}).get("sports-gap", {}).get("skips") or 0),
+                1,
+            )
+            feat_path = os.path.join(tmp, "desk_feature_store.jsonl")
+            self.assertTrue(os.path.isfile(feat_path))
+            with open(feat_path, encoding="utf-8") as fh:
+                lines = [ln for ln in fh.read().splitlines() if ln.strip()]
+            self.assertTrue(lines)
+            row = json.loads(lines[-1])
+            self.assertEqual(row.get("bot"), "sports-gap")
+            self.assertEqual(row.get("action"), "skip")
+            self.assertIn("gap < 6", str(row.get("skip_codes") or row.get("note") or ""))
+
 
 if __name__ == "__main__":
     unittest.main()
