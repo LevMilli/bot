@@ -4093,6 +4093,36 @@ def grade_leg(guild_id: int, pick_id: int, idx: int,
     return p2, note
 
 
+def dashboard_hidden_name(name) -> bool:
+    """True when this display name is kept off every PIMP-BOT dashboard surface."""
+    return str(name or "").strip().casefold() == "lelouch"
+
+
+def dashboard_hidden_pick(row) -> bool:
+    """True when a pick/row's bettor display name is kept off the dashboard."""
+    if row is None:
+        return False
+    try:
+        name = row["bettor_name"]
+    except Exception:
+        name = None
+    if name is None and isinstance(row, dict):
+        name = row.get("bettor_name") or row.get("who") or row.get("name") or row.get("user_name")
+    return dashboard_hidden_name(name)
+
+
+def dashboard_hidden_line(text: str) -> bool:
+    """True when a dashboard records/label line names the hidden display name."""
+    plain = re.sub(r"[*_`]", "", str(text or ""))
+    for part in plain.split("·"):
+        token = part.strip()
+        head = token.split("(", 1)[0].strip()
+        if dashboard_hidden_name(token) or dashboard_hidden_name(head):
+            return True
+    return False
+
+
+
 def compute_stats(guild_id: int, bettor_key: Optional[str] = None,
                   since: Optional[str] = None, until: Optional[str] = None,
                   sport: Optional[str] = None, preseason: bool = True, platform: Optional[str] = None) -> list[dict]:
@@ -4142,7 +4172,11 @@ def compute_stats(guild_id: int, bettor_key: Optional[str] = None,
     for s in out.values():
         s["net"] = s["returned"] - s["staked"]
         s["roi"] = (s["net"] / s["staked"] * 100) if s["staked"] else 0.0
-    return sorted(out.values(), key=lambda s: s["net"], reverse=True)
+    ranked = sorted(out.values(), key=lambda s: s["net"], reverse=True)
+    # Single-person lookups still resolve; group boards drop the hidden display name.
+    if bettor_key:
+        return ranked
+    return [s for s in ranked if not dashboard_hidden_name(s.get("name"))]
 
 
 def leg_counts(guild_id: int, bettor_key: Optional[str] = None,
@@ -8240,10 +8274,10 @@ def chart_series(guild_id: int, days: int, bettor_key: Optional[str] = None) -> 
 
 
 def dashboard_profit_series(series: dict) -> dict:
-    """Picks-dashboard group profit lines. The display name Lelouch is left off this graph."""
+    """Picks-dashboard group profit lines without the hidden display name."""
     return {
         name: pts for name, pts in series.items()
-        if str(name or "").strip().casefold() != "lelouch"
+        if not dashboard_hidden_name(name)
     }
 
 
@@ -13368,14 +13402,16 @@ def dash_this_week(guild_id: int) -> dict:
     settled, net = 0, 0.0
     try:
         rows = db().execute(
-            """SELECT cost, returned, settled_at, created_at, hidden, revealed_at, test FROM picks
-               WHERE guild_id = ? AND status != 'open'""", (guild_id,)).fetchall()
+            """SELECT cost, returned, settled_at, created_at, hidden, revealed_at, test, bettor_name
+               FROM picks WHERE guild_id = ? AND status != 'open'""", (guild_id,)).fetchall()
     except Exception:
         rows = []
     for p in rows:
         if p["hidden"] and not p["revealed_at"]:
             continue
         if p["test"]:
+            continue
+        if dashboard_hidden_pick(p):
             continue
         raw = p["settled_at"] or p["created_at"] or ""
         try:
@@ -13388,15 +13424,31 @@ def dash_this_week(guild_id: int) -> dict:
             continue
         settled += 1
         net += (p["returned"] or 0.0) - (p["cost"] or 0.0)
+    open_n = 0
     try:
-        open_n = db().execute(
-            """SELECT COUNT(*) AS n FROM picks WHERE guild_id = ? AND status = 'open'
-               AND (hidden IS NULL OR hidden = 0) AND (test IS NULL OR test = 0)""", (guild_id,)).fetchone()["n"]
+        for p in db().execute(
+                """SELECT bettor_name FROM picks WHERE guild_id = ? AND status = 'open'
+                   AND (hidden IS NULL OR hidden = 0) AND (test IS NULL OR test = 0)""",
+                (guild_id,)):
+            if dashboard_hidden_pick(p):
+                continue
+            open_n += 1
     except Exception:
         open_n = 0
     coins = 0
+    names = {}
     try:
-        for tx in db().execute("SELECT delta, created_at FROM coin_tx WHERE guild_id = ?", (guild_id,)):
+        for person in db().execute(
+                "SELECT bettor_id, bettor_name FROM picks WHERE guild_id = ? AND bettor_id IS NOT NULL",
+                (guild_id,)):
+            names[person["bettor_id"]] = person["bettor_name"]
+    except Exception:
+        names = {}
+    try:
+        for tx in db().execute(
+                "SELECT user_id, delta, created_at FROM coin_tx WHERE guild_id = ?", (guild_id,)):
+            if dashboard_hidden_name(names.get(tx["user_id"])):
+                continue
             try:
                 when = datetime.fromisoformat(tx["created_at"])
             except Exception:
@@ -13424,6 +13476,8 @@ def dash_week_plays(guild_id: int) -> list[dict]:
         if p["hidden"] and not p["revealed_at"]:
             continue
         if pick_is_test(p):
+            continue
+        if dashboard_hidden_pick(p):
             continue
         if local_stamp(p["created_at"] or "") < start:
             continue
@@ -13462,31 +13516,42 @@ def dashboard_data(guild_id: int) -> dict:
     def board(stats):
         return [{"key": s["key"], "name": s["name"], "record": record_line(s), "net": round(s["net"], 2),
                  "roi": round(s["roi"], 1), "streak": current_streak(guild_id, s["key"]), "open": s["open"]}
-                for s in stats if s["wins"] + s["losses"] + s["pushes"] > 0]
+                for s in stats
+                if s["wins"] + s["losses"] + s["pushes"] > 0 and not dashboard_hidden_name(s.get("name"))]
     series = dashboard_profit_series(chart_series(guild_id, 3650))
-    recent = [{"id": p["id"], "who": p["bettor_name"], "key": str(p["bettor_id"] or ""),
-               "what": shown_desc(p), "platform": p["platform"],
-               "sport": clip(p["sport"] or "", 24), "status": p["status"], "net": round(pick_net(p), 2),
-               "cost": p["cost"], "payout": p["payout"], "when": local_day(p["settled_at"] or p["created_at"]),
-               "stamp": local_stamp(p["settled_at"] or p["created_at"] or "")}
-              for p in db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND
+    recent = []
+    for p in db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status != 'open' AND
                                        (hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL)
                                        AND (test IS NULL OR test = 0)
-                                       ORDER BY settled_at DESC LIMIT 25""", (guild_id,))]
-    open_ = [{"id": p["id"], "who": p["bettor_name"], "key": str(p["bettor_id"] or ""),
-              "what": shown_desc(p), "platform": p["platform"],
-              "sport": clip(p["sport"] or "", 24), "cost": p["cost"], "payout": p["payout"],
-              "logged": local_stamp(p["created_at"] or ""),
-              "slate": local_day(p["slate_date"]) if _rg(p, "slate_date") else "",
-              "slate_on": local_stamp(p["slate_date"]) if _rg(p, "slate_date") else "",
-              "side": (_rg(p, "kalshi_side") or "").strip().lower()[:8],
-              "logger": int(p["logged_by"] or 0),
-              "player": dash_prop_name(shown_desc(p)) or None}
-             for p in db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status = 'open'
+                                       ORDER BY settled_at DESC LIMIT 80""", (guild_id,)):
+        if dashboard_hidden_pick(p):
+            continue
+        recent.append({"id": p["id"], "who": p["bettor_name"], "key": str(p["bettor_id"] or ""),
+                       "what": shown_desc(p), "platform": p["platform"],
+                       "sport": clip(p["sport"] or "", 24), "status": p["status"], "net": round(pick_net(p), 2),
+                       "cost": p["cost"], "payout": p["payout"], "when": local_day(p["settled_at"] or p["created_at"]),
+                       "stamp": local_stamp(p["settled_at"] or p["created_at"] or "")})
+        if len(recent) >= 25:
+            break
+    open_ = []
+    for p in db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status = 'open'
                                        AND (hidden IS NULL OR hidden = 0)
                                        AND (future_due IS NULL OR future_due = '')
                                        AND (test IS NULL OR test = 0)
-                                       ORDER BY id DESC LIMIT 40""", (guild_id,))]
+                                       ORDER BY id DESC LIMIT 120""", (guild_id,)):
+        if dashboard_hidden_pick(p):
+            continue
+        open_.append({"id": p["id"], "who": p["bettor_name"], "key": str(p["bettor_id"] or ""),
+                      "what": shown_desc(p), "platform": p["platform"],
+                      "sport": clip(p["sport"] or "", 24), "cost": p["cost"], "payout": p["payout"],
+                      "logged": local_stamp(p["created_at"] or ""),
+                      "slate": local_day(p["slate_date"]) if _rg(p, "slate_date") else "",
+                      "slate_on": local_stamp(p["slate_date"]) if _rg(p, "slate_date") else "",
+                      "side": (_rg(p, "kalshi_side") or "").strip().lower()[:8],
+                      "logger": int(p["logged_by"] or 0),
+                      "player": dash_prop_name(shown_desc(p)) or None})
+        if len(open_) >= 40:
+            break
     legmap: dict[int, list] = {}
     if open_:
         marks = ",".join("?" * len(open_))
@@ -13504,16 +13569,23 @@ def dashboard_data(guild_id: int) -> dict:
             row["demon"] = 1
         if re.search(r"\bgoblin\b", blob):
             row["goblin"] = 1
-    futures = [{"id": p["id"], "who": clip(p["bettor_name"], 40), "what": clip(shown_desc(p), 90),
-                "due": local_day(p["future_due"]) if p["future_due"] else "",
-                "cost": p["cost"], "payout": p["payout"]}
-               for p in db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status = 'open'
+    futures = []
+    for p in db().execute("""SELECT * FROM picks WHERE guild_id = ? AND status = 'open'
                                         AND (hidden IS NULL OR hidden = 0)
                                         AND future_due IS NOT NULL AND future_due != ''
                                         AND (test IS NULL OR test = 0)
-                                        ORDER BY future_due LIMIT 20""", (guild_id,))]
+                                        ORDER BY future_due LIMIT 60""", (guild_id,)):
+        if dashboard_hidden_pick(p):
+            continue
+        futures.append({"id": p["id"], "who": clip(p["bettor_name"], 40), "what": clip(shown_desc(p), 90),
+                        "due": local_day(p["future_due"]) if p["future_due"] else "",
+                        "cost": p["cost"], "payout": p["payout"]})
+        if len(futures) >= 20:
+            break
     r = gp_round(guild_id, create=False)
-    gp = [{"who": x["user_name"], "leg": x["text"], "status": x["status"]} for x in gp_legs(r["id"])] if r else []
+    gp = [{"who": x["user_name"], "leg": x["text"], "status": x["status"]}
+          for x in (gp_legs(r["id"]) if r else [])
+          if not dashboard_hidden_name(x["user_name"])]
     names = {}
     for p in db().execute("SELECT bettor_id, bettor_name FROM picks WHERE guild_id = ? AND bettor_id IS NOT NULL", (guild_id,)):
         names[p["bettor_id"]] = p["bettor_name"]
@@ -13522,7 +13594,7 @@ def dashboard_data(guild_id: int) -> dict:
         bettor = int(row["key"]) if str(row.get("key") or "").isdigit() else 0
         if logger and bettor and logger != bettor:
             who = names.get(logger) or ""
-            if who and who != row.get("who"):
+            if who and who != row.get("who") and not dashboard_hidden_name(who):
                 row["filer"] = clip(who, 40)
     coins = []
     coin_split: dict[int, tuple[int, int]] = {}
@@ -13537,7 +13609,10 @@ def dashboard_data(guild_id: int) -> dict:
             coin_split[tx["user_id"]] = (earned, spent)
     except Exception:
         coin_split = {}
-    for u in coins_top(guild_id, 10):
+    for u in coins_top(guild_id, 30):
+        who = names.get(u["user_id"], "Member")
+        if dashboard_hidden_name(who):
+            continue
         why = ""
         try:
             last = db().execute(
@@ -13556,20 +13631,29 @@ def dashboard_data(guild_id: int) -> dict:
         except Exception:
             game = ""
         earned, spent = coin_split.get(u["user_id"], (0, 0))
-        coins.append({"who": names.get(u["user_id"], "Member"), "coins": int(u["bal"]), "why": why, "game": game,
+        coins.append({"who": who, "coins": int(u["bal"]), "why": why, "game": game,
                       **({"earned": earned, "spent": spent} if earned and spent else {})})
+        if len(coins) >= 10:
+            break
     rec = dash30_safe_records(guild_id, records_embed(guild_id).description or "")
+    record_lines = [re.sub(r"\*\*", "", line) for line in rec.split("\n")
+                    if line and not dashboard_hidden_line(line)]
     markets = []
     for p in db().execute(
             """SELECT * FROM picks WHERE guild_id = ? AND status = 'open'
                AND (hidden IS NULL OR hidden = 0)
                AND (LOWER(COALESCE(platform,'')) = 'kalshi'
                     OR (kalshi_ticker IS NOT NULL AND kalshi_ticker != ''))
-               ORDER BY id DESC LIMIT 12""", (guild_id,)):
+               ORDER BY id DESC LIMIT 40""", (guild_id,)):
+        if dashboard_hidden_pick(p):
+            continue
         markets.append({"id": p["id"], "who": clip(p["bettor_name"], 40), "what": clip(shown_desc(p), 80),
                         "platform": clip(p["platform"] or "Kalshi", 20),
                         "ticker": clip(p["kalshi_ticker"] or "", 32),
                         "side": clip(p["kalshi_side"] or "", 8)})
+        if len(markets) >= 12:
+            break
+    visible_stats = [s for s in compute_stats(guild_id) if not dashboard_hidden_name(s.get("name"))]
     return {"version": BOT_VERSION, "update": ROADMAP_NOW, "season": season["name"] if season else None, "people": dashboard_people(guild_id),
             "settled24": dashboard_recent(guild_id),
             "settledWeek": dashboard_settled_week(guild_id),
@@ -13580,13 +13664,12 @@ def dashboard_data(guild_id: int) -> dict:
             "recent": recent, "open": open_, "futures": futures, "tickets": list(open_[:12]), "markets": markets,
             "commands": dash_commands(),
             "groupparlay": gp, "coins": coins,
-            "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
-            "records": [re.sub(r"\*\*", "", line) for line in rec.split("\n") if line],
+            "records": record_lines,
             "roadmap": BOT_ROADMAP, "plan": BOT_PLAN, "later": BOT_LATER, "thousand": BOT_THOUSAND,
             "updates": [{"ver": v, "text": t} for v, t in reversed(MEMBER_NEWS[-5:])],
             "week": dash_this_week(guild_id),
             "netmode": "group" if get_setting(guild_id, "kpi_net") == "group" else "week",
-            "groupnet": round(sum(s["net"] for s in compute_stats(guild_id)), 2),
+            "groupnet": round(sum(s["net"] for s in visible_stats), 2),
             "h2h": dash_h2h_board(guild_id), "weekplays": dash_week_plays(guild_id),
             "weekboard": clip(get_setting(guild_id, "week_board") or "", 280),
             "booted": central_stamp(STARTED_AT),
@@ -13656,12 +13739,16 @@ def dashboard_csv(guild_id: int, kind: str) -> str:
     if kind == "leaderboard":
         w.writerow(["Name", "Wins", "Losses", "Pushes", "Staked", "Net", "ROI %"])
         for s in compute_stats(guild_id):
+            if dashboard_hidden_name(s.get("name")):
+                continue
             w.writerow([s["name"], s["wins"], s["losses"], s["pushes"], round(s["staked"], 2), round(s["net"], 2),
                         round(s["roi"], 1)])
     else:
         w.writerow(["#", "Logged", "Settled", "Who", "Platform", "Sport", "Pick", "Legs", "Cost", "Payout", "Status",
                     "Returned", "Net"])
         for p in db().execute("SELECT * FROM picks WHERE guild_id = ? ORDER BY id", (guild_id,)):
+            if dashboard_hidden_pick(p):
+                continue
             hide = dash_secret(p)
             w.writerow([p["id"], local_day(p["created_at"]), local_day(p["settled_at"]) if p["settled_at"] else "",
                         p["bettor_name"], p["platform"], "" if hide else (p["sport"] or ""),
@@ -17794,6 +17881,8 @@ def card_payload(guild_id: int, key: str, name: str, back: bool = False) -> Opti
     if cn is None:
         return None
     s = cn["s"]
+    if dashboard_hidden_name(s.get("name") or name):
+        return None
     green, red = ART_GREEN, ART_RED
     streak = current_streak(guild_id, key).lstrip("🔥🧊")
     stats = [("WIN %", f"{s['wins'] / cn['n'] * 100:.0f}%" if cn["n"] else "-", None),
@@ -18329,6 +18418,8 @@ async def board_snapshot(client, guild_id: int) -> Optional[tuple]:
     today = datetime.now(TZ).date()
     slips = []
     for p in picks:
+        if dashboard_hidden_pick(p):
+            continue
         entries = await cached_progress(p) if p["status"] == "open" else db_entries(p)
         design_remember(p, entries)
         relevant = p["status"] != "open"
@@ -20569,7 +20660,7 @@ async def cashed_poster_file(client, guild_id: int, days: int = 7) -> Optional[d
     since = iso(datetime.now(timezone.utc) - timedelta(days=days))
     wins = db().execute("SELECT * FROM picks WHERE guild_id = ? AND status = 'win' AND settled_at >= ? AND "
                         "(hidden IS NULL OR hidden = 0 OR revealed_at IS NOT NULL)", (guild_id, since)).fetchall()
-    wins = sorted(wins, key=pick_net, reverse=True)[:6]
+    wins = [p for p in sorted(wins, key=pick_net, reverse=True) if not dashboard_hidden_pick(p)][:6]
     if not wins:
         return None
     receipts = []
@@ -20595,7 +20686,8 @@ async def standings_poster_file(client, guild_id: int, period: str = "season", b
         since = iso(now - timedelta(days=60))
         until = iso(now - timedelta(days=30))
         season = None
-    stats = [s for s in compute_stats(guild_id, since=since, until=until) if s["wins"] + s["losses"] + s["pushes"] > 0]
+    stats = [s for s in compute_stats(guild_id, since=since, until=until)
+             if s["wins"] + s["losses"] + s["pushes"] > 0 and not dashboard_hidden_name(s.get("name"))]
     if not stats:
         return None
     moves = rank_movement(guild_id, [s["key"] for s in stats], since, None) if period == "season" else {}
@@ -21343,13 +21435,13 @@ async def dashboard_image(kind: str, guild_id: int, arg: str = "", back: bool = 
             out = png.getvalue()
     elif kind == "card":
         c = card_payload(guild_id, arg, arg, back=back)
-        if c is not None:
+        if c is not None and not dashboard_hidden_name((c or {}).get("name") if isinstance(c, dict) else None):
             user = (await known_user(bot, int(arg)) if arg.isdigit() else None)
             av = await avatar_bytes(user) if user else None
             out = (await asyncio.to_thread(locked_render, render_trading_card, c, av)).getvalue()
     elif kind == "receipt":
         p = get_pick(guild_id, int(arg)) if arg.isdigit() else None
-        if p is not None and not dash_secret(p):
+        if p is not None and not dash_secret(p) and not dashboard_hidden_pick(p):
             entries = await cached_progress(p) if p["status"] == "open" else db_entries(p)
             user = (await known_user(bot, p["bettor_id"]) if p["bettor_id"] else None)
             av = await avatar_bytes(user) if user else None
@@ -21567,7 +21659,8 @@ def dash_h2h_board(guild_id: int) -> list[dict]:
             box["aw"] += 1
         elif r["winner_id"] == hi:
             box["bw"] += 1
-    flat = [v for sides in bag.values() for v in sides.values()]
+    flat = [v for sides in bag.values() for v in sides.values()
+            if not dashboard_hidden_name(v.get("a")) and not dashboard_hidden_name(v.get("b"))]
     return flat[:12]
 
 
@@ -21592,6 +21685,8 @@ def dashboard_people(guild_id: int) -> list[dict]:
     blank = {"season": 0.0, "month": 0.0, "week": 0.0}
     out = []
     for s in compute_stats(guild_id):
+        if dashboard_hidden_name(s.get("name")):
+            continue
         if s["wins"] + s["losses"] + s["pushes"] <= 0 and not s["open"]:
             continue
         row = {"key": s["key"], "name": s["name"], "record": record_line(s), "net": round(s["net"], 2),
@@ -22575,13 +22670,15 @@ def dashboard_settled_week(guild_id: int) -> dict:
     net = 0.0
     try:
         rows = db().execute(
-            """SELECT status, cost, returned, hidden, revealed_at, test FROM picks
+            """SELECT status, cost, returned, hidden, revealed_at, test, bettor_name FROM picks
                WHERE guild_id = ? AND status != 'open' AND settled_at >= ?""",
             (guild_id, iso(week_start()))).fetchall()
     except Exception:
         rows = []
     for p in rows:
         if unrevealed_hidden(p) or pick_is_test(p):
+            continue
+        if dashboard_hidden_pick(p):
             continue
         n += 1
         if p["status"] == "win":
@@ -22598,11 +22695,13 @@ def dashboard_last_settle(guild_id: int):
         rows = db().execute(
             """SELECT id, bettor_name, settled_at, hidden, revealed_at, test FROM picks
                WHERE guild_id = ? AND status != 'open'
-               ORDER BY settled_at DESC, id DESC LIMIT 8""", (guild_id,)).fetchall()
+               ORDER BY settled_at DESC, id DESC LIMIT 40""", (guild_id,)).fetchall()
     except Exception:
         return None
     for p in rows:
         if unrevealed_hidden(p) or pick_is_test(p):
+            continue
+        if dashboard_hidden_pick(p):
             continue
         return {"id": p["id"], "who": clip(p["bettor_name"] or "", 40),
                 "when": local_day(p["settled_at"]) if p["settled_at"] else "",
@@ -22649,6 +22748,8 @@ def dashboard_recent(guild_id: int) -> list[dict]:
     for p in rows:
         if pick_is_test(p) or unrevealed_hidden(p):
             continue
+        if dashboard_hidden_pick(p):
+            continue
         legs = legmap.get(int(p["id"])) or []
         hits = sum(1 for st, _text in legs if st == "hit")
         miss = next((clip_word(text, 80) for st, text in legs if st == "miss" and str(text).strip()), "")
@@ -22683,7 +22784,7 @@ def dashboard_recent(guild_id: int) -> list[dict]:
         filer = ""
         if logger and bettor and logger != bettor:
             who = names.get(logger) or ""
-            if who and who != p["bettor_name"]:
+            if who and who != p["bettor_name"] and not dashboard_hidden_name(who):
                 filer = clip(who, 40)
         blob = shown_desc(p) or ""
         if re.search(r"\bflex\b", blob, re.I):
@@ -26641,6 +26742,8 @@ def dash_person(guild_id: int, key: str) -> Optional[dict]:
     if not stats:
         return None
     s = stats[0]
+    if dashboard_hidden_name(s.get("name")):
+        return None
     rows = [p for p in db().execute(f"SELECT * FROM picks WHERE guild_id = ? AND bettor_key = ? AND {_DASH_VISIBLE} "
                         "ORDER BY COALESCE(settled_at, created_at) DESC, id DESC LIMIT 500", (guild_id, key)).fetchall()
             if not pick_is_test(p)]
@@ -35669,6 +35772,21 @@ const S={data:null,tab:'overview',lb:'season',period:'season',back:0,loadedAt:0,
 const COLORS=['#8b5cf6','#f59e0b','#10b981','#3b82f6','#ec4899','#14b8a6','#f97316','#84cc16'];
 const GQ=(()=>{const g=new URLSearchParams(location.search).get('guild');return g&&/^\d{1,20}$/.test(g)?'guild='+g:''})();
 const qs=(...xs)=>{const p=[GQ,...xs].filter(Boolean).join('&');return p?'?'+p:''};
+function dashHiddenName(n){return String(n||'').trim().toLowerCase()==='lelouch'}
+function scrubDash(d){if(!d||typeof d!=='object')return d;
+ const drop=xs=>Array.isArray(xs)?xs.filter(x=>x&&!dashHiddenName(x.name||x.who||x.user_name||x.a||x.b)):xs;
+ d.people=drop(d.people);d.leaderboard=drop(d.leaderboard);d.alltime=drop(d.alltime);
+ d.recent=drop(d.recent);d.open=drop(d.open);d.futures=drop(d.futures);d.markets=drop(d.markets);
+ d.tickets=drop(d.tickets);d.coins=drop(d.coins);d.groupparlay=drop(d.groupparlay);
+ d.weekplays=drop(d.weekplays);d.settled24=drop(d.settled24);
+ d.h2h=(Array.isArray(d.h2h)?d.h2h:[]).filter(x=>x&&!dashHiddenName(x.a)&&!dashHiddenName(x.b));
+ if(d.series&&typeof d.series==='object'){const keep={};for(const k in d.series)if(!dashHiddenName(k))keep[k]=d.series[k];d.series=keep}
+ if(Array.isArray(d.records))d.records=d.records.filter(line=>{
+  return !String(line||'').split('·').some(part=>{
+   const t=String(part||'').replace(/[*_`]/g,'').trim();
+   return dashHiddenName(t)||dashHiddenName(t.split('(')[0].trim())})});
+ if(d.lastSettle&&dashHiddenName(d.lastSettle.who))d.lastSettle=null;
+ return d}
 function h(tag,props,...kids){const el=document.createElement(tag);
  if(props)for(const k in props){const v=props[k];if(v==null||v===false)continue;
   if(k==='class')el.className=v;else if(k==='text')el.textContent=v;else if(k==='style')el.style.cssText=v;
@@ -36241,7 +36359,7 @@ async function load(){const seq=++S.seq;const bar=$('#loadbar');if(bar)bar.class
   ($('main')||document.body).prepend(bar);if(S.data)S.data.updated='offline'}return}
  if(seq!==S.seq)return;
  for(const k of ['open','recent','alltime','leaderboard','people','coins','groupparlay','records','needs','ticker','games'])d[k]=d[k]||[];
- S.data=d;S.loadedAt=Date.now();S.hold=1;renderMeta(d);renderTicker(d);renderMini();render()}
+ S.data=scrubDash(d);S.loadedAt=Date.now();S.hold=1;renderMeta(S.data);renderTicker(S.data);renderMini();render()}
 function skeletonAll(){const kpi=()=>h('div',{class:'card kpi'},h('div',{class:'skl',style:'height:12px;width:50%'}),h('div',{class:'skl',style:'height:22px;width:70%;margin-top:8px'}));
  const slip=()=>h('div',{class:'card'},h('div',{class:'skl',style:'height:14px;width:40%'}),h('div',{class:'skl',style:'height:64px;margin-top:10px'}));
  const row=()=>h('div',{class:'row'},h('div',{class:'skl',style:'height:16px;width:55%'}),h('div',{class:'skl',style:'height:12px;width:30%;margin-top:6px'}));
