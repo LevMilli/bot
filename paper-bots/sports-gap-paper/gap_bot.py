@@ -48,6 +48,43 @@ MAX_BUYS_PER_CHECK = 4    # more than one paper fill per timer tick when risk al
 SCALE_OUT_FAIR_MOVE = 0.08
 SCALE_OUT_FRAC = 0.50
 
+
+def fair_lane_floors(league: str = "", root: str | None = None) -> dict:
+    """Accurate/speed fair floors with staff soft-p relax applied (never edge/fee)."""
+    fair_floor = float(MIN_FAIR_PROB)
+    speed_floor = float(MIN_FAIR_SPEED)
+    try:
+        root_s = root if root is not None else DESK_ROOT
+        if root_s not in sys.path:
+            sys.path.insert(0, root_s)
+        import desk_top25
+        fair_floor = float(desk_top25.league_fair_floor(league))
+        speed_floor = float(desk_top25.league_speed_floor(league))
+    except Exception:
+        fair_floor = float(MIN_FAIR_PROB)
+        speed_floor = float(MIN_FAIR_SPEED)
+    p_relax = 0.0
+    try:
+        root_s = root if root is not None else DESK_ROOT
+        if root_s not in sys.path:
+            sys.path.insert(0, root_s)
+        import desk_roi_plan as _nm_relax
+        relax = _nm_relax.effective_near_miss_relax(root_s)
+        p_relax = float(relax.get("p_relax") or 0.0)
+    except Exception:
+        p_relax = 0.0
+    accurate = max(0.50, max(float(MIN_FAIR_ACCURATE), fair_floor) - p_relax)
+    speed = max(0.50, max(float(speed_floor), float(MIN_FAIR_SPEED)) - p_relax)
+    return {
+        "accurate_floor": accurate,
+        "speed_floor": speed,
+        "p_relax": p_relax,
+        "fair_floor": fair_floor,
+        "paper_only": True,
+        "fee_floors_locked": True,
+    }
+
+
 def stake_for_model(fair, desk=None, cfg=None, edge=None, open_risk_used=0.0, ask=None, spread=None, ticker=None):
     """Paper dollars for one sports fill — Kelly-lite + shared vol/learn adapt."""
     if desk is not None:
@@ -695,20 +732,10 @@ def run():
             reason = None
             lane = "accurate"
             need = base_need
-            # Top25 #15 / E1 #113 — sport-split fair floors (NFL stricter both lanes).
-            fair_floor = MIN_FAIR_PROB
-            speed_floor = MIN_FAIR_SPEED
-            try:
-                if DESK_ROOT not in sys.path:
-                    sys.path.insert(0, DESK_ROOT)
-                import desk_top25
-                fair_floor = float(desk_top25.league_fair_floor(league))
-                speed_floor = float(desk_top25.league_speed_floor(league))
-            except Exception:
-                fair_floor = MIN_FAIR_PROB
-                speed_floor = MIN_FAIR_SPEED
-            accurate_floor = max(MIN_FAIR_ACCURATE, fair_floor)
-            speed_floor = max(float(speed_floor), float(MIN_FAIR_SPEED))
+            # Top25 #15 / E1 #113 — sport-split fair floors + staff soft-p relax.
+            floors = fair_lane_floors(league, DESK_ROOT)
+            accurate_floor = float(floors["accurate_floor"])
+            speed_floor = float(floors["speed_floor"])
             if entries_off:
                 reason = entries_off
             elif key in open_by_game:
