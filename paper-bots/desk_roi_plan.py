@@ -3600,10 +3600,104 @@ def label_near_miss_catchup(
     }
 
 
+def _near_miss_row_soft_key(row: dict) -> str:
+    """Normalize a near-miss row's soft tag to a single allowlisted key (or '')."""
+    soft = row.get("soft")
+    if isinstance(soft, list):
+        keys = [str(s).strip().lower() for s in soft if str(s).strip()]
+        if len(keys) == 1 and keys[0] in NEAR_MISS_SOFT_ALLOW:
+            return keys[0]
+        return ",".join(keys) if keys else ""
+    key = str(soft or "").strip().lower()
+    return key if key in NEAR_MISS_SOFT_ALLOW else key
+
+
+def near_miss_soft_band_status(
+    root: str | None = None,
+    soft: str = "z",
+) -> dict:
+    """Per-soft promote board: labeled n≥30 + EV≥baseline inside that soft band only."""
+    key = str(soft or "").strip().lower()
+    rows = [
+        r for r in _near_miss_rows(root)
+        if _near_miss_row_soft_key(r) == key
+    ]
+    labeled = [r for r in rows if _finite(r.get("would_pnl")) is not None]
+    pnls = [float(_finite(r.get("would_pnl")) or 0) for r in labeled]
+    shadow_ev = round(sum(pnls) / len(pnls), 4) if pnls else None
+    baseline = float(NEAR_MISS_PROMOTE_MIN_EV)
+    labeled_n = len(labeled)
+    n = len(rows)
+    ready = bool(
+        key in NEAR_MISS_SOFT_ALLOW
+        and n >= int(NEAR_MISS_PROMOTE_N)
+        and labeled_n >= int(NEAR_MISS_PROMOTE_N)
+        and shadow_ev is not None
+        and shadow_ev + 1e-12 >= baseline
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "soft": key if key in NEAR_MISS_SOFT_ALLOW else None,
+        "n": n,
+        "labeled_n": labeled_n,
+        "n_to_promote": max(0, int(NEAR_MISS_PROMOTE_N) - labeled_n),
+        "shadow_ev": shadow_ev,
+        "baseline_ev": baseline,
+        "promote_min_n": NEAR_MISS_PROMOTE_N,
+        "promote_ready": ready,
+        "evidence_thin": not ready,
+        "label": (
+            f"soft-{key}={'ready' if ready else 'THIN'} "
+            f"labeled={labeled_n}/{NEAR_MISS_PROMOTE_N} ev={shadow_ev}"
+        ),
+        "note": (
+            f"Arm soft={key} only when this band alone has "
+            f"n≥{NEAR_MISS_PROMOTE_N} labeled with EV ≥ {baseline}."
+        ),
+    }
+
+
+def near_miss_preferred_first_soft(root: str | None = None) -> dict:
+    """Pick the soft band that actually has promote-ready evidence.
+
+    Prefer z when both bands are ready. Evidence-led: if only soft-p has
+    n≥30 EV≥0, return p as the first arm (do not hardcode z).
+    """
+    z_band = near_miss_soft_band_status(root, "z")
+    p_band = near_miss_soft_band_status(root, "p")
+    preferred = None
+    if z_band.get("promote_ready"):
+        preferred = "z"
+    elif p_band.get("promote_ready"):
+        preferred = "p"
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "preferred": preferred,
+        "z": z_band,
+        "p": p_band,
+        "label": (
+            f"preferred={preferred or 'none'} "
+            f"z_ready={bool(z_band.get('promote_ready'))} "
+            f"p_ready={bool(p_band.get('promote_ready'))}"
+        ),
+        "note": (
+            "Ready-batch arms the preferred soft band only. Soft-p second arm "
+            "(after z + M1) is separate from evidence-led first-arm soft-p."
+        ),
+    }
+
+
 def near_miss_promote_status(root: str | None = None) -> dict:
     """Masters board: n≥30 + shadow EV ≥ baseline before staff may arm one soft gate.
 
     Soft allowlist is z|p only — never edge / fee floors. auto_promote=False forever.
+    Aggregate promote_ready is informational; arming requires per-soft band ready.
     """
     rows = _near_miss_rows(root)
     n = len(rows)
@@ -3642,6 +3736,7 @@ def near_miss_promote_status(root: str | None = None) -> dict:
             soft_live = soft
     labeled_n = len(labeled)
     n_to = max(0, int(NEAR_MISS_PROMOTE_N) - labeled_n)
+    preferred = near_miss_preferred_first_soft(root)
     return {
         "paper_only": True,
         "fee_floors_locked": True,
@@ -3662,6 +3757,9 @@ def near_miss_promote_status(root: str | None = None) -> dict:
         "soft_live": soft_live,
         "soft_allow": sorted(NEAR_MISS_SOFT_ALLOW),
         "soft_p_second_arm": soft_live == "z",
+        "preferred_soft": preferred.get("preferred"),
+        "z_band_ready": bool((preferred.get("z") or {}).get("promote_ready")),
+        "p_band_ready": bool((preferred.get("p") or {}).get("promote_ready")),
         "z_relax": NEAR_MISS_Z_RELAX if soft_live == "z" else 0.0,
         "p_relax": NEAR_MISS_P_RELAX if soft_live == "p" else 0.0,
         "by_soft": by_soft,
@@ -3669,12 +3767,13 @@ def near_miss_promote_status(root: str | None = None) -> dict:
         "label": (
             f"near_miss={'ready' if ready else 'THIN'} "
             f"labeled={labeled_n}/{NEAR_MISS_PROMOTE_N} "
-            f"ev={shadow_ev} n_to={n_to} soft_live={soft_live or 'none'}"
+            f"ev={shadow_ev} n_to={n_to} soft_live={soft_live or 'none'} "
+            f"preferred={preferred.get('preferred') or 'none'}"
         ),
         "note": (
-            "Near-miss shadow: staff may arm soft-z first after "
-            f"n≥{NEAR_MISS_PROMOTE_N} labeled with shadow EV ≥ {baseline}. "
-            "Soft-p is second arm only after z holds M1. "
+            "Near-miss shadow: arm the soft band that has "
+            f"n≥{NEAR_MISS_PROMOTE_N} labeled EV ≥ {baseline} (prefer z when both). "
+            "Soft-p second arm only after z holds M1. "
             "Never auto-promote; never lower fee/edge floors. "
             "Evidence catch-up deferred — no-force promote CLI only."
         ),
@@ -3808,10 +3907,13 @@ def staff_promote_near_miss_soft(
     force: bool = False,
     bots: list | None = None,
 ) -> dict:
-    """Staff arm one soft near-miss gate (z|p). Requires promote_ready unless force.
+    """Staff arm one soft near-miss gate (z|p). Requires that soft's band ready.
 
-    Soft-p is second arm only: soft-z must already be live and firm M1 must hold
-    (unless force — deferred on money-path CLI).
+    Soft-p paths:
+    - Evidence-led first arm when soft-p band alone is promote-ready (and soft-z
+      band is not — or soft-z was armed without z-band evidence).
+    - Second arm when soft-z is correctly live and firm M1 holds.
+    force lifts gates (money-path CLI still defaults force=False).
     """
     key = str(soft or "").strip().lower()
     if key not in NEAR_MISS_SOFT_ALLOW:
@@ -3823,29 +3925,67 @@ def staff_promote_near_miss_soft(
             "fee_floors_locked": True,
         }
     summary = near_miss_promote_status(root)
+    band = near_miss_soft_band_status(root, key)
+    soft_live = summary.get("soft_live")
+    z_band = near_miss_soft_band_status(root, "z")
+    p_band = near_miss_soft_band_status(root, "p")
     if key == "p" and not force:
-        soft_p = near_miss_soft_p_status(root, bots=bots)
-        if not soft_p.get("soft_p_ready"):
+        # Second arm: z correctly live (z-band ready) → require M1.
+        z_correct = bool(soft_live == "z" and z_band.get("promote_ready"))
+        # Evidence-led first arm / correction: p-band ready and z-band thin
+        # (including wrongly-armed soft-z with zero z samples).
+        evidence_first_p = bool(
+            p_band.get("promote_ready")
+            and not z_band.get("promote_ready")
+            and soft_live in (None, "z", "p")
+        )
+        if z_correct:
+            soft_p = near_miss_soft_p_status(root, bots=bots)
+            if not soft_p.get("soft_p_ready"):
+                return {
+                    "ok": False,
+                    "live": False,
+                    "staff_approved": False,
+                    "reason": soft_p.get("reason") or "soft-p not ready",
+                    "soft_p": soft_p,
+                    "band": band,
+                    "summary": summary,
+                    "auto_promote": False,
+                    "fee_floors_locked": True,
+                    "force": False,
+                }
+        elif not evidence_first_p:
+            soft_p = near_miss_soft_p_status(root, bots=bots)
+            reason = soft_p.get("reason") or "soft-p not ready"
+            if soft_live is None and not p_band.get("promote_ready"):
+                reason = (
+                    f"soft-p band not promote_ready (need labeled "
+                    f"n≥{NEAR_MISS_PROMOTE_N} with EV ≥ {NEAR_MISS_PROMOTE_MIN_EV})"
+                )
+            elif soft_live is None:
+                reason = "soft-z not armed yet — arm z first when z-band ready"
             return {
                 "ok": False,
                 "live": False,
                 "staff_approved": False,
-                "reason": soft_p.get("reason") or "soft-p not ready",
+                "reason": reason,
                 "soft_p": soft_p,
+                "band": band,
                 "summary": summary,
                 "auto_promote": False,
                 "fee_floors_locked": True,
                 "force": False,
             }
-    if not force and not summary.get("promote_ready"):
+    if not force and not band.get("promote_ready"):
         return {
             "ok": False,
             "live": False,
             "staff_approved": False,
             "reason": (
-                f"not promote_ready (need labeled n≥{NEAR_MISS_PROMOTE_N} "
-                f"with shadow EV ≥ {NEAR_MISS_PROMOTE_MIN_EV})"
+                f"soft-{key} band not promote_ready (need labeled "
+                f"n≥{NEAR_MISS_PROMOTE_N} with shadow EV ≥ {NEAR_MISS_PROMOTE_MIN_EV})"
             ),
+            "band": band,
             "summary": summary,
             "auto_promote": False,
             "fee_floors_locked": True,
@@ -3857,8 +3997,8 @@ def staff_promote_near_miss_soft(
         "soft": key,
         "at": _now(),
         "note": str(note or "")[:200],
-        "shadow_n": summary.get("labeled_n"),
-        "shadow_ev": summary.get("shadow_ev"),
+        "shadow_n": band.get("labeled_n"),
+        "shadow_ev": band.get("shadow_ev"),
         "decision": summary.get("decision"),
         "auto_promote": False,
         "code_default_live": bool(NEAR_MISS_LIVE),
@@ -3874,6 +4014,7 @@ def staff_promote_near_miss_soft(
         "staff_approved": True,
         "soft": key,
         "reason": f"armed soft={key}",
+        "band": near_miss_soft_band_status(root, key),
         "summary": near_miss_promote_status(root),
         "auto_promote": False,
         "fee_floors_locked": True,

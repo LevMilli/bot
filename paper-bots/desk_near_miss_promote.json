@@ -1,17 +1,17 @@
 {
-  "at": "2026-11-08T10:32:54Z",
+  "at": "2026-11-08T11:06:00Z",
   "auto_promote": false,
   "code_default_live": false,
   "decision": "review",
   "edge_relax": 0.0,
   "fee_floors_locked": true,
   "live": true,
-  "note": "staff no-force promote-ready batch",
-  "p_relax": 0.0,
+  "note": "evidence-led soft-p correction after soft-match fix",
+  "p_relax": 0.02,
   "paper_only": true,
   "shadow_ev": 1.3143,
   "shadow_n": 35,
-  "soft": "z",
+  "soft": "p",
   "staff_approved": true,
-  "z_relax": 0.05
+  "z_relax": 0.0
 }

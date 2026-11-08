@@ -379,6 +379,32 @@ def _promote_pack_discord_draft(items: list) -> str:
     return "\n".join(lines)
 
 
+def _arm_near_miss_preferred(
+    root: str | None,
+    *,
+    note: str,
+    force: bool,
+    bots: list | None,
+) -> dict:
+    """Arm soft-z|p matching evidence; never hardcode z when only soft-p is ready."""
+    preferred = (plan.near_miss_preferred_first_soft(root) or {}).get("preferred")
+    if not preferred:
+        soft_p = plan.near_miss_soft_p_status(root, bots=bots) or {}
+        if soft_p.get("soft_p_ready"):
+            preferred = "p"
+    if not preferred:
+        return {
+            "ok": False,
+            "live": False,
+            "reason": "no soft band promote-ready (need z|p n≥30 EV≥0)",
+            "auto_promote": False,
+            "fee_floors_locked": True,
+        }
+    return plan.staff_promote_near_miss_soft(
+        root, str(preferred), note=note, force=force, bots=bots,
+    )
+
+
 def staff_batch_arm_promotes_ready(
     root: str | None = None,
     *,
@@ -427,8 +453,8 @@ def staff_batch_arm_promotes_ready(
         ),
         (
             "near_miss",
-            lambda: plan.staff_promote_near_miss_soft(
-                root, "z", note=note_s, force=arm_force, bots=bots,
+            lambda: _arm_near_miss_preferred(
+                root, note=note_s, force=arm_force, bots=bots,
             ),
         ),
         (
