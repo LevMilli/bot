@@ -53,6 +53,49 @@ class ShadowEvidenceDensify(unittest.TestCase):
             self.assertFalse(after["live"])
             self.assertFalse(after["promote_ready"])  # still thin
 
+    def test_near_miss_persists_ask_for_honest_settle_label(self):
+        """Sports gap_bot passes ask — dropping it forced ±stake labels at entry 0.5."""
+        with tempfile.TemporaryDirectory() as tmp:
+            row = desk_more.record_near_miss(
+                tmp,
+                {
+                    "bot": "sports-gap",
+                    "ticker": "KXNFLGAME-ASK-KEEP",
+                    "side": "YES",
+                    "soft": ["p"],
+                    "p": 0.76,
+                    "edge": 0.01,
+                    "ask": 0.81,
+                    "league": "NFL",
+                    "note": "sports shadow near-miss on p · away",
+                },
+            )
+            self.assertEqual(row.get("ask"), 0.81)
+            self.assertEqual(row.get("entry_price"), 0.81)
+            self.assertEqual(row.get("league"), "NFL")
+            stored = desk_more.load_more(tmp).get("near_miss") or []
+            self.assertEqual(stored[-1].get("ask"), 0.81)
+            self.assertEqual(stored[-1].get("league"), "NFL")
+
+            out = desk_roi_plan.label_near_miss_from_result(
+                tmp,
+                ticker="KXNFLGAME-ASK-KEEP",
+                result="yes",
+                bot="sports-gap",
+                note="test settle with ask",
+            )
+            self.assertEqual(out["labeled"], 1)
+            labeled = [
+                r for r in (desk_more.load_more(tmp).get("near_miss") or [])
+                if r.get("ticker") == "KXNFLGAME-ASK-KEEP"
+            ][0]
+            # stake 2 / ask 0.81 → contracts≈2.469 → win pnl ≈ +0.4691 (not +2.0)
+            self.assertAlmostEqual(float(labeled["would_pnl"]), 0.4691, places=3)
+            self.assertNotAlmostEqual(float(labeled["would_pnl"]), 2.0, places=2)
+            self.assertFalse(
+                desk_roi_plan.near_miss_promote_status(tmp).get("auto_promote")
+            )
+
     def test_near_miss_catchup_cli_labels_pending(self):
         with tempfile.TemporaryDirectory() as tmp:
             desk_more.record_near_miss(

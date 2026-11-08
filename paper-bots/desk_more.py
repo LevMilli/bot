@@ -993,6 +993,9 @@ def is_near_miss(
 def record_near_miss(root: str | None, row: dict) -> dict:
     state = load_more(root)
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    # Persist organic ask/entry + league/series when callers pass them.
+    # Dropping ask forced settle labels onto default entry 0.5 (±stake),
+    # wiping sports soft-p would_pnl densify (gap_bot already sends ask).
     item = {
         "at": now,
         "bot": row.get("bot"),
@@ -1006,6 +1009,18 @@ def record_near_miss(root: str | None, row: dict) -> dict:
         "shadow_only": True,
         "note": row.get("note") or "",
     }
+    ask = _finite(row.get("ask"))
+    if ask is None:
+        ask = _finite(row.get("entry_price"))
+    if ask is not None and 0.0 < float(ask) < 1.0:
+        item["ask"] = round(float(ask), 4)
+        item["entry_price"] = item["ask"]
+    league = str(row.get("league") or "").strip()
+    if league:
+        item["league"] = league
+    series = str(row.get("series") or "").strip()
+    if series:
+        item["series"] = series
     state.setdefault("near_miss", []).append(item)
     state["last_at"] = now
     save_more(state, root)
