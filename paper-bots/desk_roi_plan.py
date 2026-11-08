@@ -3662,10 +3662,11 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
 
 
 def ensure_shadow_densify_journals(root: str | None = None) -> dict:
-    """Materialize empty sports/commodity shadow journals if missing.
+    """Materialize empty sports/commodity/edge08 shadow journals if missing.
 
     Distinguishes *missing* (never created) from *thin* (present, n=0) in
-    shadow_ops_alerts. Never invents promote rows; never LIVE; never arms.
+    shadow_ops_alerts. Tick already ensures edge08; catchup must too.
+    Never invents promote rows; never LIVE; never arms.
     """
     created: list[str] = []
     specs = (
@@ -3682,6 +3683,18 @@ def ensure_shadow_densify_journals(root: str | None = None) -> dict:
             created.append(name)
         except OSError:
             continue
+    # Edge08 shadow account — same missing≠thin contract as journals (#392 leftover).
+    try:
+        import pimp_desk
+        edge08_path = pimp_desk.shadow_account_path(root, "btc15m", "edge08")
+        if not os.path.isfile(edge08_path):
+            pimp_desk.save_shadow_account(
+                root, "btc15m", "edge08",
+                pimp_desk.load_shadow_account(root, "btc15m", "edge08"),
+            )
+            created.append(os.path.basename(edge08_path))
+    except Exception:
+        pass
     return {
         "ok": True,
         "created": created,
@@ -3691,7 +3704,7 @@ def ensure_shadow_densify_journals(root: str | None = None) -> dict:
         "auto_promote": False,
         "live": False,
         "note": (
-            "Ensured empty densify journals exist (missing→thin). "
+            "Ensured empty densify journals + edge08 account exist (missing→thin). "
             "Never invents evidence; never LIVE; never arms."
         ),
     }
