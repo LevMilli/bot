@@ -5166,11 +5166,13 @@ def _chicago_day_label(closed_at) -> str | None:
 
 
 def repair_weekly_sports_m1(root: str | None = None, *, fill_tax: float = 0.01) -> dict:
-    """Backfill missing sports_m1 on weekly/day scorecards from that day's closes.
+    """Backfill / refresh sports_m1 on weekly/day scorecards from that day's closes.
 
     Cards captured without sports history left sports_m1=None and starved
-    green_boost weeks_ok. Day-sliced taxed expectancy only — no invent.
-    Observe only; never LIVE; never arms.
+    green_boost weeks_ok. Also refresh when a card already has sports_m1 but
+    n/expectancy no longer matches that Chicago day's closes (stale copy from
+    a prior day DROPs honest week evidence). Day-sliced taxed expectancy only —
+    no invent. Observe only; never LIVE; never arms.
     """
     path = _path(WEEKLY_SCORECARD, root)
     store = _load(path, {"paper_only": True, "cards": []})
@@ -5199,14 +5201,26 @@ def repair_weekly_sports_m1(root: str | None = None, *, fill_tax: float = 0.01) 
         by_day.setdefault(day, []).append(taxed)
     repaired = 0
     for card in cards:
-        if _finite(card.get("sports_m1")) is not None:
-            continue
         label = str(card.get("label") or "").strip()
         day_pnls = by_day.get(label)
         if not day_pnls:
             continue
-        card["sports_m1"] = round(sum(day_pnls) / len(day_pnls), 4)
-        card["sports_m1_n"] = len(day_pnls)
+        new_m1 = round(sum(day_pnls) / len(day_pnls), 4)
+        new_n = len(day_pnls)
+        old_m1 = _finite(card.get("sports_m1"))
+        try:
+            old_n = int(card.get("sports_m1_n") or 0)
+        except (TypeError, ValueError):
+            old_n = 0
+        # Skip only when already honest vs today's closes.
+        if (
+            old_m1 is not None
+            and old_n == new_n
+            and abs(float(old_m1) - float(new_m1)) < 1e-9
+        ):
+            continue
+        card["sports_m1"] = new_m1
+        card["sports_m1_n"] = new_n
         card["sports_m1_repaired"] = True
         repaired += 1
     if repaired:
@@ -5228,8 +5242,8 @@ def repair_weekly_sports_m1(root: str | None = None, *, fill_tax: float = 0.01) 
         "auto_promote": False,
         "live": False,
         "note": (
-            "Backfilled sports_m1 from Chicago-day closed fills where missing. "
-            "Never LIVE; never arms."
+            "Backfilled/refreshed sports_m1 from Chicago-day closed fills "
+            "(missing or stale n/expectancy). Never LIVE; never arms."
         ),
     }
 
