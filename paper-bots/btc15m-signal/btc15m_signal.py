@@ -915,6 +915,27 @@ def _card(sentence):
     return 0
 
 
+def _card_sentence(*, buys, markets_n, eth_markets_n, last_sentence, skip_reasons=None):
+    """CARD body only. Prefer first evaluate/ops skip over generic no-buy (#396 sibling)."""
+    if buys:
+        if last_sentence and "parlay" in str(last_sentence).lower():
+            return str(last_sentence)
+        return (
+            f"Checked {markets_n} open BTC 15-minute markets. "
+            f"{buys} paper buy{'s' if buys != 1 else ''}."
+        )
+    skips = [str(s).strip() for s in (skip_reasons or []) if str(s).strip()]
+    if skips:
+        return skips[0]
+    if not markets_n and eth_markets_n:
+        return "Checked ETH/BTC crypto Kalshi markets. No paper buy."
+    return (
+        last_sentence
+        if last_sentence
+        else "Checked all open BTC 15-minute markets. No paper buy."
+    )
+
+
 def eth_early_should_buy(regime, reasons=None, *, delay_eth: bool = False) -> bool:
     """
     E1 #106 — ETH early singles under the same confident_early gates as BTC.
@@ -1281,6 +1302,7 @@ def main():
     skips = 0
     parlays = 0
     parlay_legs = []  # candidates for ≤5m combo
+    skip_reasons = []  # first evaluate/ops skip → CARD densify (#396 sibling)
     last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
     # Selective volume: +1 fee-clear buy/check on green Chicago day (min_edge locked).
     today_pnl = 0.0
@@ -1369,7 +1391,9 @@ def main():
     for ev in ranked:
         if buys >= max_buys_eff:
             skips += 1
-            print(f"--- {ev.get('ticker')}  skip: max buys this check ({max_buys_eff})")
+            max_note = f"max buys this check ({max_buys_eff})"
+            skip_reasons.append(max_note)
+            print(f"--- {ev.get('ticker')}  skip: {max_note}")
             if not IS_SHADOW:
                 try:
                     import desk_roi_plan
@@ -1378,7 +1402,7 @@ def main():
                         bot="btc15m",
                         ticker=str(ev.get("ticker") or ""),
                         edge=ev.get("edge"),
-                        reason=f"max buys this check ({max_buys_eff})",
+                        reason=max_note,
                     )
                 except Exception:
                     pass
@@ -1562,8 +1586,10 @@ def main():
             if regime == "confident_early" and not reasons:
                 pass  # fall through — should not hit
             else:
-                print("  SIGNAL: SKIP -> " + "; ".join(reasons or [regime]))
+                skip_note = "; ".join(reasons or [regime])
+                print("  SIGNAL: SKIP -> " + skip_note)
                 skips += 1
+                skip_reasons.append(skip_note)
                 last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
                 if desk_brain and not IS_SHADOW:
                     try:
@@ -1640,6 +1666,7 @@ def main():
         if firm_block:
             print(f"  SIGNAL: SKIP -> {firm_block}")
             skips += 1
+            skip_reasons.append(str(firm_block))
             last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
             if desk_brain and not IS_SHADOW:
                 try:
@@ -1669,6 +1696,7 @@ def main():
         if sticky_block:
             print(f"  SIGNAL: SKIP -> {sticky_block}")
             skips += 1
+            skip_reasons.append(str(sticky_block))
             last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
             print()
             continue
@@ -1735,6 +1763,7 @@ def main():
                     pass
         else:
             skips += 1
+            skip_reasons.append(str(last_sentence)[:160] or "desk/account blocked fill")
             print(f"  desk/account blocked fill: {last_sentence}")
             if not IS_SHADOW:
                 try:
@@ -1934,15 +1963,20 @@ def main():
                     pass
             else:
                 skips += 1
+                skip_reasons.append(str(sentence)[:160] or "ETH desk/account blocked fill")
                 print(f"  ETH desk/account blocked fill: {sentence}")
         elif regime == "confident_early" and delay_eth:
             mv = f"{btc_move:.3f}%" if btc_move is not None else "?"
-            print(f"  ETH early DELAYED ({delay_sec}s study) — BTC move {mv} (paper lead-lag)")
+            delay_note = f"ETH early DELAYED ({delay_sec}s study) — BTC move {mv}"
+            print(f"  {delay_note} (paper lead-lag)")
             skips += 1
+            skip_reasons.append(delay_note)
         elif regime == "confident_early":
             reasons = list(ev_early.get("reasons") or []) or [regime]
-            print("  ETH SIGNAL: SKIP -> " + "; ".join(reasons))
+            eth_skip = "; ".join(reasons)
+            print("  ETH SIGNAL: SKIP -> " + eth_skip)
             skips += 1
+            skip_reasons.append(eth_skip)
             if desk_brain and not IS_SHADOW:
                 try:
                     desk_brain.record_decision(
@@ -2001,6 +2035,7 @@ def main():
                 print("  ETH PARLAY-CANDIDATE")
             else:
                 skips += 1
+                skip_reasons.append("; ".join(late_reasons or ["ETH parlay_window skip"]))
         elif regime == "volatile_hold":
             if kalshi_history is not None:
                 try:
@@ -2011,8 +2046,10 @@ def main():
                 except Exception:
                     pass
             skips += 1
+            skip_reasons.append("ETH volatile — hold for ≤5m parlay")
         else:
             skips += 1
+            skip_reasons.append(str(regime or "ETH skip"))
 
     # Open paper parlay when ≥2 fee-aware legs ready in the ≤5m window.
     if (not IS_SHADOW) and kalshi_parlay is not None and len(parlay_legs) >= 2:
@@ -2148,14 +2185,13 @@ def main():
         f"paper buys: {buys}  parlays: {parlays}  skips/blocks: {skips}"
     )
     print("(Paper only. Nothing was ordered.)")
-    if buys:
-        return _card(last_sentence if "parlay" in last_sentence.lower() else (
-            f"Checked {len(markets)} open BTC 15-minute markets. "
-            f"{buys} paper buy{'s' if buys != 1 else ''}."
-        ))
-    if not markets and eth_markets:
-        return _card("Checked ETH/BTC crypto Kalshi markets. No paper buy.")
-    return _card(last_sentence if last_sentence else "Checked all open BTC 15-minute markets. No paper buy.")
+    return _card(_card_sentence(
+        buys=buys,
+        markets_n=len(markets),
+        eth_markets_n=len(eth_markets),
+        last_sentence=last_sentence,
+        skip_reasons=skip_reasons,
+    ))
 
 
 if __name__ == "__main__":

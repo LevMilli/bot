@@ -830,6 +830,20 @@ def paper_buy(state: dict, ev: dict) -> str:
     return f"Paper buy {ev['side']} {ticker} x{contracts} @ {ask:.2f}."
 
 
+def _card_sentence(*, buys: int, skip_reasons=None, open_windows: bool = True) -> str:
+    """CARD body only. Prefer first evaluate skip over generic no-buy (#396 sibling)."""
+    if not open_windows:
+        return "Checked commodity 15m markets. No open windows."
+    if buys <= 0:
+        skips = [str(s).strip() for s in (skip_reasons or []) if str(s).strip()]
+        if skips:
+            return skips[0]
+        return "Checked commodity 15m markets. No paper buy."
+    if buys == 1:
+        return "Checked commodity 15m markets. Paper buy."
+    return f"Checked commodity 15m markets. {buys} paper buys."
+
+
 def main() -> int:
     print("commodity-15m paper check (no live orders)")
     t0 = time.perf_counter()
@@ -887,7 +901,7 @@ def main() -> int:
             windows.append((series, spot, m))
     if not windows:
         elapsed = time.perf_counter() - t0
-        print("CARD: Checked commodity 15m markets. No open windows.")
+        print("CARD: " + _card_sentence(buys=0, open_windows=False))
         try:
             import desk_roi_plan
             for series in SERIES:
@@ -925,12 +939,15 @@ def main() -> int:
     print(f"Prefetched {len(books)} commodity orderbook(s) in parallel")
     candidates = []
     buys = 0
+    skip_reasons = []  # first evaluate skip → CARD densify (#396 sibling)
     for series, spot, m in windows:
         ev = evaluate(m, spot, edge_buf, book=books.get(str(m["ticker"])))
         print(
             f"  {series} {m['ticker']} spot={spot:.5f} target={m['target']} "
             f"side={ev.get('side')} p={ev.get('p')} reasons={ev.get('reasons')}"
         )
+        if ev.get("reasons"):
+            skip_reasons.append("; ".join(str(r) for r in (ev.get("reasons") or [])[:3]))
         # Phase 3 densify BEFORE model-flip — near-close underwater flips otherwise
         # leave open[] and never hit mid-open / all-opens time-stop shadow.
         try:
@@ -1400,12 +1417,7 @@ def main() -> int:
     except Exception:
         pass
     print(f"Done. paper buys={buys} open={len(account.get('open') or [])}")
-    if buys <= 0:
-        print("CARD: Checked commodity 15m markets. No paper buy.")
-    elif buys == 1:
-        print("CARD: Checked commodity 15m markets. Paper buy.")
-    else:
-        print(f"CARD: Checked commodity 15m markets. {buys} paper buys.")
+    print("CARD: " + _card_sentence(buys=buys, skip_reasons=skip_reasons))
     return 0
 
 
