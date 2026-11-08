@@ -194,6 +194,13 @@ class ShadowEvidenceDensify(unittest.TestCase):
         self.assertAlmostEqual(float(got), ask, places=3)
         self.assertIsNone(desk_roi_plan.recover_near_miss_ask_from_edge(0.7, None))
         self.assertIsNone(desk_roi_plan.recover_near_miss_ask_from_edge(None, 0.01))
+        # Fee-clear bots ok; memecoin residual must refuse (no fake ask invent).
+        self.assertIsNotNone(
+            desk_roi_plan.recover_near_miss_ask_from_edge(p, edge, bot="btc15m"),
+        )
+        self.assertIsNone(
+            desk_roi_plan.recover_near_miss_ask_from_edge(p, edge, bot="memecoin"),
+        )
 
     def test_densify_near_miss_ask_catchup_sibling_and_edge(self):
         """Catch-up stamps sibling ask + p/edge recover; repairs ±stake poison."""
@@ -269,6 +276,35 @@ class ShadowEvidenceDensify(unittest.TestCase):
             ]
             self.assertTrue(sib)
             self.assertAlmostEqual(float(sib[0]["ask"]), 0.79, places=4)
+
+    def test_densify_near_miss_ask_catchup_refuses_memecoin_residual(self):
+        """Memecoin edge=conf−0.5 is residual — catch-up must not invent ask."""
+        with tempfile.TemporaryDirectory() as tmp:
+            desk_more.record_near_miss(
+                tmp,
+                {
+                    "bot": "memecoin",
+                    "ticker": "SOL-MEME-RESIDUAL",
+                    "side": "YES",
+                    "soft": ["p"],
+                    "p": 0.62,
+                    "edge": 0.12,  # residual conf−0.5 shape, not fee-clear
+                    "note": "meme residual must not invert",
+                },
+            )
+            state = desk_more.load_more(tmp)
+            state["near_miss"][0].pop("ask", None)
+            state["near_miss"][0].pop("entry_price", None)
+            state["near_miss"][0]["would_pnl"] = 2.0
+            desk_more.save_more(state, tmp)
+            out = desk_roi_plan.densify_near_miss_ask_catchup(tmp)
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["stamped"], 0)
+            self.assertEqual(out["relabeled"], 0)
+            row = (desk_more.load_more(tmp).get("near_miss") or [])[0]
+            self.assertIsNone(row.get("ask"))
+            self.assertIsNone(row.get("ask_densify"))
+            self.assertAlmostEqual(float(row["would_pnl"]), 2.0, places=4)
 
     def test_near_miss_catchup_cli_labels_pending(self):
         with tempfile.TemporaryDirectory() as tmp:

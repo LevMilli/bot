@@ -4013,13 +4013,22 @@ def _kalshi_fee_per_contract(ask: float) -> float:
     return math.ceil(round(0.07 * a * (1.0 - a) * 100, 6)) / 100
 
 
-def recover_near_miss_ask_from_edge(p, edge) -> float | None:
+# p+edge invert is Kalshi fee-clear shape only (BTC/ETH under btc15m, commodity,
+# sports). Memecoin stores residual conf−0.5 as "edge" — inverting invents ask.
+NEAR_MISS_ASK_EDGE_BOTS = frozenset({"btc15m", "commodity-15m", "sports-gap"})
+
+
+def recover_near_miss_ask_from_edge(p, edge, *, bot: str | None = None) -> float | None:
     """Recover organic ask from stored soft-p + edge when ask was dropped.
 
     evaluate_window stores edge = p − ask − fee(ask). Pre-#408 BTC/ETH rows
     kept edge but dropped ask; invert on a 0.1¢ grid. Never invents a quote
     without both p and edge. Returns ask∈(0,1) or None.
+
+    When ``bot`` is set, refuse non-fee-clear towers (esp. memecoin residual).
     """
+    if bot is not None and str(bot).strip() not in NEAR_MISS_ASK_EDGE_BOTS:
+        return None
     p_n = _finite(p)
     e_n = _finite(edge)
     if p_n is None or e_n is None:
@@ -4048,8 +4057,9 @@ def densify_near_miss_ask_catchup(root: str | None = None) -> dict:
     """Stamp organic ask onto ask-less near-miss rows (sibling or p+edge recover).
 
     Order: (1) sibling ask/entry on same ticker+side+bot, (2) invert p−edge=ask+fee
-    for pre-#408 rows that kept edge. When a labeled row's would_pnl matches the
-    default entry=0.5 poison (±stake), recompute with the recovered ask.
+    for fee-clear bots only (never memecoin residual). When a labeled row's
+    would_pnl matches the default entry=0.5 poison (±stake), recompute with the
+    recovered ask.
 
     Observe only — never LIVE; never arms soft gates.
     """
@@ -4114,7 +4124,10 @@ def densify_near_miss_ask_catchup(root: str | None = None) -> dict:
         ask = organic.get(key)
         source = "sibling" if ask is not None else None
         if ask is None:
-            ask = recover_near_miss_ask_from_edge(item.get("p"), item.get("edge"))
+            # Fee-clear invert only — memecoin residual must not mint a fake ask.
+            ask = recover_near_miss_ask_from_edge(
+                item.get("p"), item.get("edge"), bot=bot_id,
+            )
             if ask is not None:
                 source = "p_edge"
         if ask is None or not (0.0 < float(ask) < 1.0):
@@ -4172,8 +4185,9 @@ def densify_near_miss_ask_catchup(root: str | None = None) -> dict:
         "fee_floors_locked": True,
         "live": False,
         "note": (
-            "Near-miss ask catch-up: sibling organic ask, else p+edge invert. "
-            "Repairs ±stake default-entry poison when ask recovered. Never LIVE."
+            "Near-miss ask catch-up: sibling organic ask, else fee-clear p+edge "
+            "invert (never memecoin residual). Repairs ±stake default-entry "
+            "poison when ask recovered. Never LIVE."
         ),
     }
 
