@@ -957,8 +957,11 @@ def main() -> int:
         elapsed = time.perf_counter() - t0
         # Prefer-1/2: feed-down ≠ empty Kalshi windows (#433/#434 sibling).
         # Without this, CARD invents "No open windows" and skip_board stays empty.
+        # Partial Yahoo down (some series spot, some not) + empty windows was still
+        # inventing clean empty while failed series only printed "no spot — skip".
         empty_skip_reasons: list[str] = []
         empty_note = "no open commodity windows"
+        missing_spots = [s for s in SERIES if s not in spots]
         if not spots:
             spot_reason = "spot failed (yahoo)"
             empty_skip_reasons.append(spot_reason)
@@ -978,6 +981,20 @@ def main() -> int:
                 note="commodity kalshi list densify",
             )
             print(f"SKIP densify: {kalshi_reason} ({','.join(list_errs)})")
+        elif missing_spots:
+            # Prefer-1: partial Yahoo down + empty windows ≠ clean no-open invent
+            # (#434 leftover — all-down densified; partial still false-friended).
+            spot_reason = "spot failed (yahoo)"
+            empty_skip_reasons.append(spot_reason)
+            empty_note = spot_reason
+            _densify_evaluate_skip(
+                reasons=[spot_reason],
+                note="commodity partial spot densify",
+            )
+            print(
+                f"SKIP densify: {spot_reason} "
+                f"(partial {len(missing_spots)}/{len(SERIES)} missing)"
+            )
         print(
             "CARD: "
             + _card_sentence(
@@ -997,11 +1014,12 @@ def main() -> int:
                     series=series,
                     note=empty_note,
                 )
+            spot_feed_down = (not spots) or bool(missing_spots and not list_errs)
             desk_roi_plan.record_latency(
                 DESK_ROOT, bot="commodity-15m", seconds=spot_secs,
                 note=(
                     "commodity spot failed"
-                    if not spots
+                    if spot_feed_down
                     else (
                         "commodity kalshi list failed"
                         if list_errs
@@ -1014,7 +1032,7 @@ def main() -> int:
                 DESK_ROOT, bot="commodity-15m", seconds=elapsed,
                 note=(
                     "spot failed card"
-                    if not spots
+                    if spot_feed_down
                     else (
                         "kalshi list failed card"
                         if list_errs
