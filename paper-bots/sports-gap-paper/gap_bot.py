@@ -789,6 +789,14 @@ def run():
                 )
                 # Densify match-miss into CARD skips (buy path stays off).
                 summary_out["skips"].append(miss)
+                # Honest DATA densify: no ticker (unmatched). Feeds skip_board
+                # MATCH/DATA codes without inventing a market id (#401 leftover).
+                _densify_early_eval_skip(
+                    reason=miss,
+                    ticker="",
+                    series=series,
+                    league=league,
+                )
                 continue
             summary_out["matched"] += 1
             hb, ha = px(pair["home"], "yes_bid_dollars"), px(pair["home"], "yes_ask_dollars")
