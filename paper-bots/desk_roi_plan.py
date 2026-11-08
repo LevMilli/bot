@@ -3468,6 +3468,12 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
     except Exception as exc:  # noqa: BLE001
         errors.append(f"sports_exit:{type(exc).__name__}")
         sports_exit = {"ok": False, "recorded": 0, "error": type(exc).__name__}
+    weekly_m1 = {"ok": False, "repaired": 0}
+    try:
+        weekly_m1 = repair_weekly_sports_m1(root)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"weekly_m1:{type(exc).__name__}")
+        weekly_m1 = {"ok": False, "repaired": 0, "error": type(exc).__name__}
     status = near_miss_promote_status(root)
     # CLI catch-up writes marker so doctor / shadow_ops aren't false-stale.
     try:
@@ -3493,12 +3499,14 @@ def run_shadow_catchup(root: str | None = None, *, fetch_result=None) -> dict:
         "sports_exit_shadow": int(sports_exit.get("recorded") or 0),
         "hard_stop_poison_removed": int(hs_repair.get("removed") or 0),
         "time_final_poison_removed": int(tf_repair.get("removed") or 0),
+        "weekly_sports_m1_repaired": int(weekly_m1.get("repaired") or 0),
         "near_miss_label": labeled,
         "helper_backfill": backfilled,
         "clv_repair": repaired,
         "hard_stop_repair": hs_repair,
         "time_final_repair": tf_repair,
         "sports_exit": sports_exit,
+        "weekly_sports_m1_repair": weekly_m1,
         "errors": errors[:8],
         "note": (
             "Shadow catch-up — labels/backfills/repairs densify evidence only. "
@@ -4551,6 +4559,157 @@ def latest_daily_r_board(root: str | None = None) -> dict | None:
 
 # ---- Sports green_boost gate (Phase 5) -------------------------------------
 
+def _sports_closed_history_from_account(root: str | None = None) -> list[dict]:
+    """Closed sports fills as history rows for firm_taxed_m1 (paper observe)."""
+    path = _sports_account_path(root)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            state = json.load(handle)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return []
+    out: list[dict] = []
+    for crow in state.get("closed") or []:
+        if not isinstance(crow, dict):
+            continue
+        pnl = _finite(crow.get("pnl"))
+        if pnl is None:
+            continue
+        contracts = _finite(crow.get("contracts"))
+        row = {
+            "pnl": pnl,
+            "contracts": contracts if contracts is not None else 1.0,
+            "ticker": crow.get("ticker"),
+            "closed": crow.get("closed"),
+            "exit": crow.get("exit"),
+            "league": crow.get("league"),
+        }
+        out.append(row)
+    return out
+
+
+def _bots_with_sports_history(
+    root: str | None = None,
+    bots: list | None = None,
+) -> list:
+    """Ensure sports-gap history is present for M1 / green_boost observes.
+
+    gap_bot and some pulse paths call green_boost without a desk snapshot —
+    without this hydrate, sports_m1_n stays 0 despite real closed fills.
+    Never invents PnL; reads sports-gap-paper/state.json only.
+    """
+    base: list = [b for b in (bots or []) if isinstance(b, dict)]
+    sports = next((b for b in base if str(b.get("id") or "") == "sports-gap"), None)
+    hist = list((sports or {}).get("history") or []) if sports else []
+    if hist:
+        return base
+    account_hist = _sports_closed_history_from_account(root)
+    if not account_hist:
+        return base
+    if sports is None:
+        base = list(base) + [{
+            "id": "sports-gap",
+            "history": account_hist,
+            "paper_only": True,
+        }]
+    else:
+        sports = dict(sports)
+        sports["history"] = account_hist
+        base = [
+            sports if str(b.get("id") or "") == "sports-gap" else b
+            for b in base
+        ]
+    return base
+
+
+def _chicago_day_label(closed_at) -> str | None:
+    """YYYY-MM-DD Chicago day from a sports closed stamp or ISO string."""
+    raw = str(closed_at or "").strip()
+    if not raw:
+        return None
+    # Common sports log: "2026-11-08 00:30:49 CT"
+    if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
+        return raw[:10]
+    try:
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+        text = raw.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def repair_weekly_sports_m1(root: str | None = None, *, fill_tax: float = 0.01) -> dict:
+    """Backfill missing sports_m1 on weekly/day scorecards from that day's closes.
+
+    Cards captured without sports history left sports_m1=None and starved
+    green_boost weeks_ok. Day-sliced taxed expectancy only — no invent.
+    Observe only; never LIVE; never arms.
+    """
+    path = _path(WEEKLY_SCORECARD, root)
+    store = _load(path, {"paper_only": True, "cards": []})
+    cards = [c for c in (store.get("cards") or []) if isinstance(c, dict)]
+    if not cards:
+        return {
+            "ok": True,
+            "repaired": 0,
+            "kept": 0,
+            "paper_only": True,
+            "observe_only": True,
+            "auto_promote": False,
+            "note": "no weekly cards",
+        }
+    hist = _sports_closed_history_from_account(root)
+    by_day: dict[str, list[float]] = {}
+    for row in hist:
+        day = _chicago_day_label(row.get("closed"))
+        if not day:
+            continue
+        pnl = _finite(row.get("pnl"))
+        if pnl is None:
+            continue
+        contracts = _finite(row.get("contracts")) or 1.0
+        taxed = pnl - float(fill_tax) * max(1.0, contracts)
+        by_day.setdefault(day, []).append(taxed)
+    repaired = 0
+    for card in cards:
+        if _finite(card.get("sports_m1")) is not None:
+            continue
+        label = str(card.get("label") or "").strip()
+        day_pnls = by_day.get(label)
+        if not day_pnls:
+            continue
+        card["sports_m1"] = round(sum(day_pnls) / len(day_pnls), 4)
+        card["sports_m1_n"] = len(day_pnls)
+        card["sports_m1_repaired"] = True
+        repaired += 1
+    if repaired:
+        store["cards"] = cards[-52:]
+        if isinstance(store.get("latest"), dict):
+            latest_label = str((store.get("latest") or {}).get("label") or "")
+            for card in reversed(cards):
+                if str(card.get("label") or "") == latest_label:
+                    store["latest"] = card
+                    break
+        store["paper_only"] = True
+        _save(path, store)
+    return {
+        "ok": True,
+        "repaired": repaired,
+        "kept": len(cards),
+        "paper_only": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live": False,
+        "note": (
+            "Backfilled sports_m1 from Chicago-day closed fills where missing. "
+            "Never LIVE; never arms."
+        ),
+    }
+
+
 def sports_green_boost_status(
     root: str | None = None,
     *,
@@ -4559,7 +4718,9 @@ def sports_green_boost_status(
     """green_boost=1 only when sports M1≥0 for 2 Chicago weeks and CLV≥52%.
 
     Default boost stays 0 until ready. auto_promote=False forever.
+    Hydrates sports-gap history from account when bots omit it (gap_bot path).
     """
+    bots = _bots_with_sports_history(root, bots)
     m1 = firm_taxed_m1(bots)
     sports = next(
         (r for r in (m1.get("by_tower") or []) if r.get("bot") == "sports-gap"),
@@ -9886,6 +10047,7 @@ def capture_weekly_scorecard(
 ) -> dict:
     """Persist a Chicago-week firm scorecard (bleed, M1 proxy, Gate A counts)."""
     cfg = cfg or {}
+    bots = _bots_with_sports_history(root, bots)
     bleed = firm_bleed_ratio(bots)
     misplaced = capital_misplaced(bots, cfg)
     m1 = firm_taxed_m1(bots)
