@@ -7516,6 +7516,15 @@ def _sports_clock_seconds(status) -> float | None:
     clock = status.get("clock")
     if isinstance(clock, (int, float)):
         return float(clock)
+    # Some ESPN / cache payloads stringify seconds — do not period_min-DROP.
+    if isinstance(clock, str) and str(clock).strip():
+        raw = str(clock).strip()
+        try:
+            return float(raw)
+        except ValueError:
+            parsed = _parse_espn_mmss_prefix(raw)
+            if parsed is not None:
+                return float(parsed)
     has_disp = "displayClock" in status or "display_clock" in status
     if has_disp:
         disp = status.get("displayClock")
