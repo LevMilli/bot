@@ -295,7 +295,7 @@ class CommodityCardSkipDensify(unittest.TestCase):
         src = CMD.read_text(encoding="utf-8")
         empty_idx = src.find("if not windows:")
         self.assertGreater(empty_idx, 0)
-        chunk = src[empty_idx:empty_idx + 2800]
+        chunk = src[empty_idx:empty_idx + 4200]
         self.assertIn("if not spots:", chunk)
         self.assertIn("spot failed (yahoo)", chunk)
         self.assertIn("commodity spot densify", chunk)
@@ -366,7 +366,7 @@ class CommodityCardSkipDensify(unittest.TestCase):
         self.assertIn("get_json(", list_fn)
         empty_idx = src.find("if not windows:")
         self.assertGreater(empty_idx, 0)
-        chunk = src[empty_idx:empty_idx + 2200]
+        chunk = src[empty_idx:empty_idx + 3600]
         self.assertIn("elif list_errs:", chunk)
         self.assertIn("markets failed (kalshi)", chunk)
         self.assertIn("commodity kalshi list densify", chunk)
@@ -402,6 +402,46 @@ class CommodityCardSkipDensify(unittest.TestCase):
         cmd.get_json = _boom
         with self.assertRaises(RuntimeError):
             cmd.list_open("KXGOLD15M", limit=1)
+
+    def test_partial_kalshi_list_fail_empty_windows_densifies_not_invent(self):
+        """Prefer-1: some list_errs + some [] + empty windows densifies incomplete — not total failed invent (#435 leftover)."""
+        src = CMD.read_text(encoding="utf-8")
+        empty_idx = src.find("if not windows:")
+        self.assertGreater(empty_idx, 0)
+        chunk = src[empty_idx:empty_idx + 3600]
+        self.assertIn("listed_ok", chunk)
+        self.assertIn("markets incomplete (kalshi", chunk)
+        self.assertIn("commodity partial kalshi list densify", chunk)
+        self.assertIn("_densify_evaluate_skip", chunk)
+        # Partial must beat invent: CARD prefers densified skip over No open windows.
+        # Incomplete (not total "markets failed") — listed-ok series may be true empty.
+        cmd = _load(CMD, "commodity_partial_kalshi_list_card_under_test")
+        card = cmd._card_sentence(
+            buys=0,
+            open_windows=False,
+            skip_reasons=["markets incomplete (kalshi 2/4 failed)"],
+        )
+        self.assertIn("markets incomplete", card)
+        self.assertNotIn("No open windows", card)
+        import desk_brain
+        import desk_more
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cmd.DESK_ROOT = tmp
+            cmd._densify_evaluate_skip(
+                reasons=["markets incomplete (kalshi 2/4 failed)"],
+                note="commodity partial kalshi list densify",
+            )
+            journal = desk_brain.load_journal(tmp)
+            last = (journal.get("decisions") or [])[-1]
+            self.assertEqual(last.get("bot"), "commodity-15m")
+            self.assertEqual(last.get("action"), "skip")
+            self.assertIn(
+                "markets incomplete",
+                " ".join(last.get("reasons") or []),
+            )
+            board = desk_more.skip_leaderboard(tmp)
+            self.assertIn("commodity-15m", board.get("by_bot") or {})
 
     def test_evaluate_skip_densifies_brain_skip_board(self):
         cmd = _load(CMD, "commodity_brain_skip_under_test")
