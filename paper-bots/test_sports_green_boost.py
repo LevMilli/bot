@@ -97,10 +97,76 @@ class SportsGreenBoost(unittest.TestCase):
             by = {c["label"]: c for c in cards}
             self.assertIsNotNone(by["2026-11-06"]["sports_m1"])
             self.assertIsNotNone(by["2026-11-07"]["sports_m1"])
+            # No closes on 11-08 → leave prior sports_m1 alone.
             self.assertEqual(by["2026-11-08"]["sports_m1"], 1.5)
             st = desk_roi_plan.sports_green_boost_status(tmp)
             self.assertTrue(st["weeks_ok"])
             self.assertEqual(st["weeks_n"], 2)
+
+    def test_repair_weekly_sports_m1_refreshes_stale_day_copy(self):
+        """Stale card with prior-day m1/n must refresh once that day's closes exist."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sports_dir = os.path.join(tmp, "sports-gap-paper")
+            os.makedirs(sports_dir, exist_ok=True)
+            with open(os.path.join(sports_dir, "state.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "cash": 100,
+                    "open": [],
+                    "closed": [
+                        {
+                            "ticker": "KX-DAY8-A",
+                            "pnl": -1.44,
+                            "contracts": 24,
+                            "closed": "2026-11-08 13:15:38 CT",
+                        },
+                        {
+                            "ticker": "KX-DAY8-B",
+                            "pnl": -1.95,
+                            "contracts": 39,
+                            "closed": "2026-11-08 14:48:37 CT",
+                        },
+                        {
+                            "ticker": "KX-DAY8-C",
+                            "pnl": 3.45,
+                            "contracts": 10,
+                            "closed": "2026-11-08 00:30:49 CT",
+                        },
+                    ],
+                    "paper_only": True,
+                }, fh)
+            path = os.path.join(tmp, desk_roi_plan.WEEKLY_SCORECARD)
+            # Poison: 11-08 card copied prior-day m1/n=14 (green weeks_ok false friend).
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({
+                    "paper_only": True,
+                    "cards": [
+                        {
+                            "label": "2026-11-07",
+                            "sports_m1": 3.1714,
+                            "sports_m1_n": 14,
+                        },
+                        {
+                            "label": "2026-11-08",
+                            "sports_m1": 3.1714,
+                            "sports_m1_n": 14,
+                        },
+                    ],
+                }, fh)
+            out = desk_roi_plan.repair_weekly_sports_m1(tmp)
+            self.assertTrue(out["ok"], out)
+            self.assertGreaterEqual(out["repaired"], 1)
+            self.assertFalse(out.get("live"))
+            self.assertFalse(out.get("auto_promote"))
+            with open(path, encoding="utf-8") as fh:
+                by = {c["label"]: c for c in json.load(fh)["cards"]}
+            day8 = by["2026-11-08"]
+            self.assertEqual(day8["sports_m1_n"], 3)
+            # Taxed m1: (-1.44-0.24)+(-1.95-0.39)+(3.45-0.10) / 3
+            self.assertAlmostEqual(float(day8["sports_m1"]), -0.2233, places=3)
+            self.assertTrue(day8.get("sports_m1_repaired"))
+            # Idempotent once honest.
+            out2 = desk_roi_plan.repair_weekly_sports_m1(tmp)
+            self.assertEqual(out2["repaired"], 0)
 
     def test_ready_when_weeks_hist_clv(self):
         with tempfile.TemporaryDirectory() as tmp:
