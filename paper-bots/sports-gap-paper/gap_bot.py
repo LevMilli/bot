@@ -1635,11 +1635,28 @@ def run():
                     p["scale_out_at"] = ts
                     p["scale_out_fair"] = round(float(fair), 4)
                     reason = f"scale-out +{SCALE_OUT_FAIR_MOVE*100:.0f}¢ fair (50%)"
+                    # Densify clip into closed[] so boards/CLV/phase2 see partial exits
+                    # (cash already moved; runner stays open). Never invent tip.
+                    clip_row = dict(p)
+                    clip_row.update({
+                        "closed": ts,
+                        "exit": reason,
+                        "exit_price": round(float(bid), 4),
+                        "payout": proceeds,
+                        "pnl": pnl,
+                        "contracts": clip,
+                        "cost": cost_clip,
+                        "fair_at_exit": round(float(fair), 4),
+                        "scale_out_clip": True,
+                        "runner_left": int(p.get("contracts") or 0),
+                    })
+                    s.setdefault("closed", []).append(clip_row)
                     try:
                         if DESK_ROOT not in sys.path:
                             sys.path.insert(0, DESK_ROOT)
                         import desk_roi_plan
                         import desk_living
+                        import desk_phase2
                         desk_roi_plan.record_fee_ledger(
                             DESK_ROOT,
                             bot="sports-gap",
@@ -1664,6 +1681,22 @@ def run():
                             kind="scale_out",
                             eligible=True,
                             note=reason[:120],
+                        )
+                        desk_phase2.remember_scale_out(
+                            DESK_ROOT,
+                            bot="sports-gap",
+                            ticker=str(p.get("ticker") or ""),
+                            plan={
+                                "league": p.get("league"),
+                                "side": p.get("side"),
+                                "clip": clip,
+                                "runner": int(p.get("contracts") or 0),
+                                "bid": round(float(bid), 4),
+                                "pnl": pnl,
+                                "fair": round(float(fair), 4),
+                                "fair_at_entry": p.get("fair_at_entry"),
+                                "reason": reason[:120],
+                            },
                         )
                     except Exception:
                         pass
