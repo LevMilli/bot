@@ -212,5 +212,42 @@ class HardStopShadowCsvExport(unittest.TestCase):
             self.assertTrue(out["path"] and out["path"].endswith(".csv"))
 
 
+class OrphanHardStopDensify(unittest.TestCase):
+    """Prefer-1: info=None opens must ticker-fetch + HS densify (no live sell)."""
+
+    def test_gap_bot_wires_orphan_info_none_hs(self):
+        gap_path = os.path.join(HERE, "sports-gap-paper", "gap_bot.py")
+        with open(gap_path, encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertIn("orphan shadow hard-stop — no live sell", src)
+        self.assertIn("ORPHAN STOP", src)
+        self.assertIn("if info is None and bid is not None:", src)
+        # Fetch must not require live_info (starved shadow n while losers rode).
+        self.assertNotIn("if info and bid is None:", src)
+        self.assertIn("if bid is None:", src)
+        self.assertFalse(desk_roi_plan.SPORTS_HARD_STOP_LIVE)
+
+    def test_orphan_note_records_shadow_not_live(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rec = desk_roi_plan.record_sports_hard_stop_shadow(
+                tmp,
+                ticker="KX-ORPHAN-1",
+                side="home",
+                league="NBA",
+                entry_price=0.80,
+                bid=0.60,
+                fair=None,
+                contracts=10,
+                cost=8.0,
+                note="orphan shadow hard-stop — no live sell",
+            )
+            self.assertTrue(rec["recorded"])
+            self.assertTrue(rec["shadow_only"])
+            summ = desk_roi_plan.sports_hard_stop_shadow_summary(tmp)
+            self.assertEqual(summ["n"], 1)
+            self.assertFalse(summ["live"])
+            self.assertFalse(desk_roi_plan.sports_hard_stop_is_live(tmp))
+
+
 if __name__ == "__main__":
     unittest.main()
