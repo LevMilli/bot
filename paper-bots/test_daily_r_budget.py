@@ -76,6 +76,27 @@ class DailyRBudget(unittest.TestCase):
             )
             self.assertFalse(out.get("ok"))
 
+    def test_plan_summary_daily_r_matches_live_firm_health(self):
+        """plan_summary.daily_r must not lag firm_health after #484."""
+        with tempfile.TemporaryDirectory() as tmp:
+            desk_roi_plan.capture_daily_r_board(
+                tmp,
+                bots=[{"id": "commodity-15m", "today": 0.0}],
+                label="2026-11-09",
+            )
+            bots = [
+                {"id": "commodity-15m", "today": 35.02, "open_risk": 0, "history": [], "gate_a": {}},
+                {"id": "sports-gap", "today": 0.0, "open_risk": 0, "history": [], "gate_a": {}},
+            ]
+            plan = desk_roi_plan.plan_summary(tmp, bots=bots, cfg={"max_open_risk": 100})
+            settle = (plan.get("daily_r") or {}).get("settle_only") or []
+            fh_settle = ((plan.get("firm_health") or {}).get("daily_r") or {}).get("settle_only") or []
+            self.assertIn("commodity-15m", settle)
+            self.assertEqual(sorted(settle), sorted(fh_settle))
+            master = desk_master.master_summary(tmp, bots=bots, cfg={"max_open_risk": 100})
+            m_settle = ((master.get("roi_plan") or {}).get("daily_r") or {}).get("settle_only") or []
+            self.assertIn("commodity-15m", m_settle)
+
 
 if __name__ == "__main__":
     unittest.main()
