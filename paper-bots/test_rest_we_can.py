@@ -171,6 +171,7 @@ class RestWeCanDensify(unittest.TestCase):
                  mock.patch("desk_roi_plan.shadow_ops_alerts", return_value={"alerts": []}):
                 out = pimp_desk.run_shadow_tick(tmp, run_bots=True)
             self.assertTrue(out.get("commodity_smoked"))
+            self.assertTrue(out.get("btc_carry_smoked"))
             self.assertTrue(out.get("inx_sp_smoked"))
             self.assertTrue(out.get("inx_sized_smoked"))
             self.assertFalse(out["live_orders_enabled"])
@@ -178,6 +179,7 @@ class RestWeCanDensify(unittest.TestCase):
             self.assertFalse(out["auto_promote"])
             self.assertTrue(out["fee_floors_locked"])
             self.assertTrue(any(s["bot"] == "commodity-15m" for s in seen))
+            self.assertTrue(any(s["bot"] == "btc-carry" for s in seen))
             self.assertTrue(any(
                 s["bot"] == "kalshi-sp" and s["action"] == "settle" for s in seen
             ))
