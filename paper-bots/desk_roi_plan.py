@@ -11208,7 +11208,12 @@ def plan_summary(
             if (root and bots)
             else profit_lock_status(root)
         ),
-        "skip_regret_weekly": latest_skip_regret_weekly(root),
+        # Prefer live journal whenever root is present (#494 Masters twin).
+        "skip_regret_weekly": (
+            skip_regret_weekly_card(root)
+            if root
+            else latest_skip_regret_weekly(root)
+        ),
         # Prefer live bots.today when provided (#484 firm_health twin).
         "daily_r": (
             capture_daily_r_board(root, bots=bots)

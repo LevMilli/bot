@@ -539,16 +539,14 @@ def master_summary(
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_sr = desk_roi_plan.latest_skip_regret_weekly(root)
-            if root and (
-                not isinstance(latest_sr, dict)
-                or str(latest_sr.get("label") or "") != today
-            ):
+            # Prefer live journal whenever root is present — same-day stale
+            # skip-regret card must not lag new labels (#494 weekly twin).
+            if root:
                 plan["skip_regret_weekly"] = desk_roi_plan.skip_regret_weekly_card(
                     root, label=today,
                 )
             else:
-                plan["skip_regret_weekly"] = latest_sr
+                plan["skip_regret_weekly"] = desk_roi_plan.latest_skip_regret_weekly(root)
         except Exception:
             plan["skip_regret_weekly"] = None
         try:
