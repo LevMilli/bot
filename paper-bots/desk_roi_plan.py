@@ -3323,9 +3323,11 @@ def backfill_sports_exit_shadow_from_closed(
             market = None
         api_bid = _kalshi_yes_bid_from_market(market)
         # gap_bot stores entry companion `bid`≈ask at open — never use it as an
-        # exit mark. Prefer true exit marks; honor API wipe 0 on settle losers.
-        # When organic exit_mark already hits HS (gap-decay/flip), keep it —
-        # live api_bid>0 after exit can recover above threshold and DROP evidence.
+        # exit mark. Prefer true exit marks; honor API wipe 0 on settle losers
+        # only when no organic mid-open exit exists. When organic exit_mark
+        # already hits HS (gap-decay/flip), keep it — live api_bid>0 after exit
+        # can recover above threshold and DROP evidence. Inverse: organic exit
+        # that never hit must not invent HS from a later API quote.
         exit_mark = None
         for key in ("exit_bid", "mark_bid", "exit_price"):
             if row.get(key) is not None:
@@ -3335,17 +3337,18 @@ def backfill_sports_exit_shadow_from_closed(
         is_loser = settle_pnl is not None and settle_pnl + 1e-12 < 0.0
         entry = row.get("entry_price")
         bid = None
-        if need_hs and exit_mark is not None:
+        organic_exit = exit_mark is not None
+        if need_hs and organic_exit:
             if sports_hard_stop_hit(entry, exit_mark).get("hit"):
                 bid = exit_mark
-        if bid is None:
+            # else: organic mid-open exit never hit — do not invent from later API
+        elif need_hs:
+            # hold-to-settle / missing exit mark — honest API settle-retro
             if api_bid is not None and api_bid > 0:
                 bid = api_bid
             elif api_bid is not None and api_bid <= 0 and is_loser:
                 # Finalized wipe on a loser — honest settle-retro densify.
                 bid = api_bid
-            elif exit_mark is not None and exit_mark >= 0:
-                bid = exit_mark
             elif api_bid is not None:
                 bid = api_bid
         if bid is None:
@@ -3620,8 +3623,21 @@ def repair_sports_hard_stop_settle_poison(root: str | None = None) -> dict:
         settle_pnl = _finite(crow.get("pnl")) if crow is not None else None
         # Finalize / catch-up settle-retro on a winner is poison — mid-open
         # notes ("shadow hard-stop") stay for honest underwater evidence.
+        # Also drop settle-retro when closed organic exit never hit HS (API invent).
+        organic_exit_mark = None
+        if crow is not None:
+            for key in ("exit_bid", "mark_bid", "exit_price"):
+                if crow.get(key) is not None:
+                    organic_exit_mark = _finite(crow.get(key))
+                    break
         if settle_retro and settle_pnl is not None and settle_pnl + 1e-12 >= 0.0:
             drop_row = True
+        elif settle_retro and crow is not None and organic_exit_mark is not None:
+            entry_c = crow.get("entry_price")
+            if entry_c is None:
+                entry_c = row.get("entry_price")
+            if not sports_hard_stop_hit(entry_c, organic_exit_mark).get("hit"):
+                drop_row = True
         elif priced_thr and crow is not None:
             # Winner + threshold invent → poison.
             if settle_pnl is not None and settle_pnl + 1e-12 >= 0.0:
