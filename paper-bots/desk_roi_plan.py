@@ -6529,12 +6529,35 @@ def firm_health_observe(
     misplaced = capital_misplaced(bots, cfg)
     bleed_card = latest_bleed_week(root) or {}
     capital = capital_os_status(root, bots=bots, cfg=cfg)
+    # Prefer live bots.today when provided — a same-day stale latest with
+    # settle_only=[] must not hide profit-lock settle-only (#482/#483 sibling).
     daily = latest_daily_r_board(root) or {}
-    if not daily and bots:
-        daily = capture_daily_r_board(root, bots=bots) if root else {
+    if bots:
+        if root:
+            daily = capture_daily_r_board(root, bots=bots)
+        else:
+            settle_only = []
+            towers = {}
+            for bot in bots:
+                if not isinstance(bot, dict):
+                    continue
+                bot_id = str(bot.get("id") or "")
+                if not bot_id:
+                    continue
+                row = daily_r_status(bot_id, bot.get("today"))
+                towers[bot_id] = row
+                if row.get("settle_only"):
+                    settle_only.append(bot_id)
+            daily = {
+                "towers": towers,
+                "settle_only": sorted(settle_only),
+                "note": "ephemeral daily R (no root)",
+            }
+    elif not daily:
+        daily = {
             "towers": {},
             "settle_only": [],
-            "note": "ephemeral daily R (no root)",
+            "note": "daily R board empty",
         }
     profit = profit_lock_status(root)
     opp = opp_cost_summary(root)
