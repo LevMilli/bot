@@ -3487,8 +3487,11 @@ def backfill_commodity_time_stop_from_closed(
             <= float(COMMODITY_TIME_STOP_MIN_LEFT) + 1e-12
         ):
             eval_now = close_dt
+        # Prefer true exit marks only — never entry companion `bid` (sports HS
+        # #448 sibling). Settled opens carry open-time bid into closed[] without
+        # exit_price; using it invents past-bell t-stops on winners.
         bid = None
-        for key in ("exit_price", "exit_bid", "mark_bid", "bid"):
+        for key in ("exit_price", "exit_bid", "mark_bid"):
             if row.get(key) is not None:
                 bid = _finite(row.get(key))
                 break
@@ -3531,6 +3534,7 @@ def backfill_commodity_time_stop_from_closed(
         "note": (
             "Commodity time-stop catch-up from closed[] with honest closed_at clock "
             "(past-bell ≤min_left clamps to close_time for settle-retro parity). "
+            "Exit marks only (exit_price|exit_bid|mark_bid — never entry companion bid). "
             "Never LIVE; never arms; never invents rem=0 on early flips."
         ),
     }
