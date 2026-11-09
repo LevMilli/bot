@@ -1255,6 +1255,16 @@ def master_summary(
             if isinstance(living, dict)
             else None
         ),
+        "nhl_poisson_audit": (
+            (living or {}).get("nhl_poisson_audit")
+            if isinstance(living, dict)
+            else None
+        ),
+        "dvol_regime": (
+            (living or {}).get("dvol_regime")
+            if isinstance(living, dict)
+            else None
+        ),
         "skip_historian": (
             (living or {}).get("skip_historian")
             if isinstance(living, dict)

@@ -3044,10 +3044,14 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         es = desk_living.eia_scout_chip(root)
         ls = desk_living.line_shopper_chip(root)
         bs = desk_living.btc_basis_scout_chip(root)
+        nhl = desk_living.nhl_poisson_audit_chip(root)
+        dv = desk_living.dvol_regime_chip(root)
         desk_row["injury_wire"] = iw
         desk_row["eia_scout"] = es
         desk_row["line_shopper"] = ls
         desk_row["btc_basis_scout"] = bs
+        desk_row["nhl_poisson_audit"] = nhl
+        desk_row["dvol_regime"] = dv
         if isinstance(desk_row.get("master"), dict):
             desk_row["master"]["injury_wire"] = desk_row["master"].get("injury_wire") or iw
             desk_row["master"]["eia_scout"] = desk_row["master"].get("eia_scout") or es
@@ -3055,11 +3059,17 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             desk_row["master"]["btc_basis_scout"] = (
                 desk_row["master"].get("btc_basis_scout") or bs
             )
+            desk_row["master"]["nhl_poisson_audit"] = (
+                desk_row["master"].get("nhl_poisson_audit") or nhl
+            )
+            desk_row["master"]["dvol_regime"] = desk_row["master"].get("dvol_regime") or dv
     except Exception as exc:  # noqa: BLE001
         desk_row["injury_wire"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["eia_scout"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["line_shopper"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["btc_basis_scout"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["nhl_poisson_audit"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["dvol_regime"] = {"paper_only": True, "error": type(exc).__name__}
     try:
         import desk_living
         sh = desk_living.skip_historian_chip(root)
