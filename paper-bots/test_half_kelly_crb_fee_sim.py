@@ -119,7 +119,26 @@ class HalfKellyCrbFeeSim(unittest.TestCase):
         })
         self.assertFalse(incomplete["ok"])
         self.assertIn("no invent", incomplete["reason"].lower())
-        board = desk_roi_plan.cross_venue_arb_observe(".")
+        # Explicit fixtures — cwd may have a harvested file that is all fee-walled.
+        board = desk_roi_plan.cross_venue_arb_observe(
+            ".",
+            pairs=[
+                {
+                    "label": "thin_gap_sports",
+                    "kalshi_venue": "kalshi_sports",
+                    "poly_category": "sports",
+                    "kalshi_yes_ask": 0.48,
+                    "poly_no_ask": 0.50,
+                },
+                {
+                    "label": "fat_gap_geopolitics",
+                    "kalshi_venue": "kalshi_econ",
+                    "poly_category": "geopolitics",
+                    "kalshi_yes_ask": 0.40,
+                    "poly_no_ask": 0.48,
+                },
+            ],
+        )
         self.assertTrue(board["idea_bank_only"])
         self.assertTrue(board["observe_only"])
         self.assertFalse(board["live_orders_enabled"])
@@ -145,7 +164,14 @@ class HalfKellyCrbFeeSim(unittest.TestCase):
         incomplete = desk_roi_plan.cpi_nowcast_probe({"ask": 0.48})
         self.assertFalse(incomplete["ok"])
         self.assertIn("no invent", incomplete["reason"].lower())
-        board = desk_roi_plan.cpi_nowcast_observe(".")
+        # Explicit fixtures — cwd harvest leaves nowcast_fair null (waiting on staff).
+        board = desk_roi_plan.cpi_nowcast_observe(
+            ".",
+            strikes=[
+                {"label": "thin", "nowcast_fair": 0.55, "ask": 0.52},
+                {"label": "fat", "nowcast_fair": 0.62, "ask": 0.50},
+            ],
+        )
         self.assertTrue(board["idea_bank_only"])
         self.assertTrue(board["observe_only"])
         self.assertFalse(board["live_orders_enabled"])
