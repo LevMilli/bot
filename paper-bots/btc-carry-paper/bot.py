@@ -39,6 +39,32 @@ VENUE_FLOOR = 0.02  # registry lock. Not a monthly hurdle. Not the btc15m 0.05 f
 FLAT_CARD = "flat - BTC spot long / perp short not open; 0.30% round trip unpaid"
 HOLD_CARD = "holding unlevered BTC spot long / perp short; red month is a mark, not a flip"
 
+
+def densified_hold_card(state: dict) -> str:
+    """HUD densify: the open IS the trade. Realized stays $0 until a month seals."""
+    pos = (state.get("open") or [None])[0]
+    if not isinstance(pos, dict):
+        return HOLD_CARD
+    opened = str(pos.get("opened") or "")
+    day = opened[:10] if opened else "?"
+    fee = float(pos.get("entry_fee") or 0.0)
+    fund = float(pos.get("funding_pnl") or 0.0)
+    basis = float(pos.get("basis_pnl") or 0.0)
+    return (
+        f"{HOLD_CARD}; open 1 since {day}; "
+        f"RT fee ${fee:.2f} paid once; funding {fund:+.4f} basis {basis:+.4f}"
+    )
+
+
+def densified_flat_card(*, error: str = "") -> str:
+    """HUD densify: flat means waiting on marks, not a missed fill."""
+    err = str(error or "").strip()
+    if err:
+        return f"{FLAT_CARD}; marks {err}"
+    return (
+        f"{FLAT_CARD}; opens once when public funding + premium marks exist, then holds"
+    )
+
 VISION = "https://data.binance.vision/data/futures/um"
 UA = {"User-Agent": "btc-carry-paper/1.0 (paper-only; public archive)"}
 KEY_ENV = ("BINANCE_API_KEY", "BINANCE_API_SECRET", "BINANCE_SECRET_KEY")
@@ -342,6 +368,9 @@ def hold_step(state: dict, marks: dict, cfg: dict, now: dt.datetime, *, block_en
         pos["premium_time"] = stamp
         premium_time = stamp
     pos["applied"] = sorted(applied)[-400:]
+    # Heartbeat the open on each hold check. Archive premium_time can lag wall
+    # clock by weeks; doctor must not read that lag as a dead book.
+    pos["price_at"] = now.isoformat(timespec="seconds")
     _seal_finished_months(state, pos, now)
     state["pass_bar"] = _pass_bar(state)
     state["last_action"] = "hold"
@@ -458,14 +487,14 @@ def run_once(
     error = str(marks.get("error") or "")
     if state.get("open"):
         print("SIGNAL: HOLD BTCUSDT unlevered")
-        print("CARD: " + HOLD_CARD)
+        print("CARD: " + densified_hold_card(state))
         if error and not (marks.get("funding") or marks.get("premium")):
             print("SIGNAL: SKIP data " + error)
     else:
         print("SIGNAL: SKIP flat")
         if error:
             print("SIGNAL: SKIP data " + error)
-        print("CARD: " + FLAT_CARD)
+        print("CARD: " + densified_flat_card(error=error))
         print("no trade")
     return 0
 
