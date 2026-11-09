@@ -388,11 +388,38 @@ def _line_clv_fair_home(fair):
     return f
 
 
+def _espn_settle_line_wp(summary):
+    """Last non-wipe home WP for hold-to-settle line CLV (skip trailing 0/1).
+
+    ESPN finals append exact 0.0/1.0 wipe after the last line WP. Mid-open
+    espn_home_wp correctly reads wp[-1]; settle densify must walk back so
+    #442 line fair_home is not None → binary Kalshi wipe.
+    """
+    wp = summary.get("winprobability") or []
+    for row in reversed(wp):
+        v = row.get("homeWinPercentage")
+        if v is None:
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if 0.0 < f < 1.0:
+            return f
+    return None
+
+
 def _post_settle_fair_home(path, game, src, summary=None):
     """Densify ESPN/model fair_home for a finalized open hold (green CLV)."""
     try:
         summ = summary if summary is not None else espn_summary(path, game["id"])
-        fair = nhl_model(summ, game) if src != "espn" else espn_fair_home(summ, game)
+        if src != "espn":
+            fair = nhl_model(summ, game)
+        else:
+            # Prefer-3: walk back trailing wipe so true finals densify line CLV.
+            fair = _espn_settle_line_wp(summ)
+            if fair is None:
+                fair = espn_fair_home(summ, game)  # tip-soon pickcenter fallback
         return _line_clv_fair_home(fair)
     except Exception:
         return None

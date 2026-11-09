@@ -174,15 +174,8 @@ class TradeWinClvCushionTests(unittest.TestCase):
         self.assertIsNone(gap._line_clv_fair_home(1.0))
         self.assertIsNone(gap._line_clv_fair_home(None))
         self.assertAlmostEqual(gap._line_clv_fair_home(0.9533), 0.9533, places=4)
-        with mock.patch.object(gap, "espn_summary", return_value={
-            "winprobability": [{"homeWinPercentage": 0.9533}],
-        }):
-            fair = gap._post_settle_fair_home(
-                "football/college-football",
-                {"id": "401856856", "state": "post", "status": {}},
-                "espn",
-            )
-        self.assertAlmostEqual(fair, 0.9533, places=4)
+        self.assertIn("def _espn_settle_line_wp", src)
+        # Wipe-only series → still None (no invent).
         with mock.patch.object(gap, "espn_summary", return_value={
             "winprobability": [{"homeWinPercentage": 1.0}],
         }):
@@ -193,6 +186,50 @@ class TradeWinClvCushionTests(unittest.TestCase):
                     "espn",
                 )
             )
+        # Pre-wipe last line densifies as before.
+        with mock.patch.object(gap, "espn_summary", return_value={
+            "winprobability": [{"homeWinPercentage": 0.9533}],
+        }):
+            fair = gap._post_settle_fair_home(
+                "football/college-football",
+                {"id": "401856856", "state": "post", "status": {}},
+                "espn",
+            )
+        self.assertAlmostEqual(fair, 0.9533, places=4)
+        # True finals: trailing wipe 0/1 must walk back to last line WP.
+        with mock.patch.object(gap, "espn_summary", return_value={
+            "winprobability": [
+                {"homeWinPercentage": 0.8877},
+                {"homeWinPercentage": 1.0},
+                {"homeWinPercentage": 1.0},
+            ],
+        }):
+            fair = gap._post_settle_fair_home(
+                "football/nfl",
+                {"id": "401873039", "state": "post", "status": {}},
+                "espn",
+            )
+        self.assertAlmostEqual(fair, 0.8877, places=4)
+        self.assertAlmostEqual(
+            gap._espn_settle_line_wp({
+                "winprobability": [
+                    {"homeWinPercentage": 0.001},
+                    {"homeWinPercentage": 0.0},
+                ],
+            }),
+            0.001,
+            places=4,
+        )
+        # Mid-open buy fair still uses wipe-last espn_home_wp (unchanged).
+        self.assertEqual(
+            gap.espn_home_wp({
+                "winprobability": [
+                    {"homeWinPercentage": 0.8877},
+                    {"homeWinPercentage": 1.0},
+                ],
+            }),
+            1.0,
+        )
 
     def test_repair_does_not_invent_binary_close(self):
         with tempfile.TemporaryDirectory() as tmp:
