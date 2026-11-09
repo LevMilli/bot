@@ -9319,9 +9319,11 @@ def record_fee_ledger(
 def backfill_fee_ledger_from_closed(root: str | None = None) -> dict:
     """Catch-up: densify fee ledger from tower closed[] / history.
 
-    Uses stored fee or price→estimate only — never invents closes or fee
-    amounts without a price/fee on the source row. Idempotent by fill_id
-    (and skips bot+ticker already in ledger). Observe densify only.
+    Uses stored fee or entry-side price→estimate only (ask|entry|entry_price|
+    price). Never invents fee from exit marks (exit_price/exit_bid/mark_bid/
+    bid) — settle wipe bids are not fill prices. Never invents closes.
+    Idempotent by fill_id (and skips bot+ticker already in ledger).
+    Observe densify only.
     """
     base = _root(root)
     sources = (
@@ -9392,11 +9394,13 @@ def backfill_fee_ledger_from_closed(root: str | None = None) -> dict:
             tick = str(pos.get("ticker") or pos.get("what") or "").strip()
             fee_n = _finite(pos.get("fee"))
             px = None
-            for key in ("ask", "entry", "entry_price", "price", "exit_price"):
+            # Entry-side fill prices only — exit_price/bid invent wipe-fee rows
+            # (Prefer-1 sibling of cmd t-stop entry-bid refuse #449).
+            for key in ("ask", "entry", "entry_price", "price"):
                 px = _finite(pos.get(key))
                 if px is not None:
                     break
-            # Never invent fee without a stored fee or a price to estimate from.
+            # Never invent fee without a stored fee or an entry-side price.
             if fee_n is None and px is None:
                 skipped += 1
                 continue
@@ -9468,7 +9472,8 @@ def backfill_fee_ledger_from_closed(root: str | None = None) -> dict:
         "places_orders": False,
         "live": False,
         "note": (
-            "Fee ledger catchup from tower closed[]/history with fee or price. "
+            "Fee ledger catchup from tower closed[]/history with fee or "
+            "entry-side ask|entry|entry_price|price (never exit_price/bid invent). "
             "Idempotent by fill_id / bot+ticker. Never LIVE; never invents closes."
         ),
     }
