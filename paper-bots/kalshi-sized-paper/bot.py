@@ -197,6 +197,7 @@ def step_scan(args, state, day):
         reason = "no KXINXU 3 PM CT event listed (holiday/half day?)"
         print(alerts.format_skip_note(day, reason))
         if not args.dry_run:
+            logger.learn(f"{day}: no trade - {reason}", "skip")
             _densify_scan_skip(reason, features=False)
         return
     # Positive-ROI: post-print / pre-FOMC calm gates (fee floors unchanged).
@@ -263,6 +264,11 @@ def step_scan(args, state, day):
     n = 0
     last_ob_miss = False
     last_reason = ""
+    # Twin / anti-double / fair vetoes must densify with the blocked ticker+edge
+    # (skip honesty). edge_proxy stays 0 until a buy clears — do not lose veto edge.
+    last_skip_ticker = ""
+    last_skip_side = ""
+    last_skip_edge = None
     spot_px = chosen.get("spot")
     hour_ct = dt.datetime.now(CT).hour
     sp_state = {}
@@ -283,6 +289,14 @@ def step_scan(args, state, day):
     if DESK_ROOT not in sys.path:
         sys.path.insert(0, DESK_ROOT)
     import desk_inx
+
+    def _remember_veto(reason: str, confirmed: dict, edge=None) -> None:
+        nonlocal last_reason, last_skip_ticker, last_skip_side, last_skip_edge
+        last_reason = str(reason or "")
+        last_skip_ticker = str(confirmed.get("ticker") or "")
+        last_skip_side = str(confirmed.get("side") or "")
+        last_skip_edge = edge
+
     for row in ranked:
         cand = row.get("pick") if isinstance(row, dict) else None
         if not isinstance(cand, dict):
@@ -295,7 +309,7 @@ def step_scan(args, state, day):
             ticker=str(confirmed.get("ticker") or ""), sp_state=sp_state,
         )
         if blocked_dbl:
-            last_reason = blocked_dbl
+            _remember_veto(blocked_dbl, confirmed)
             continue
         fee_try = paper_sim.taker_fee(1, confirmed["ask"])
         try:
@@ -307,11 +321,12 @@ def step_scan(args, state, day):
                 settle_time_ct=str(CFG.get("settle_time_ct") or "15:00"),
             )
         except Exception as exc:
-            last_reason = f"inx fair unavailable ({type(exc).__name__})"
+            _remember_veto(f"inx fair unavailable ({type(exc).__name__})", confirmed)
             continue
         if not fair_try.get("ok"):
-            last_reason = str(
-                fair_try.get("reason") or desk_inx.refuse_residual_as_edge()
+            _remember_veto(
+                str(fair_try.get("reason") or desk_inx.refuse_residual_as_edge()),
+                confirmed,
             )
             continue
         edge_try = float(fair_try.get("edge") or 0.0)
@@ -319,7 +334,7 @@ def step_scan(args, state, day):
             sized_edge=edge_try, venue_edge=venue_edge, extra=0.01,
         )
         if twin_block:
-            last_reason = twin_block
+            _remember_veto(twin_block, confirmed, edge=edge_try)
             continue
         # Learn/corr are side×bucket keyed — continue to next fair sibling.
         policy = desk_inx.inx_learn_corr_reason(
@@ -328,7 +343,7 @@ def step_scan(args, state, day):
             pick=confirmed, edge=edge_try, hour_ct=hour_ct,
         )
         if policy:
-            last_reason = policy
+            _remember_veto(policy, confirmed, edge=edge_try)
             continue
         pick = confirmed
         ob = ob_try
@@ -346,7 +361,15 @@ def step_scan(args, state, day):
         print(alerts.format_skip_note(day, reason))
         if not args.dry_run:
             logger.learn(f"{day}: no trade - {reason}", "skip")
-            _densify_scan_skip(reason, edge=edge_proxy if edge_proxy else None)
+            densify_edge = last_skip_edge
+            if densify_edge is None and edge_proxy:
+                densify_edge = edge_proxy
+            _densify_scan_skip(
+                reason,
+                ticker=last_skip_ticker,
+                side=last_skip_side,
+                edge=densify_edge,
+            )
         return
     try:
         desk = _desk()

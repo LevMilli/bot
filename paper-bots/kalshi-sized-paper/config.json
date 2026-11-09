@@ -1,5 +1,5 @@
 {
-  "_comment": "Sized Kalshi PAPER bot — desk Kelly-lite stake on KXINXU. Throughput: up to 3 sized fills/day; slightly wider band than fixed-$25 twin.",
+  "_comment": "Sized Kalshi PAPER bot — protective idle twin of kalshi-sp on KXINXU. Anti-double + twin-edge (+1¢) vetoes; max 1 fill/day; never unlock volume to spend the $500.",
   "paper_mode": true,
   "api_base": "https://api.elections.kalshi.com/trade-api/v2",
   "series": "KXINXU",
