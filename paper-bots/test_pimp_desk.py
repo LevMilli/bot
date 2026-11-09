@@ -1109,6 +1109,13 @@ class PimpDeskTests(unittest.TestCase):
             "CARD: z < 1.25 (0.91)\n"
         )
         self.assertIn("SIGNAL: SKIP", pimp_desk._btc_skip(btc))
+        # No-window line densifies skip when CARD is bland (#499 twin).
+        no_win = (
+            "No open KXBTC15M window right now — still tracking ETH/ladder history.\n"
+            "CARD: Checked all open BTC 15-minute markets. No paper buy.\n"
+        )
+        self.assertIn("no open kxbtc15m window", pimp_desk._btc_skip(no_win).lower())
+        self.assertNotIn("did not include a skip line", pimp_desk._btc_skip(no_win).lower())
 
     def test_sports_skip_prefers_densified_card(self):
         sports = (

@@ -1621,6 +1621,14 @@ def _btc_skip(summary: str) -> str:
     card_skip = _btc_skip_card_body(summary)
     if card_skip:
         return card_skip[:400]
+    # No-window / ladder-only lines beat bland CARD + "did not include a skip
+    # line" lie (#499 sports twin).
+    for line in lines:
+        low = line.lower()
+        if "no open" in low and "window" in low:
+            return line[:400]
+        if "no open windows" in low:
+            return line[:400]
     return "The last run did not include a skip line."
 
 
