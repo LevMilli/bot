@@ -10,6 +10,7 @@ import { beamColorFor } from './data/format'
 import { FLOORS, parseCityHash } from './data/floorMap'
 import { CityScene } from './scene/CityScene'
 import { OfficeHallScene } from './scene/OfficeHallScene'
+import { WallStreetScene } from './scene/WallStreetFloor'
 import { BankScene } from './scene/BankScene'
 import { BossDashboard } from './hud/BossDashboard'
 import type { BotRow } from './types'
@@ -345,7 +346,9 @@ export default function App() {
           <AdaptiveDpr pixelated />
           <AdaptiveEvents />
           <Suspense fallback={null}>
-            {view === 'office' && selected && spawnBotId ? (
+            {view === 'office' && selected?.id === 'wall-street' && spawnBotId ? (
+              <WallStreetScene bot={selected} />
+            ) : view === 'office' && selected && spawnBotId ? (
               <OfficeHallScene
                 bot={selected}
                 bots={bots}
@@ -476,7 +479,9 @@ export default function App() {
               />
               <div className="office-title">
                 <span className="screen-hint">
-                  {walkHint || 'W/S walk · A/D turn · Space jump · mouse look'}
+                  {selected.id === 'wall-street'
+                    ? `${selected.traders && selected.traders >= 100 ? selected.traders : 120} traders · one book · paper only · drag to look`
+                    : walkHint || 'W/S walk · A/D turn · Space jump · mouse look'}
                 </span>
               </div>
             </div>

@@ -92,8 +92,9 @@ export function Tower({ bot, index, position, selected, onSelect, vista = false 
   const beamCore = useRef<Mesh>(null)
   const color = beamColorFor(bot.id, index)
   const offline = bot.present === false
-  const height = offline ? 5.4 : 7.6 + (index % 3) * 1.35 + (index === 0 ? 1.2 : 0)
-  const width = 1.9 + (index % 2) * 0.28
+  const street = bot.id === 'wall-street'
+  const height = street ? 10.8 : offline ? 5.4 : 7.6 + (index % 3) * 1.35 + (index === 0 ? 1.2 : 0)
+  const width = street ? 2.25 : 1.9 + (index % 2) * 0.28
   const hero = index === 0 && !offline
 
   useFrame(({ clock }) => {
@@ -168,6 +169,12 @@ export function Tower({ bot, index, position, selected, onSelect, vista = false 
         <boxGeometry args={[width + 0.22, 0.16, width + 0.22]} />
         <meshStandardMaterial color="#0c0c14" emissive={color} emissiveIntensity={0.7} />
       </mesh>
+      {street && (
+        <mesh position={[0, height + 0.32, 0]}>
+          <boxGeometry args={[width + 0.46, 0.18, width + 0.46]} />
+          <meshStandardMaterial color="#1a1408" emissive="#c6a15b" emissiveIntensity={1.15} />
+        </mesh>
+      )}
 
       {/* neon beam + halo rings */}
       <group ref={beamGroup} position={[0, height + 0.2, 0]}>

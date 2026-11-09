@@ -66,6 +66,8 @@ export type BotRow = {
   realized?: Money
   today?: Money
   open_count?: number
+  /** Wall Street floor headcount. Staff on one book, not extra strategies. */
+  traders?: number
   open_risk?: Money
   paused?: boolean
   feed?: string | null

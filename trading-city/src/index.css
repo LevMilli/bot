@@ -440,6 +440,30 @@ a {
   font-size: 0.62rem;
 }
 
+.wall-street-sign {
+  min-width: 220px;
+  padding: 8px 14px 10px;
+  text-align: center;
+  color: #f6e7b4;
+  background: rgba(12, 9, 4, 0.82);
+  border: 1px solid #c6a15b;
+  box-shadow: 0 0 16px #c6a15b55;
+  letter-spacing: 0.14em;
+}
+.wall-street-sign strong {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+}
+.wall-street-sign span {
+  display: block;
+  margin-top: 4px;
+  letter-spacing: 0.02em;
+  font-size: 11px;
+  color: #f4f0d4;
+  text-transform: none;
+}
+
 .tower-holo-compact .holo-pnl {
   font-size: 0.58rem;
 }

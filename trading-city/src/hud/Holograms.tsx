@@ -27,6 +27,10 @@ export function TowerHologram({
   const offline = bot.present === false
   const color = beamColorFor(bot.id, index)
   const pnlToneClass = offline ? 'flat' : pnlTone(hologramPnlValue(bot))
+  const floorLabel =
+    bot.id === 'wall-street'
+      ? `${bot.traders && bot.traders >= 100 ? bot.traders : 120} traders`
+      : null
 
   return (
     <Html
@@ -52,7 +56,7 @@ export function TowerHologram({
       >
         <strong>{bot.name}</strong>
         <span className={`holo-pnl tone-${pnlToneClass}`}>
-          {offline ? 'offline' : hologramPnl(bot)}
+          {offline ? 'offline' : floorLabel || hologramPnl(bot)}
         </span>
         {!offline && (bot.skip_board?.length ?? 0) > 0 && (
           <span className="tower-skips">
