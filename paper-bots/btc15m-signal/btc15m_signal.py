@@ -1478,28 +1478,41 @@ def main():
         max_buys_eff = int(MAX_BUYS_PER_CHECK)
     if today_pnl >= 0 and max_buys_eff > MAX_BUYS_PER_CHECK:
         print(f"Selective volume: max buys {max_buys_eff} (today ${today_pnl:.2f} ≥ 0, fee floors locked)")
-    # Daily R budget → settle-only after tower hits target (exits stay on).
+    # Buy-loop gate locks (cool / stale / daily-R) — densify CARD+brain and
+    # refuse max-buys(0) invent (#522 commodity / #521 sports twin).
     try:
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_roi_plan
-        r_block = desk_roi_plan.daily_r_blocks("btc15m", today_pnl)
-        if r_block:
-            print(f"Settle-only: {r_block}")
-            max_buys_eff = 0
-            # Prepend so CARD/why densify settle-only ahead of evaluate ask/band noise.
-            skip_reasons.insert(0, str(r_block))
-            # Sibling brain/skip_board densify (#482 leftover): empty ranked never
-            # hits max-buys; do not wait for capacity invent.
+
+        def _densify_gate_skip(reason: str, *, note: str) -> None:
+            skip_reasons.insert(0, str(reason))
             if desk_brain and not IS_SHADOW:
                 try:
                     desk_brain.record_decision(
                         DESK_ROOT, bot="btc15m", action="skip",
-                        reasons=[str(r_block)],
-                        note="btc daily-r densify",
+                        reasons=[str(reason)], note=note,
                     )
                 except Exception:
                     pass
+
+        cool = desk_roi_plan.adverse_cool_blocks(DESK_ROOT, "btc15m")
+        if cool:
+            print(f"Adverse cool: {cool}")
+            max_buys_eff = 0
+            _densify_gate_skip(cool, note="btc adverse-cool densify")
+        stale = desk_roi_plan.stale_world_blocks(DESK_ROOT, "btc15m")
+        if stale:
+            print(f"Stale-world: {stale}")
+            max_buys_eff = 0
+            _densify_gate_skip(stale, note="btc stale-world densify")
+        # Daily R budget → settle-only after tower hits target (exits stay on).
+        # Insert last so settle-only stays skips[0] over cool/stale.
+        r_block = desk_roi_plan.daily_r_blocks("btc15m", today_pnl)
+        if r_block:
+            print(f"Settle-only: {r_block}")
+            max_buys_eff = 0
+            _densify_gate_skip(r_block, note="btc daily-r densify")
     except Exception:
         pass
 
@@ -1536,13 +1549,21 @@ def main():
         if buys >= max_buys_eff:
             skips += 1
             max_note = f"max buys this check ({max_buys_eff})"
-            # Prefer-1: settle-only zeroed the cap — do not invent capacity skip
-            # into brain/Learning while CARD already names daily-R.
-            settle_lock = max_buys_eff == 0 and any(
-                "settle-only" in str(s).lower() for s in skip_reasons
-            )
-            if settle_lock:
-                print(f"--- {ev.get('ticker')}  skip: {skip_reasons[0]}")
+            # Prefer-1: gate (settle-only / cool / stale) zeroed the cap — do not
+            # invent capacity skip into brain/Learning while CARD names the gate.
+            gate_keys = ("settle-only", "adverse cool", "stale-world", "clock-skew")
+            gate_hits = [
+                str(s)
+                for s in skip_reasons
+                if any(k in str(s).lower() for k in gate_keys)
+            ]
+            gate_lock = max_buys_eff == 0 and bool(gate_hits)
+            if gate_lock:
+                gate_why = next(
+                    (s for s in gate_hits if "settle-only" in s.lower()),
+                    gate_hits[0],
+                )
+                print(f"--- {ev.get('ticker')}  skip: {gate_why}")
                 continue
             skip_reasons.append(max_note)
             print(f"--- {ev.get('ticker')}  skip: {max_note}")
