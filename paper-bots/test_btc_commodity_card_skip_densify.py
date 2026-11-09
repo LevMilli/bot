@@ -77,7 +77,10 @@ class BtcCardSkipDensify(unittest.TestCase):
         chunk = src[max_idx:max_idx + 2400]
         self.assertIn("desk_brain.record_decision", chunk)
         self.assertIn("reasons=[max_note]", chunk)
-        self.assertIn("settle_lock", chunk)
+        # Prefer-1: gate_lock covers settle/cool/stale — refuse max-buys invent.
+        self.assertIn("gate_lock", chunk)
+        self.assertIn("adverse cool", chunk)
+        self.assertIn("stale-world", chunk)
         cmd_src = CMD.read_text(encoding="utf-8")
         cmd_idx = cmd_src.find("if buys >= max_buys_eff:")
         self.assertGreater(cmd_idx, 0)
@@ -85,7 +88,6 @@ class BtcCardSkipDensify(unittest.TestCase):
         self.assertIn("skip_reasons.append(max_note)", cmd_chunk)
         self.assertIn("_densify_evaluate_skip", cmd_chunk)
         self.assertIn("commodity max-buys densify", cmd_chunk)
-        # Prefer-1: gate_lock covers settle/cool/stale — refuse max-buys invent.
         self.assertIn("gate_lock", cmd_chunk)
         self.assertIn("adverse cool", cmd_chunk)
         self.assertIn("stale-world", cmd_chunk)
@@ -496,12 +498,12 @@ class CommodityCardSkipDensify(unittest.TestCase):
     def test_daily_r_settle_only_prepends_card_skip(self):
         """Daily-R settle-only must densify CARD ahead of evaluate ask/band noise."""
         btc_src = BTC.read_text(encoding="utf-8")
-        btc_idx = btc_src.find("daily_r_blocks(")
-        self.assertGreater(btc_idx, 0)
-        btc_chunk = btc_src[btc_idx:btc_idx + 900]
-        self.assertIn("skip_reasons.insert(0, str(r_block))", btc_chunk)
-        self.assertIn("daily-r densify", btc_chunk)
-        self.assertIn("settle_lock", btc_src)
+        btc_loop = btc_src.find("btc adverse-cool densify")
+        self.assertGreater(btc_loop, 0)
+        btc_gate = btc_src[btc_loop - 400:btc_loop + 1600]
+        self.assertIn("btc daily-r densify", btc_gate)
+        self.assertIn("_densify_gate_skip", btc_gate)
+        self.assertIn("gate_lock", btc_src)
         cmd_src = CMD.read_text(encoding="utf-8")
         cool_idx = cmd_src.find('adverse_cool_blocks(DESK_ROOT, "commodity-15m")')
         self.assertGreater(cool_idx, 0)
@@ -526,15 +528,18 @@ class CommodityCardSkipDensify(unittest.TestCase):
         self.assertNotEqual(card.lower().split(";")[0].strip()[:3], "ask")
 
     def test_cool_stale_gate_densify_refuses_max_buys_invent(self):
-        """#521 twin: commodity cool/stale zeroing max_buys must not invent capacity."""
-        src = CMD.read_text(encoding="utf-8")
-        self.assertIn("commodity adverse-cool densify", src)
-        self.assertIn("commodity stale-world densify", src)
+        """#521/#522 twin: cool/stale zeroing max_buys must not invent capacity."""
+        cmd_src = CMD.read_text(encoding="utf-8")
+        self.assertIn("commodity adverse-cool densify", cmd_src)
+        self.assertIn("commodity stale-world densify", cmd_src)
         # paper_buy honors cool (records cool but used to keep buying).
-        buy_idx = src.find("def paper_buy(")
+        buy_idx = cmd_src.find("def paper_buy(")
         self.assertGreater(buy_idx, 0)
-        buy_chunk = src[buy_idx:buy_idx + 900]
+        buy_chunk = cmd_src[buy_idx:buy_idx + 900]
         self.assertIn('adverse_cool_blocks(DESK_ROOT, "commodity-15m")', buy_chunk)
+        btc_src = BTC.read_text(encoding="utf-8")
+        self.assertIn("btc adverse-cool densify", btc_src)
+        self.assertIn("btc stale-world densify", btc_src)
         cmd = _load(CMD, "commodity_cool_stale_card_under_test")
         cool_card = cmd._card_sentence(
             buys=0,
@@ -554,6 +559,19 @@ class CommodityCardSkipDensify(unittest.TestCase):
         )
         self.assertIn("stale-world", stale_card.lower())
         self.assertNotIn("ask 0.550", stale_card.split(";")[0])
+        btc = _load(BTC, "btc_cool_stale_card_under_test")
+        btc_cool = btc._card_sentence(
+            buys=0,
+            markets_n=2,
+            eth_markets_n=0,
+            last_sentence="Checked all open BTC 15-minute markets. No paper buy.",
+            skip_reasons=[
+                "adverse cool-off: btc15m paused ~12m after 0.2 drop on KXBTC",
+                "z < 1.25 (0.91); edge < 0.05 after fees",
+            ],
+        )
+        self.assertIn("adverse cool", btc_cool.lower())
+        self.assertNotIn("No paper buy", btc_cool)
 
     def test_cool_stale_classify_not_capacity_other(self):
         """Cool→LEARN and stale→DATA so fee-clear zero-buy taxonomy stays honest."""
@@ -561,8 +579,10 @@ class CommodityCardSkipDensify(unittest.TestCase):
 
         cool = "adverse cool-off: commodity-15m paused ~12m after 0.2 drop on CLX"
         stale = "stale-world: last loop 90.0s > 60s bar (commodity-15m); skip new entries"
+        btc_cool = "adverse cool-off: btc15m paused ~12m after 0.2 drop on KXBTC"
         self.assertEqual(desk_more.classify_skip(cool), "learning")
         self.assertEqual(desk_more.classify_skip(stale), "data")
+        self.assertEqual(desk_more.classify_skip(btc_cool), "learning")
         self.assertEqual(desk_more.classify_skip("max buys this check (0)"), "other")
 
     def test_daily_r_settle_only_densifies_brain_not_max_buys_invent(self):
