@@ -1403,8 +1403,10 @@ def _clv_counts_for_boost(row: dict) -> bool:
     kind = str(row.get("clv_kind") or "").strip().lower()
     if kind == "binary":
         return False
-    # Legacy untagged settle rows with exact 0/1 close are binary proxies.
-    if kind in ("", "line") and str(row.get("exit") or "").lower().startswith("settled"):
+    # Exact 0/1 close is Kalshi/model wipe — never line CLV for green_boost.
+    # Prefer-1 leftover after #446: mid-open gap-decay/flip used to count wipe
+    # as line because only settled exits were stripped.
+    if kind in ("", "line"):
         fc = _finite(row.get("fair_close"))
         if fc is None:
             fc = _finite(row.get("close_fair"))
@@ -1435,7 +1437,7 @@ def clv_summary(root: str | None = None) -> dict:
         "binary_excluded_n": max(0, len(all_rows) - n),
         "note": (
             "CLV>0 means entry fair beat later fair/close (learning north star for sports). "
-            "Binary settle proxies excluded from beat-close / green_boost."
+            "Exact 0/1 wipe closes (settle or mid-open) excluded from beat-close / green_boost."
         ),
     }
 

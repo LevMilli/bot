@@ -1710,17 +1710,47 @@ def run():
                     if DESK_ROOT not in sys.path:
                         sys.path.insert(0, DESK_ROOT)
                     import desk_more
-                    desk_more.record_sports_clv(
-                        DESK_ROOT,
-                        ticker=str(p.get("ticker") or ""),
-                        side=str(p.get("side") or ""),
-                        fair_entry=p.get("fair_at_entry"),
-                        fair_exit=fair,
-                        close_fair=fair,
-                        pnl=pnl,
-                        league=str(p.get("league") or ""),
-                        exit_reason=str(exit_reason or "sell"),
-                    )
+                    # Prefer-1: mid-open wipe fair must not invent line CLV
+                    # (settle path already densifies; #446 walkback may miss).
+                    close_fair = None
+                    clv_kind = "line"
+                    if fair is not None:
+                        try:
+                            ff = float(fair)
+                        except (TypeError, ValueError):
+                            ff = None
+                        if ff is not None and 0.0 < ff < 1.0:
+                            close_fair = ff
+                    if close_fair is None:
+                        for key in ("last_fair", "last_mark"):
+                            if p.get(key) is None:
+                                continue
+                            try:
+                                mf = float(p.get(key))
+                            except (TypeError, ValueError):
+                                continue
+                            if 0.0 < mf < 1.0:
+                                close_fair = mf
+                                break
+                    if close_fair is None and fair is not None:
+                        try:
+                            close_fair = float(fair)
+                            clv_kind = "binary"
+                        except (TypeError, ValueError):
+                            close_fair = None
+                    if close_fair is not None:
+                        desk_more.record_sports_clv(
+                            DESK_ROOT,
+                            ticker=str(p.get("ticker") or ""),
+                            side=str(p.get("side") or ""),
+                            fair_entry=p.get("fair_at_entry"),
+                            fair_exit=close_fair,
+                            close_fair=close_fair,
+                            pnl=pnl,
+                            league=str(p.get("league") or ""),
+                            exit_reason=str(exit_reason or "sell"),
+                            clv_kind=clv_kind,
+                        )
                 except Exception:
                     pass
                 fair_txt = f"{fair:.1%}" if fair is not None else "n/a"
