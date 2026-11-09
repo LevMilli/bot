@@ -1330,6 +1330,52 @@ class PimpDeskTests(unittest.TestCase):
         self.assertIn("Settle smoke: empty book", why)
         self.assertFalse(why.lower().startswith("no open paper"))
 
+    def test_finish_bot_staff_clear_outside_window_leads_with_next_scan(self):
+        """Soft-DD staff-clear must not lead the tip after the entry window."""
+        from unittest import mock
+
+        spec = {
+            "id": "kalshi-sp",
+            "name": "Kalshi S&P",
+            "kind": "kalshi",
+            "folder": "kalshi-sp500-paper",
+            "state": "paper_state.json",
+            "log": "",
+            "empty": "empty",
+        }
+        clear = (
+            "Staff cleared soft drawdown halt: bankroll $444.37 ≤ $460.00 "
+            "(start $500). Paper buys may resume; kill $400 + fee/band/max-1/day stay stone."
+        )
+        view = {
+            "id": "kalshi-sp",
+            "present": True,
+            "has_state": True,
+            "open_count": 0,
+            "positions": [],
+            "trades": [],
+            "history": [],
+            "cash": 444.37,
+            "realized": -55.63,
+            "today": 0.0,
+            "why": clear,
+            "skip": clear,
+            "paused": False,
+            "read_error": "",
+            "central_check": "3:10 PM",
+            "last_check": "3:10 PM",
+            "last_run": {"ok": True, "summary": "No open paper positions.", "action": "settle"},
+        }
+        with mock.patch.object(
+            pimp_desk, "next_inx_scan_line",
+            return_value="Next scan tomorrow 12:05 CT.",
+        ):
+            out = pimp_desk._finish_bot(view, spec, ".")
+        why = out.get("why") or ""
+        self.assertTrue(why.startswith("Next scan tomorrow 12:05 CT."))
+        self.assertIn("Staff cleared soft drawdown", why)
+        self.assertFalse(why.lower().startswith("staff cleared"))
+
     def test_finish_bot_inx_in_scan_prefers_skip_over_settle_smoke(self):
         """In-window sized tip must keep densified NO TRADE, not settle boilerplate."""
         from unittest import mock
