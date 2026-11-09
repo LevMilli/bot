@@ -26036,14 +26036,16 @@ DASH_LOGO_SVG = (
     '<g fill="#EADFFB"><rect x="227.5" y="329" width="5" height="16" rx="2.5"/><rect x="253.5" y="329" width="5" '
     'height="16" rx="2.5"/><rect x="279.5" y="329" width="5" height="16" rx="2.5"/></g>'
     '<circle cx="168" cy="337" r="8" fill="url(#pbG)"/><circle cx="344" cy="337" r="8" fill="url(#pbG)"/></svg>')
-APP_MARK_V = "5"
+APP_MARK_V = "6"
 DASH_FAVICON = "/icon-192.png?v=" + APP_MARK_V
 DASH_LOGO_HTML = (
     '<img src="/icon-192.png?v=' + APP_MARK_V + '" alt="" width="60" height="60">'
 )
 PWA_HEAD = (
     '<link rel="manifest" href="/manifest.webmanifest">'
-    '<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=' + APP_MARK_V + '">'
+    '<link rel="apple-touch-icon" sizes="180x180" href="/pimp-mark-180.png">'
+    '<link rel="apple-touch-icon" sizes="192x192" href="/pimp-mark-192.png">'
+    '<link rel="apple-touch-icon" sizes="512x512" href="/pimp-mark-512.png">'
     '<link rel="apple-touch-startup-image" href="/img/app-splash.jpg?v=' + APP_MARK_V + '">'
     '<meta name="apple-mobile-web-app-capable" content="yes">'
     '<meta name="mobile-web-app-capable" content="yes">'
@@ -35142,9 +35144,9 @@ def dash_manifest_body() -> str:
         "start_url": "/", "scope": "/", "display": "standalone",
         "background_color": "#14003A", "theme_color": "#1a0f33",
         "icons": [
-            {"src": f"/apple-touch-icon.png?v={v}", "sizes": "180x180", "type": "image/png"},
-            {"src": f"/icon-192.png?v={v}", "sizes": "192x192", "type": "image/png"},
-            {"src": f"/icon-512.png?v={v}", "sizes": "512x512", "type": "image/png"},
+            {"src": "/pimp-mark-180.png", "sizes": "180x180", "type": "image/png", "purpose": "any"},
+            {"src": "/pimp-mark-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": "/pimp-mark-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
         ],
     }, separators=(",", ":"))
 
@@ -35152,16 +35154,16 @@ def dash_manifest_body() -> str:
 async def dash_manifest(request):
     from aiohttp import web
     return web.Response(text=dash_manifest_body(), content_type="application/manifest+json",
-                        headers={"Cache-Control": "private, max-age=3600"})
+                        headers={"Cache-Control": "no-cache"})
 
 
 SW_JS = (
-    "const CACHE='pb-shell-155';"
+    "const CACHE='pb-shell-156';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
     "const u=new URL(req.url);if(u.origin!==location.origin)return;"
-    "if(u.pathname.startsWith('/api/')||u.pathname.startsWith('/img/')||u.pathname.indexOf('icon')>=0||u.pathname.indexOf('favicon')>=0||u.pathname.indexOf('apple-touch')>=0)return;"
+    "if(u.pathname.startsWith('/api/')||u.pathname.startsWith('/img/')||u.pathname.indexOf('icon')>=0||u.pathname.indexOf('favicon')>=0||u.pathname.indexOf('apple-touch')>=0||u.pathname.indexOf('pimp-mark')>=0)return;"
     "e.respondWith(fetch(req).then(r=>{try{const copy=r.clone();caches.open(CACHE).then(c=>c.put(req,copy))}catch(x){}"
     "return r}).catch(()=>caches.match(req)))});"
 )
@@ -35176,13 +35178,13 @@ async def dash_sw(request):
 async def dash_touch_icon(request):
     from aiohttp import web
     path = request.path or ""
-    size = 180 if "apple" in path else 192 if "192" in path else 512
+    size = 512 if "512" in path else 192 if "192" in path else 180
     try:
         raw = app_icon_png(size)
     except Exception:
         return dash_error(web, request, 404)
     return web.Response(body=raw, content_type="image/png",
-                        headers={"Cache-Control": "public, max-age=86400"})
+                        headers={"Cache-Control": "no-cache"})
 
 
 async def dash_app_splash(request):
@@ -35285,8 +35287,12 @@ def dash_app(web):
                     web.get("/favicon.svg", dash_favicon),
                     web.get("/manifest.webmanifest", dash_manifest),
                     web.get("/apple-touch-icon.png", dash_touch_icon),
+                    web.get("/apple-touch-icon-precomposed.png", dash_touch_icon),
                     web.get("/icon-192.png", dash_touch_icon),
                     web.get("/icon-512.png", dash_touch_icon),
+                    web.get("/pimp-mark-180.png", dash_touch_icon),
+                    web.get("/pimp-mark-192.png", dash_touch_icon),
+                    web.get("/pimp-mark-512.png", dash_touch_icon),
                     web.get("/sw.js", dash_sw),
                     web.post("/api/log.json", dash_api_log),
                     web.get("/logout", dash_logout),
@@ -36363,7 +36369,7 @@ function renderMore(el,d){
    h('p',{class:'muted',style:'margin:8px 0 0',text:'Last clean start: '+(d.booted||'')+'.'}),
    h('p',{class:'muted',style:'margin:8px 0 0'},'The first number is this file. The second is the idea list it is filling. Times are Central. This page refreshes itself every minute while it’s open. Hidden picks stay hidden until they’re revealed. Nothing on this map cuts a live feature.'),
    (window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)?h('p',{class:'muted',style:'margin:8px 0 0',text:'Reduced motion is on. The intro stays off.'}):null,
-   h('img',{class:'abouticon',width:'180',height:'180',alt:'Home screen icon',src:'/apple-touch-icon.png?v=2'})))}
+   h('img',{class:'abouticon',width:'180',height:'180',alt:'Home screen icon',src:'/pimp-mark-180.png'})))}
 const TABS={overview:renderOverview,live:renderLive,news:renderNews,people:renderPeople,posters:renderPosters,more:renderMore};
 function render(){if(!S.data)return;const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data)}
 function show(t){if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-tab',t)}catch(e){}
@@ -36882,7 +36888,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#14003a url('/img/app-splash.jpg?v=5') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#14003a url('/img/app-splash.jpg?v=6') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 70% 58% at 50% 46%, rgba(12,6,28,.22), rgba(8,4,18,.42))}
@@ -37423,7 +37429,7 @@ function phoneHomeHint(){watchFind();const stand=matchMedia('(display-mode:stand
  const ios=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
  if(!ios)return;const head=$('header');if(!head)return;
  const bar=h('div',{class:'homehint',id:'homehint'},
-  h('p',{text:'Put PIMP-BOT on your Home Screen. Tap Share (the square with the arrow) → Add to Home Screen. It opens as its own app — no Safari bar.'}),
+  h('p',{text:'Put PIMP-BOT on your Home Screen. Tap Share (the square with the arrow) → Add to Home Screen. It opens as its own app — no Safari bar. If the icon is still the old robot, delete that shortcut and add it again. The phone keeps the picture it saved the first time.'}),
   h('button',{type:'button',onclick:()=>{try{localStorage.setItem('pb-home','1')}catch(e){}const n=$('#homehint');if(n)n.remove()}},'Got it'));
  head.after(bar)}
 function defaultLine(vals){if(!vals.length)return 0.5;const avg=vals.reduce((a,b)=>a+b,0)/vals.length;return Math.max(0.5,Math.floor(avg)+0.5)}
