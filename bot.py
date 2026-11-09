@@ -26036,7 +26036,7 @@ DASH_LOGO_SVG = (
     '<g fill="#EADFFB"><rect x="227.5" y="329" width="5" height="16" rx="2.5"/><rect x="253.5" y="329" width="5" '
     'height="16" rx="2.5"/><rect x="279.5" y="329" width="5" height="16" rx="2.5"/></g>'
     '<circle cx="168" cy="337" r="8" fill="url(#pbG)"/><circle cx="344" cy="337" r="8" fill="url(#pbG)"/></svg>')
-APP_MARK_V = "4"
+APP_MARK_V = "5"
 DASH_FAVICON = "/icon-192.png?v=" + APP_MARK_V
 DASH_LOGO_HTML = (
     '<img src="/icon-192.png?v=' + APP_MARK_V + '" alt="" width="60" height="60">'
@@ -26537,7 +26537,7 @@ content="width=device-width,initial-scale=1"><meta name="referrer" content="no-r
 :root{{color-scheme:dark light}}body{{margin:0;min-height:100vh;display:grid;place-items:center;background:#0e0b16;
 color:#f4f1fb;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:16px}}
 @media (prefers-color-scheme:light){{body{{background:#f6f3fc;color:#1d1530}}p{{color:#5d5475!important}}}}
-main{{max-width:380px;text-align:center}}svg,main img{{width:96px;height:96px;border-radius:50%;object-fit:cover}}h1{{font-size:22px;margin:12px 0 4px}}
+main{{max-width:380px;text-align:center}}svg,main img{{width:96px;height:96px;border-radius:14px;object-fit:cover}}h1{{font-size:22px;margin:12px 0 4px}}
 p{{color:#a9a1bf;margin:0 0 18px}}a{{color:#a27bff;font-weight:600;text-decoration:none}}</style></head>
 <body><main>{logo}<h1>{title}</h1><p>{msg}</p><a href="/">Go to the dashboard</a></main></body></html>"""
 
@@ -35091,48 +35091,20 @@ def _dash_brand_path(name: str) -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "dash-brand", name)
 
 
-def _app_icon_badge(src):
-    """Drop the dark margin around the gold ring so the crown fills a header slot."""
+def _poster_square(size: int):
+    """The full Pimps Dashboard poster, squared. This is the page logo."""
     from PIL import Image
-    px = src.load()
-    w, h = src.size
-    pts = []
-    for y in range(0, h, 2):
-        for x in range(0, w, 2):
-            r, g, b, a = px[x, y]
-            if a > 200 and r > 170 and 110 < g < 210 and b < 130 and r > b + 40:
-                pts.append((x, y))
-    if len(pts) < 20:
-        return src
-    xs = [p[0] for p in pts]
-    ys = [p[1] for p in pts]
-    left, top, right, bottom = min(xs), min(ys), max(xs), max(ys)
-    pad = int(max(right - left, bottom - top) * 0.06)
-    left, top = left - pad, top - pad
-    right, bottom = right + pad, bottom + pad
-    side = max(right - left, bottom - top)
-    cx, cy = (left + right) / 2, (top + bottom) / 2
-    half = side / 2
-    box = (
-        max(0, int(cx - half)),
-        max(0, int(cy - half)),
-        min(w, int(cx + half)),
-        min(h, int(cy + half)),
-    )
-    if box[2] - box[0] < 32 or box[3] - box[1] < 32:
-        return src
-    return src.crop(box)
+    size = max(16, min(1024, int(size)))
+    src = Image.open(_dash_brand_path("splash.jpg")).convert("RGB")
+    side = min(src.size)
+    left = (src.width - side) // 2
+    top = (src.height - side) // 2
+    return src.crop((left, top, left + side, top + side)).resize((size, size), Image.LANCZOS)
 
 
 def app_icon_png(size: int) -> bytes:
-    """Home-screen / tab mark from dash-brand/app-icon.png, cropped to the badge and resized."""
-    from PIL import Image
-    size = max(16, min(1024, int(size)))
-    src = _app_icon_badge(Image.open(_dash_brand_path("app-icon.png")).convert("RGBA"))
-    side = max(src.size)
-    plate = Image.new("RGBA", (side, side), (0, 0, 0, 0))
-    plate.paste(src, ((side - src.width) // 2, (side - src.height) // 2), src)
-    img = plate.resize((size, size), Image.LANCZOS)
+    """Home-screen / tab mark: the Pimps Dashboard poster."""
+    img = _poster_square(size)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
@@ -35143,15 +35115,17 @@ def app_splash_jpeg() -> bytes:
         return fh.read()
 
 
-def dash_mark_data_uri(size: int = 192) -> str:
-    """The crowned-robot mark inside the page, so the header does not wait on a second request."""
+def dash_mark_data_uri(size: int = 240) -> str:
+    """The poster inside the page, so the header does not wait on a second request."""
     import base64
-    return "data:image/png;base64," + base64.b64encode(app_icon_png(size)).decode()
+    buf = io.BytesIO()
+    _poster_square(size).save(buf, format="JPEG", quality=76, optimize=True)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-# Header and tab icon are the file itself. Home Screen icons stay on /icon-*.png.
-DASH_FAVICON = dash_mark_data_uri(160)
-DASH_LOGO_HTML = '<img src="' + DASH_FAVICON + '" alt="" width="60" height="60">'
+# Header and tab icon are the poster. Home Screen icons stay on /icon-*.png.
+DASH_FAVICON = dash_mark_data_uri(240)
+DASH_LOGO_HTML = '<img src="' + DASH_FAVICON + '" alt="" width="88" height="88">'
 
 
 async def dash_favicon(request):
@@ -35182,7 +35156,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-154';"
+    "const CACHE='pb-shell-155';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -35369,8 +35343,8 @@ header{background:var(--head);position:relative;overflow:hidden}
 header:before{content:"";position:absolute;inset:-40% -10% auto auto;width:520px;height:520px;border-radius:50%;
  background:radial-gradient(closest-side,#7B3FE455,transparent);pointer-events:none}
 .top{max-width:1180px;margin:auto;padding:18px 20px 14px;display:flex;align-items:center;gap:14px;position:relative}
-.logo{width:60px;height:60px;flex:none;filter:drop-shadow(0 6px 14px #7B3FE466);animation:bob 5s ease-in-out infinite}
-.logo svg,.logo img{width:100%;height:100%;display:block;border-radius:50%;object-fit:cover}
+.logo{width:88px;height:88px;flex:none;filter:drop-shadow(0 6px 14px #7B3FE466);animation:bob 5s ease-in-out infinite}
+.logo svg,.logo img{width:100%;height:100%;display:block;border-radius:14px;object-fit:cover}
 @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 .brand{min-width:0}.brand h1{margin:0;font-size:24px;font-weight:850;letter-spacing:.06em;line-height:1.1}
 .brand h1 b{color:var(--gold)}.brand .meta{font-size:13px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:3px}
@@ -35649,7 +35623,7 @@ footer{max-width:1180px;margin:0 auto;padding:0 20px 30px;color:var(--faint);fon
 footer a{color:var(--faint)}
 @media (max-width:900px){.s4,.s5,.s6,.s7,.s8{grid-column:span 12}.kpi{grid-column:span 6}.pgrid{grid-template-columns:1fr}}
 @media (max-width:640px){
- .top{padding:14px 16px 12px}.logo{width:48px;height:48px}.brand h1{font-size:20px}
+ .top{padding:14px 16px 12px}.logo{width:72px;height:72px}.brand h1{font-size:20px}
  main{padding:12px 12px calc(84px + env(safe-area-inset-bottom))}.tab{gap:12px}.card{padding:14px;border-radius:18px}
  .ticker{padding:0 12px;margin-top:10px}
  nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:15;padding:6px 6px calc(6px + env(safe-area-inset-bottom));
@@ -36908,7 +36882,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#14003a url('/img/app-splash.jpg?v=4') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#14003a url('/img/app-splash.jpg?v=5') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 70% 58% at 50% 46%, rgba(12,6,28,.22), rgba(8,4,18,.42))}
@@ -36922,7 +36896,7 @@ html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 
  letter-spacing:.03em;color:#07070a;text-align:center;
  text-shadow:0 0 6px #e4d4ff,0 0 16px #7B3FE4,0 0 34px #7B3FE4,0 0 58px #6d28d9,0 0 92px #7B3FE4cc;
  filter:drop-shadow(0 0 14px #7B3FE4) drop-shadow(0 0 36px #6d28d9)}
-a.logo{display:block;color:inherit;flex:none;text-decoration:none}a.logo svg,a.logo img{width:100%;height:100%;display:block;border-radius:50%;object-fit:cover}
+a.logo{display:block;color:inherit;flex:none;text-decoration:none}a.logo svg,a.logo img{width:100%;height:100%;display:block;border-radius:14px;object-fit:cover}
 .lookbtn.icon{width:38px;height:38px;border-radius:12px;border:1px solid var(--line);background:var(--card);display:grid;
  place-items:center;cursor:pointer;flex:none;color:var(--gold)}
 .looksheet{position:fixed;inset:0;z-index:80;display:none;overflow-y:auto;-webkit-overflow-scrolling:touch;
@@ -37305,7 +37279,7 @@ body.v4 .nlist{margin:0;padding:0 0 0 18px}body.v4 .nlist li{margin:7px 0;line-h
 @media (max-width:720px){body.v4 .kpis{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 12px 12px}
  body.v4 header{background:#0b0714f2;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);overflow-anchor:none}
  body.v4 .top{padding:8px 12px 8px;gap:10px 8px;align-items:center}
- body.v4 .logo{width:56px;height:56px}
+ body.v4 .logo{width:80px;height:80px}
  body.v4 .spacer{display:none}body.v4 .brand{flex:1 1 auto;min-width:0}
  body.v4 .brand h1{font-size:17px;letter-spacing:.08em;white-space:nowrap}
  body.v4 .brand h1 a{display:inline-flex;align-items:center;min-height:44px}
@@ -37316,7 +37290,7 @@ body.v4 .nlist{margin:0;padding:0 0 0 18px}body.v4 .nlist li{margin:7px 0;line-h
  body.v4 .findwrap{order:3;max-width:none;width:100%;flex:none;padding:0 12px 10px}
  body.v4.findaway .findwrap,body.v4.findaway .brand .meta{display:none}
  body.v4.findaway header{background:#0b0714}
- body.v4.findaway .logo{width:44px;height:44px}
+ body.v4.findaway .logo{width:64px;height:64px}
  body.v4.findaway .top{padding-top:2px;padding-bottom:0}
  body.v4 nav.tabs button.on{color:var(--gold);background:color-mix(in srgb,var(--gold) 18%,transparent)}
  body.v4 nav.tabs button.on:after{display:block;height:3px;background:var(--gold)}
@@ -38123,7 +38097,6 @@ addEventListener('load',smokeIntro);
         '<button type="button" id="resetphone">Reset this phone</button>'
         '<button type="button" id="lookdone">Done</button></div></div></div>'
         '<div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introbrand">'
-        '<img src="' + DASH_FAVICON + '" alt="" width="120" height="120">'
         '<div id="introtitle">Pimp\'s Dashboard</div></div></div>'
         '<noscript><p style="text-align:center">The dashboard needs JavaScript switched on.</p></noscript>',
         1)
@@ -38163,7 +38136,7 @@ body{margin:0;background:radial-gradient(1200px 700px at 8% -12%,#7B3FE466,trans
 a{color:#c4a6ff;text-decoration:none}a:hover{color:#fff}
 .wrap{max-width:1080px;margin:0 auto;padding:0 22px}
 header{display:flex;align-items:center;gap:14px;padding:18px 0 8px;border-bottom:1px solid #F5C54222}
-.logo{width:60px;height:60px;flex:none;filter:drop-shadow(0 8px 16px #7B3FE466)}.logo svg,.logo img{width:100%;height:100%;display:block;border-radius:50%;object-fit:cover}
+.logo{width:88px;height:88px;flex:none;filter:drop-shadow(0 8px 16px #7B3FE466)}.logo svg,.logo img{width:100%;height:100%;display:block;border-radius:14px;object-fit:cover}
 .brand{font-weight:850;letter-spacing:.14em;font-size:15px}.brand b{color:var(--gold)}
 nav{margin-left:auto;display:flex;gap:18px;align-items:center;font-weight:650;font-size:14px;color:var(--muted)}
 nav a.btn{background:linear-gradient(90deg,var(--brand),#5a22c8);color:#fff;padding:8px 14px;border-radius:999px;box-shadow:0 8px 20px -10px #7B3FE4}
@@ -40346,7 +40319,7 @@ STAFF_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
  padding:calc(10px + env(safe-area-inset-top)) 16px 10px;border-bottom:1px solid #F5C54222;
  background:#0b0714f2;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
 .homebar{display:flex;align-items:center;gap:10px;min-height:48px;min-width:0;flex:1 1 auto}
-.logo{width:56px;height:56px;flex:none;display:block}.brand{font-weight:850;letter-spacing:.14em;color:inherit;text-decoration:none;
+.logo{width:88px;height:88px;flex:none;display:block}.brand{font-weight:850;letter-spacing:.14em;color:inherit;text-decoration:none;
  display:flex;align-items:center;min-height:44px}.brand b{color:var(--gold)}
 .pill{background:linear-gradient(90deg,var(--gold),var(--brand));color:#14003A;font-weight:850;
  font-size:11px;letter-spacing:.12em;text-transform:uppercase;padding:7px 11px;border-radius:999px}
@@ -40671,7 +40644,7 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
 <p class="lookhint" style="margin-top:14px">Accent</p><div class="lookaccents" id="lookaccents"></div>
 <div class="lookrow"><button type="button" id="lookdone">Done</button></div></div></div>
 <div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introbrand">
-<img src="{{FAVICON}}" alt="" width="120" height="120"><div id="introtitle">Pimp's Dashboard</div></div></div>
+<div id="introtitle">Pimp's Dashboard</div></div></div>
 <script>
 'use strict';
 const $=s=>document.querySelector(s);
@@ -42106,7 +42079,7 @@ ACCOUNT_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
  padding:calc(10px + env(safe-area-inset-top)) 16px 10px;border-bottom:1px solid #F5C54222;
  background:#0b0714f2;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
 .homebar{display:flex;align-items:center;gap:10px;min-height:48px;min-width:0;flex:1 1 auto}
-.logo{width:56px;height:56px;flex:none;display:block}.brand{font-weight:850;letter-spacing:.14em;color:inherit;text-decoration:none;
+.logo{width:88px;height:88px;flex:none;display:block}.brand{font-weight:850;letter-spacing:.14em;color:inherit;text-decoration:none;
  display:flex;align-items:center;min-height:44px}.brand b{color:var(--gold)}
 .nav{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
 .navchip{display:inline-flex;align-items:center;height:44px;padding:0 12px;border-radius:12px;border:1px solid var(--line);
@@ -42134,7 +42107,7 @@ a.dlink:hover{color:#fff}
 <div class="nav"><a class="navchip" href="/">Dashboard</a><a class="navchip" href="/logout">Sign out</a></div></div>
 <div class="wrap" id="box"></div>
 <div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introbrand">
-<img src="{{FAVICON}}" alt="" width="120" height="120"><div id="introtitle">Pimp's Dashboard</div></div></div>
+<div id="introtitle">Pimp's Dashboard</div></div></div>
 <script>
 'use strict';
 const $=s=>document.querySelector(s);

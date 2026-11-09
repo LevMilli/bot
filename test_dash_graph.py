@@ -55,28 +55,19 @@ class DashGraphTests(unittest.TestCase):
         splash = bot.app_splash_jpeg()
         self.assertTrue(splash.startswith(b"\xff\xd8"))
         body = bot.dash_manifest_body()
-        self.assertIn("/icon-512.png?v=4", body)
-        self.assertIn("pb-shell-154", bot.SW_JS)
-        from PIL import Image
+        self.assertIn("/icon-512.png?v=5", body)
+        self.assertIn("pb-shell-155", bot.SW_JS)
+        from PIL import Image, ImageChops, ImageStat
         import io
-        icon = Image.open(io.BytesIO(raw)).convert("RGBA")
+        icon = Image.open(io.BytesIO(raw)).convert("RGB")
         self.assertEqual(icon.size, (64, 64))
-        # The gold ring sits near the edge once the dark margin is cropped off.
-        near = False
-        px = icon.load()
-        for y in range(64):
-            for x in range(64):
-                if min(x, y, 63 - x, 63 - y) > 6:
-                    continue
-                r, g, b, _a = px[x, y]
-                if r > 170 and g > 120 and b < 150 and r > b + 40:
-                    near = True
-                    break
-            if near:
-                break
-        self.assertTrue(near)
-        self.assertTrue(bot.DASH_FAVICON.startswith("data:image/png;base64,"))
+        poster = Image.open(bot._dash_brand_path("splash.jpg")).convert("RGB").resize((64, 64))
+        diff = sum(ImageStat.Stat(ImageChops.difference(icon, poster)).mean) / 3
+        self.assertLess(diff, 8)
+        self.assertTrue(bot.DASH_FAVICON.startswith("data:image/jpeg;base64,"))
         self.assertIn(bot.DASH_FAVICON, bot.DASHBOARD_HTML_V4)
+        self.assertIn(bot.DASH_FAVICON, bot.STAFF_HTML)
+        self.assertIn("border-radius:14px", bot.STAFF_HTML)
         self.assertNotIn("id=\"pbP\"", bot.DASHBOARD_HTML_V4)
 
     def test_group_stats_filter_matches_hidden_helper(self):
