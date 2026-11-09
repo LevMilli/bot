@@ -3051,6 +3051,7 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         mh = desk_living.metals_heat_chip(root)
         eh = desk_living.energy_heat_chip(root)
         ib = desk_living.inx_band_occupancy_chip(root)
+        e8 = desk_living.e8_pack_chips(root)
         desk_row["injury_wire"] = iw
         desk_row["eia_scout"] = es
         desk_row["line_shopper"] = ls
@@ -3062,6 +3063,7 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["metals_heat"] = mh
         desk_row["energy_heat"] = eh
         desk_row["inx_band_occupancy"] = ib
+        desk_row.update(e8)
         if isinstance(desk_row.get("master"), dict):
             desk_row["master"]["injury_wire"] = desk_row["master"].get("injury_wire") or iw
             desk_row["master"]["eia_scout"] = desk_row["master"].get("eia_scout") or es
@@ -3084,6 +3086,8 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             desk_row["master"]["inx_band_occupancy"] = (
                 desk_row["master"].get("inx_band_occupancy") or ib
             )
+            for name, chip in e8.items():
+                desk_row["master"][name] = desk_row["master"].get(name) or chip
     except Exception as exc:  # noqa: BLE001
         desk_row["injury_wire"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["eia_scout"] = {"paper_only": True, "error": type(exc).__name__}
@@ -3096,6 +3100,12 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["metals_heat"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["energy_heat"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["inx_band_occupancy"] = {"paper_only": True, "error": type(exc).__name__}
+        try:
+            from helpers import e8_digest_pack
+            for name in e8_digest_pack.HELPER_NAMES:
+                desk_row[name] = {"paper_only": True, "error": type(exc).__name__}
+        except Exception:
+            pass
     try:
         import desk_living
         sh = desk_living.skip_historian_chip(root)

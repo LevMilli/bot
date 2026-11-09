@@ -1747,6 +1747,15 @@ def main() -> int:
             "multi-ex-disagree", "funding-scout",
             "metals-heat", "energy-heat",
             "inx-band-occupancy",
+            "e8-digest-pack",
+            # E8 remaining pack kebab names (also via e8-digest-pack).
+            "inx-dual-ev-lab", "meme-rug-auditor", "meme-liq-cliff",
+            "opp-cost-clock", "fee-ledger-nag", "masters-canary",
+            "hillclimb-watchdog", "stale-skew-watchdog", "misplaced-publisher",
+            "selective-eligibility", "green-boost-readiness", "daily-r-clerk",
+            "profit-lock-clerk", "barbell-clerk", "corr-clerk",
+            "incubation-registrar", "shadow-edge08-clerk", "skip-regret-clerk",
+            "ruin-drill-proctor",
             "commodity-tstop-status", "commodity-tstop-promote",
             "commodity-tstop-promote-ready",
             "sports-tfinal-status", "sports-tfinal-promote",
@@ -4452,6 +4461,47 @@ def main() -> int:
     if args.action == "inx-band-occupancy":
         from helpers import inx_band_occupancy
         out = inx_band_occupancy.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "e8-digest-pack":
+        from helpers import e8_digest_pack
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = {
+            name: e8_digest_pack.write_digest_from_desk(name, root, bots=bots)
+            for name in e8_digest_pack.HELPER_NAMES
+        }
+        print(json.dumps({
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "may_place_alone": False,
+            "n": len(out),
+            "helpers": sorted(out.keys()),
+            "digests": out,
+        }, indent=2, sort_keys=True, default=str))
+        return 0
+    # Individual E8 pack kebab → snake helper modules.
+    _e8_kebab = str(args.action or "").replace("-", "_")
+    if _e8_kebab in getattr(__import__("helpers.e8_digest_pack", fromlist=["HELPER_NAMES"]), "HELPER_NAMES", ()):
+        import importlib
+        mod = importlib.import_module(f"helpers.{_e8_kebab}")
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = mod.write_digest_from_desk(root, bots=bots)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
     if args.action == "fee-ledger":

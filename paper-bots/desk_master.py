@@ -1080,7 +1080,7 @@ def master_summary(
     if isinstance(expand, dict) and expand.get("blocked"):
         priority.insert(0, str(expand.get("label") or "betting expand BLOCKED")[:120])
     priority = finalize_living_priority(priority)
-    return {
+    out = {
         "paper_only": True,
         "version": MASTER_VERSION,
         "bars": dict(MASTER_BARS),
@@ -1386,6 +1386,13 @@ def master_summary(
             "No profit guarantee. Fee floors unchanged."
         ),
     }
+    try:
+        import desk_living
+        for name in desk_living.e8_pack_helper_names():
+            out[name] = (living or {}).get(name) if isinstance(living, dict) else None
+    except Exception:
+        pass
+    return out
 
 
 def self_check() -> None:
