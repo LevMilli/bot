@@ -58,6 +58,8 @@ BOT_VENUE = {
     "memecoin": "solana_dex",
     "coinbase-spot": "coinbase_spot",
     "btc-carry": "binance_btc_carry",
+    # Sharp→Kalshi lag reuses locked sports floor 0.06 (no softer venue).
+    "sports-sharp-lag": "kalshi_sports",
 }
 
 

@@ -529,6 +529,13 @@ living-baseline-capture:
 living-fee-ledger:
 	python3 tools/staff_living_status.py fee-ledger
 
+.PHONY: living-half-kelly-crb living-fee-sim
+living-half-kelly-crb:
+	python3 tools/staff_living_status.py half-kelly-crb
+
+living-fee-sim:
+	python3 tools/staff_living_status.py fee-sim
+
 living-commodity-tstop-status:
 	python3 tools/staff_living_status.py commodity-tstop-status
 
