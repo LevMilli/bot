@@ -750,7 +750,7 @@ class ShadowEvidenceDensify(unittest.TestCase):
             self.assertEqual(again["recorded"], 0)
 
     def test_catchup_api_wipe_on_loser_records_hard_stop(self):
-        """API wipe 0 on settle loser densifies hard-stop; entry companion bid ignored."""
+        """API wipe 0 on hold-to-settle loser densifies HS; entry companion ignored."""
         with tempfile.TemporaryDirectory() as tmp:
             sports_dir = os.path.join(tmp, "sports-gap-paper")
             os.makedirs(sports_dir, exist_ok=True)
@@ -766,7 +766,7 @@ class ShadowEvidenceDensify(unittest.TestCase):
                         # Entry companion bid ≈ ask — must NOT block wipe densify.
                         "bid": 0.69,
                         "ask": 0.70,
-                        "exit_price": 0.65,
+                        # No organic mid-open exit — hold-to-settle wipe OK.
                         "contracts": 21,
                         "cost": 15.12,
                         "pnl": -1.89,
@@ -804,6 +804,63 @@ class ShadowEvidenceDensify(unittest.TestCase):
             repair = desk_roi_plan.repair_sports_hard_stop_settle_poison(tmp)
             self.assertEqual(repair["removed"], 0)
             self.assertEqual(repair["kept"], 1)
+
+    def test_catchup_skips_api_when_organic_exit_never_hit(self):
+        """Gap-decay exit non-hit must not invent HS from later API bid/wipe."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sports_dir = os.path.join(tmp, "sports-gap-paper")
+            os.makedirs(sports_dir, exist_ok=True)
+            state = {
+                "cash": 100.0,
+                "open": [],
+                "closed": [
+                    {
+                        "ticker": "KX-GAP-NO-HIT",
+                        "side": "home",
+                        "league": "NFL",
+                        "entry_price": 0.81,
+                        "bid": 0.80,
+                        "exit_price": 0.79,  # thr 0.69 — never hit
+                        "last_mark": 0.79,
+                        "contracts": 10,
+                        "cost": 8.1,
+                        "pnl": -0.2,
+                        "exit": "gap-decay: now 0.01 < 55% of entry 0.06",
+                    }
+                ],
+                "paper_only": True,
+            }
+            with open(os.path.join(sports_dir, "state.json"), "w", encoding="utf-8") as fh:
+                json.dump(state, fh)
+
+            def fake_later_api(ticker: str):
+                # Later API would invent a hit — must not.
+                return {"yes_bid_dollars": "0.55", "status": "finalized"}
+
+            out = desk_roi_plan.backfill_sports_exit_shadow_from_closed(
+                tmp, fetch_market=fake_later_api,
+            )
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out["hard_stop"], 0, out)
+            self.assertEqual(
+                desk_roi_plan.sports_hard_stop_shadow_summary(tmp)["n"], 0,
+            )
+
+            # Seed invent poison + repair must strip settle-retro non-hit.
+            desk_roi_plan.record_sports_hard_stop_shadow(
+                tmp,
+                ticker="KX-GAP-NO-HIT",
+                side="home",
+                league="NFL",
+                entry_price=0.81,
+                bid=0.55,
+                contracts=10,
+                cost=8.1,
+                note="catchup settle-retro hard-stop — no live sell",
+            )
+            repair = desk_roi_plan.repair_sports_hard_stop_settle_poison(tmp)
+            self.assertEqual(repair["removed"], 1)
+            self.assertEqual(repair["kept"], 0)
 
     def test_catchup_prefers_exit_mark_not_entry_bid(self):
         """API missing → use exit_price/exit_bid; never entry companion bid."""
