@@ -302,8 +302,12 @@ def classify_skip(reason: str | None, *, weekday: int | None = None) -> str:
     if (
         "learning" in text
         or "adverse cool" in text
+        or "anti-revenge" in text
+        or "anti revenge" in text
         or ("bucket" in text and "cool" in text)
     ):
+        # Prefer-2: anti-revenge is same-market LEARN lockout (adverse-cool sibling).
+        # Must not invent DATA via other→DATA while CARD names the cool.
         return "learning"
     if "news" in text or "blackout" in text or "fomc" in text or "cpi" in text:
         return "news"
@@ -318,12 +322,15 @@ def classify_skip(reason: str | None, *, weekday: int | None = None) -> str:
         return "data"
     # Daily-R settle-only is a budget lock (fee-clear profit target) — not DATA/other.
     # Keeps zero-buy / skip_board BUDGET taxonomy honest beside CARD densify.
+    # Firm-queue deferral is desk risk-rank allocation (BUDGET), not DATA invent.
     if (
         "settle-only" in text
         or "daily r budget" in text
         or "tower budget" in text
         or "budget full" in text
         or ("budget" in text and "left" in text)
+        or "firm-queue" in text
+        or "firm queue" in text
     ):
         return "budget"
     if "cushion" in text:
@@ -345,6 +352,9 @@ def classify_skip(reason: str | None, *, weekday: int | None = None) -> str:
     if "cash" in text or "broke" in text:
         return "cash"
     if "max open risk" in text or "open-risk" in text or "open risk" in text:
+        return "open_risk"
+    # Sticky-open SLA: exits-first on red day — open-risk posture, not DATA invent.
+    if "sticky-open" in text or "sticky open" in text:
         return "open_risk"
     if "max open position" in text:
         return "max_open"
@@ -1556,6 +1566,14 @@ def self_check() -> None:
     assert stable_skip_code("fair") == "P"
     assert classify_skip("forexfactory calendar closed", weekday=2) == "calendar"
     assert classify_skip("tower budget left $0", weekday=2) == "budget"
+    assert classify_skip(
+        "anti-revenge: btc15m blocked on KXTEST ~12m after hard-stop", weekday=1
+    ) == "learning"
+    assert stable_skip_code("learning") == "LEARN"
+    assert classify_skip(
+        "sticky-open SLA: 2 open(s) past settle window — exits first", weekday=1
+    ) == "open_risk"
+    assert classify_skip("firm-queue deferred rank=3: lower score", weekday=1) == "budget"
     assert depth_adjusted_edge(0.10, 5, need=10) == round(0.05, 6)
     assert depth_adjusted_edge(0.10, 20, need=10) == round(0.10, 6)
     assert opportunity_score_v2(0.10, 0.8, 5, need=10) < opportunity_score_v2(0.10, 0.8, 20, need=10)
