@@ -227,10 +227,19 @@ def _fetch_orderbook_raw(ticker: str):
 
 
 def depth_from_book(data, side: str, ask: float) -> tuple[float | None, int]:
-    """Spread + depth from a raw Kalshi orderbook payload (or None)."""
+    """Spread + depth from a raw Kalshi orderbook payload (or None).
+
+    Live Kalshi returns ``orderbook_fp`` with ``yes_dollars`` / ``no_dollars``
+    (BTC ``book_for_side`` already). Legacy ``orderbook.yes/no`` kept as
+    fallback. Missing fp must not silent-map thick books to depth 0.
+    """
     if not data:
         return None, 0
-    book = data.get("orderbook") if isinstance(data, dict) else data
+    if isinstance(data, dict):
+        # Prefer fp (current API); fall back to legacy nested / bare book.
+        book = data.get("orderbook_fp") or data.get("orderbook") or data
+    else:
+        book = data
     if not isinstance(book, dict):
         return None, 0
     key = "yes" if side == "YES" else "no"
