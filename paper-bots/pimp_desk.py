@@ -102,6 +102,8 @@ DEFAULTS = {
         "solana_dex": 0.02,
         # Excess return after Coinbase round-trip. Locked. Shadow tower only.
         "coinbase_spot": 0.05,
+        # Registry lock for the held BTC carry. Does not change kalshi_btc15m.
+        "binance_btc_carry": 0.02,
     },
     "fill_adverse_tax": 0.01,
     "gate_a_min_n": 20,
@@ -146,6 +148,7 @@ ACCOUNT_FILES = {
     "memecoin": "positions.json",
     "kalshi-sized": "paper_state.json",
     "coinbase-spot": "paper_account.json",
+    "btc-carry": "paper_account.json",
 }
 
 # Closed paper settlements and the logs that record them. These are the files a
@@ -185,6 +188,7 @@ SETTLEMENT_FILES = (
     "desk_fee_ledger.json",
     "btc15m-signal/shadow_edge08_account.json",
     "coinbase-spot-paper/paper_account.json",
+    "btc-carry-paper/paper_account.json",
     "pimp-learning.json",
     "pimp-good.json",
 )
@@ -221,6 +225,10 @@ ACTIONS = {
         # Shadow sleeve. Public candles only. Entry gate still blocks new buys.
         "run": {"argv": ("bot.py",), "entry": True, "timeout": 45, "label": "Run one check"},
     },
+    "btc-carry": {
+        # Shadow sleeve. Public funding archive only. Entry gate blocks a new open.
+        "run": {"argv": ("bot.py",), "entry": True, "timeout": 60, "label": "Run one check"},
+    },
 }
 
 # One automatic pass. Intervals are seconds. Clock times are America/Chicago.
@@ -242,6 +250,8 @@ AUTO = (
     {"id": "memecoin", "action": "run", "every_sec": 180},
     # Shadow research cadence. Does not spend desk cash. Fee floor stays 0.05.
     {"id": "coinbase-spot", "action": "run", "every_sec": 300},
+    # Held carry. Funding prints every 8h. The check does not flip the month.
+    {"id": "btc-carry", "action": "run", "every_sec": 300},
     {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "11:59"},
     # Forced INX scan slots (plan E1 #123) — up to 3 fee-aware scans / Chicago day.
     {"id": "kalshi-sp", "action": "run", "at_ct": "12:05", "until_ct": "12:25"},
@@ -335,6 +345,22 @@ BOTS = (
         ),
         "state": "paper_account.json",
         "kind": "spot",
+        "log": "",
+        "empty": "No paper account yet. A check writes paper_account.json.",
+        "shadow_only": True,
+    },
+    {
+        "id": "btc-carry",
+        "name": "BTC carry",
+        "folder": "btc-carry-paper",
+        "script": "bot.py",
+        "blurb": (
+            "Shadow BTC spot-long / perpetual-short carry. Public archive only. "
+            "Unlevered and held. A red month is a mark, not a flip. "
+            "Spends no desk cash."
+        ),
+        "state": "paper_account.json",
+        "kind": "carry",
         "log": "",
         "empty": "No paper account yet. A check writes paper_account.json.",
         "shadow_only": True,
@@ -521,6 +547,32 @@ BOT_PLANS = {
         "entry_gated": True,
         "stake": "fixed-25",
     },
+    "btc-carry": {
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "Long BTC spot and short the BTC perpetual, same notional, leverage 1",
+            "Public Binance archive funding and 8h premium index; no key",
+            "Spot taker 0.10% and perp taker 0.05%. Round trip 0.30%, paid once to open",
+            "Open only when both marks exist. Then hold. Do not flip the month",
+        ],
+        "sell": [
+            "A red funding month is marked and is not a close",
+            "Flipping every month is refused. That path pays the 0.30% round trip every month",
+            "The sleeve does not add a second leg after a red month",
+            "Staff close is the backstop. Nothing here auto-promotes",
+        ],
+        "failsafes": [
+            "Desk entry gate blocks a new open. An open hold still marks",
+            "Spot taker stays 0.10% and perp taker stays 0.05%. The Coinbase 0.90% taker is not used",
+            "kalshi_btc15m 0.05 is not this book and is not lowered",
+            "Leverage above 1 is put back to 1. Notional stays the $500 sleeve",
+            "Pass bar: after-fee monthly median stays positive. A monthly flip is a reject",
+            "Pause file. A Binance key in the environment refuses the check",
+        ],
+        "exit_quality": "partial",
+        "entry_gated": True,
+        "stake": "sleeve-500",
+    },
 }
 
 
@@ -648,6 +700,7 @@ ROI_POLICY = {
         "btc15m": [],
         "memecoin": ["fixed_ticket_25"],
         "coinbase-spot": ["fixed_ticket_25", "shadow_only"],
+        "btc-carry": ["shadow_only"],
     },
     "target_exit_quality": {
         "sports-gap": "partial",
@@ -656,6 +709,7 @@ ROI_POLICY = {
         "memecoin": "strong",
         "kalshi-sized": "partial",
         "coinbase-spot": "partial",
+        "btc-carry": "partial",
     },
 }
 
@@ -1361,7 +1415,7 @@ def _save_run(root: str, bot_id: str, row: dict) -> None:
 
 
 # Combined manage+buy scripts still run when the desk gate hits, with entries off.
-_MANAGE_WHEN_GATED = frozenset({"sports-gap", "memecoin", "btc15m"})
+_MANAGE_WHEN_GATED = frozenset({"sports-gap", "memecoin", "btc15m", "btc-carry"})
 
 
 def _child_env(block_entries: bool = False, shadow: dict | None = None) -> dict:
@@ -1863,7 +1917,7 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
         view["why"] = "That script is not on this checkout, so this check bought nothing."
         return _finish_bot(view, spec, root)
     run = view["last_run"] or {}
-    if spec["kind"] in ("btc", "spot"):
+    if spec["kind"] in ("btc", "spot", "carry"):
         summary = str(run.get("summary") or "")
         view["skip"] = _btc_skip(summary)
         if spec["kind"] == "btc":
@@ -3213,11 +3267,18 @@ def _paper_ok(root: str, bot_id: str) -> str:
         return "Memecoin PAPER is not True. This desk will not start it."
     if bot_id == "coinbase-spot" and not _coinbase_paper(root):
         return "Coinbase spot config is not paper-only. This desk will not start it."
+    if bot_id == "btc-carry" and not _btc_carry_paper(root):
+        return "BTC carry config is not paper-only. This desk will not start it."
     return ""
 
 
 def _coinbase_paper(root: str) -> bool:
     cfg = _read_json(_under(root, "coinbase-spot-paper", "config.json")) or {}
+    return cfg.get("paper_only") is True and cfg.get("live_orders") is not True
+
+
+def _btc_carry_paper(root: str) -> bool:
+    cfg = _read_json(_under(root, "btc-carry-paper", "config.json")) or {}
     return cfg.get("paper_only") is True and cfg.get("live_orders") is not True
 
 
@@ -3340,6 +3401,7 @@ def timer_text() -> str:
         "Kalshi paper scans forced at 12:05, 13:05, and 14:20 CT (up to 3/day). "
         "Kalshi paper settle once at 4:00 PM. "
         "Coinbase spot shadow about every 5 minutes (public candles, no desk cash). "
+        "BTC carry shadow about every 5 minutes (public funding archive, no desk cash). "
         "Memecoin about every 3 minutes (manage exits, then scan; dual lanes; stop-bleed); "
         "about every 2 minutes when open paper needs manage. "
         "Commodity about every 90 seconds; about every 60 seconds when ≥2 series are open. "
@@ -4102,6 +4164,7 @@ TOWER_STARTER_CASH = {
     "kalshi-sp": 500.0,
     "kalshi-sized": 500.0,
     "coinbase-spot": 500.0,
+    "btc-carry": 500.0,
 }
 TOWER_MIN_AMMO = {
     "sports-gap": 10.0,
@@ -4111,6 +4174,7 @@ TOWER_MIN_AMMO = {
     "kalshi-sp": 20.0,
     "kalshi-sized": 20.0,
     "coinbase-spot": 25.0,
+    "btc-carry": 500.0,
 }
 
 
@@ -4395,6 +4459,16 @@ def _account_body(bot_id: str) -> dict:
             "paper_only": True,
             "shadow_only": True,
             "live_orders": False,
+        }
+    if bot_id == "btc-carry":
+        return {
+            "cash": 500.0,
+            "open": [],
+            "closed": [],
+            "paper_only": True,
+            "shadow_only": True,
+            "live_orders": False,
+            "entry_fees": 0,
         }
     if bot_id == "memecoin":
         return {
@@ -5542,6 +5616,7 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
     now = dt.datetime.now(dt.timezone.utc)
     view["book_id"] = {
         "sports": "sports", "kalshi": "kalshi", "btc": "bitcoin", "meme": "meme", "spot": "coinbase",
+        "carry": "btc-carry",
     }.get(spec.get("kind"), "kalshi")
     view["shadow_only"] = bool(spec.get("shadow_only"))
     view["paused"] = bot_paused(root, spec["id"])
