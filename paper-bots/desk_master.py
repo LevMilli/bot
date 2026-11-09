@@ -8,6 +8,7 @@ M3/M4 read desk_roi_plan fit + latency journals (no longer stubs).
 """
 from __future__ import annotations
 
+import json
 import math
 import os
 from typing import Any
@@ -305,7 +306,35 @@ def meme_stopbleed_measure(bot: dict | None = None, *, red_lock_usd: float = 5.0
     }
 
 
-def firm_roi_rescue(bots: list | None = None, *, cfg: dict | None = None) -> dict:
+def _inx_staff_clear_soft_dd(root: str | None, bot_id: str, cfg: dict | None = None) -> bool:
+    """True when staff waived soft $460 DD for that INX tower (kill $400 stays stone)."""
+    cfg = cfg or {}
+    # Explicit desk cfg wins; else read tower config.json.
+    if bot_id == "kalshi-sp" and "staff_clear_drawdown_halt" in cfg:
+        return bool(cfg.get("staff_clear_drawdown_halt"))
+    if bot_id == "kalshi-sized" and "staff_clear_sized_drawdown_halt" in cfg:
+        return bool(cfg.get("staff_clear_sized_drawdown_halt"))
+    folder = {
+        "kalshi-sp": "kalshi-sp500-paper",
+        "kalshi-sized": "kalshi-sized-paper",
+    }.get(bot_id)
+    if not folder:
+        return False
+    try:
+        path = os.path.join(root or os.path.dirname(__file__), folder, "config.json")
+        with open(path, encoding="utf-8") as handle:
+            tower_cfg = json.load(handle)
+        return bool(tower_cfg.get("staff_clear_drawdown_halt"))
+    except Exception:
+        return False
+
+
+def firm_roi_rescue(
+    bots: list | None = None,
+    *,
+    cfg: dict | None = None,
+    root: str | None = None,
+) -> dict:
     """Overnight ROI rescue flags — which towers should refuse new entries."""
     cfg = cfg or {}
     flags = []
@@ -323,11 +352,21 @@ def firm_roi_rescue(bots: list | None = None, *, cfg: dict | None = None) -> dic
                 "why": f"meme red-day lock (today ${today:.2f} ≤ −$5)",
             })
         if bot_id in ("kalshi-sp", "kalshi-sized") and cash is not None and cash <= 460:
-            flags.append({
-                "bot": bot_id,
-                "action": "entries_off",
-                "why": f"INX drawdown halt (cash ${cash:.2f} ≤ $460)",
-            })
+            if _inx_staff_clear_soft_dd(root, bot_id, cfg):
+                flags.append({
+                    "bot": bot_id,
+                    "action": "staff_cleared_soft_dd",
+                    "why": (
+                        f"Staff cleared soft DD (cash ${cash:.2f} ≤ $460); "
+                        "paper buys may resume — kill $400 + fee/band/max-1/day stay stone"
+                    ),
+                })
+            else:
+                flags.append({
+                    "bot": bot_id,
+                    "action": "entries_off",
+                    "why": f"INX drawdown halt (cash ${cash:.2f} ≤ $460)",
+                })
         if bot_id == "sports-gap":
             red = None
             if today is not None and realized is not None:
@@ -379,7 +418,7 @@ def master_summary(
     m1_ready = sum(1 for r in rows if (r.get("passing") or {}).get("M1"))
     meme = next((b for b in (bots or []) if isinstance(b, dict) and b.get("id") == "memecoin"), None)
     stopbleed = meme_stopbleed_measure(meme)
-    rescue = firm_roi_rescue(bots, cfg=cfg)
+    rescue = firm_roi_rescue(bots, cfg=cfg, root=root)
     bleed = None
     misplaced = None
     plan = None
@@ -566,11 +605,9 @@ def master_summary(
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_ch = desk_roi_plan.cold_harvest_status(root).get("latest")
-            if root and bots and (
-                not isinstance(latest_ch, dict)
-                or str(latest_ch.get("label") or "") != today
-            ):
+            # Prefer live bots whenever provided — same-day stale week_pnl must
+            # not lag bleed_week / profit_lock (#486 twin).
+            if root and bots:
                 plan["cold_harvest"] = desk_roi_plan.capture_cold_harvest(
                     root, bots=bots, label=today,
                 )

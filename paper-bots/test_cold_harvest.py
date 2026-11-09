@@ -74,6 +74,24 @@ class ColdHarvest(unittest.TestCase):
             self.assertIn("cold_harvest", plan)
             self.assertTrue(plan.get("fee_floors_locked"))
 
+    def test_master_cold_harvest_prefers_live_bots_over_stale(self):
+        """Same-day stale week_pnl must not lag live commodity green (#486 twin)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            morning = [{"id": "commodity-15m", "today": 10.16, "open_risk": 0, "history": [], "gate_a": {}}]
+            desk_roi_plan.capture_profit_lock(tmp, bots=morning, label="2026-11-09")
+            desk_roi_plan.capture_cold_harvest(tmp, bots=morning, label="2026-11-09", pct=0.40)
+            stale = (desk_roi_plan.cold_harvest_status(tmp).get("latest") or {})
+            self.assertAlmostEqual(float(stale.get("week_pnl") or 0), 10.16, places=2)
+            live = [{"id": "commodity-15m", "today": 35.02, "open_risk": 0, "history": [], "gate_a": {}}]
+            summary = desk_master.master_summary(
+                tmp, bots=live, cfg={"max_open_risk": 100},
+            )
+            ch = (summary.get("roi_plan") or {}).get("cold_harvest") or {}
+            # capture returns the row; status returns wrapper with latest
+            row = ch.get("latest") if isinstance(ch.get("latest"), dict) else ch
+            self.assertAlmostEqual(float(row.get("week_pnl") or 0), 35.02, places=2)
+            self.assertGreater(float(row.get("harvested") or 0), 4.06)
+
     def test_fee_floors_untouched(self):
         import desk_profit
         floors = desk_profit.venue_floors_locked()

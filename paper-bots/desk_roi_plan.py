@@ -11005,6 +11005,13 @@ def capture_cold_harvest(
     """
     day = label or _chicago_day()
     week_id = _chicago_week_id(day)
+    # When bots are provided, refresh profit-lock week first so harvest tracks live
+    # green (same-day stale week_pnl must not lag Masters bleed_week — #486 twin).
+    if bots:
+        try:
+            capture_profit_lock(root, bots=bots, label=day)
+        except Exception:
+            pass
     # Prefer profit-lock week accumulator when present; else firm today as thin proxy.
     pl_store = _load(
         _path(PROFIT_LOCK, root),
@@ -11013,8 +11020,7 @@ def capture_cold_harvest(
     weeks_pl = pl_store.get("weeks") if isinstance(pl_store.get("weeks"), dict) else {}
     week_row = weeks_pl.get(week_id) if isinstance(weeks_pl.get(week_id), dict) else {}
     week_pnl = _finite(week_row.get("week_pnl"))
-    if week_pnl is None:
-        # Ensure profit-lock has today's snap, then re-read.
+    if week_pnl is None and not bots:
         try:
             capture_profit_lock(root, bots=bots, label=day)
             pl_store = _load(
@@ -11203,7 +11209,12 @@ def plan_summary(
         "fee_ledger_completeness": fee_ledger_completeness(root, bots=bots),
         "stale_world": stale_world_status(root, bots=bots),
         "helper_gate_a": helper_promote_status(root),
-        "cold_harvest": cold_harvest_status(root),
+        # Prefer live bots whenever provided (#486 Masters twin).
+        "cold_harvest": (
+            capture_cold_harvest(root, bots=bots)
+            if (root and bots)
+            else cold_harvest_status(root)
+        ),
         "hillclimb_lever": hillclimb_lever_status(root),
         "dual_control": dual_control_status(root),
         "quarterly_rebaseline": quarterly_rebaseline_status(root),
