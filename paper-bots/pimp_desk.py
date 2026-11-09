@@ -5916,7 +5916,13 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
                     or "staff cleared soft drawdown" in why_low
                     or not why.strip()
                 ):
-                    view["why"] = f"{why} {heartbeat}".strip()
+                    # Outside the entry window, schedule is why the book is idle.
+                    # Soft-DD staff-clear is resume truth — not a "we're down so we
+                    # don't trade" lead (HUD sibling after #506 tip densify).
+                    if "staff cleared soft drawdown" in why_low and not in_scan:
+                        view["why"] = f"{heartbeat} {why}".strip()
+                    else:
+                        view["why"] = f"{why} {heartbeat}".strip()
             elif not why:
                 view["why"] = heartbeat
     if not view.get("why") and view.get("skip"):
