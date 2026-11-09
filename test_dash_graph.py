@@ -55,8 +55,11 @@ class DashGraphTests(unittest.TestCase):
         splash = bot.app_splash_jpeg()
         self.assertTrue(splash.startswith(b"\xff\xd8"))
         body = bot.dash_manifest_body()
-        self.assertIn("/icon-512.png?v=2", body)
-        self.assertIn("pb-shell-152", bot.SW_JS)
+        self.assertIn("/icon-512.png?v=3", body)
+        self.assertIn("pb-shell-153", bot.SW_JS)
+        self.assertTrue(bot.DASH_FAVICON.startswith("data:image/png;base64,"))
+        self.assertIn(bot.DASH_FAVICON, bot.DASHBOARD_HTML_V4)
+        self.assertNotIn("id=\"pbP\"", bot.DASHBOARD_HTML_V4)
 
     def test_group_stats_filter_matches_hidden_helper(self):
         rows = [{"name": "Lelouch"}, {"name": "LELOUCH"}, {"name": "Levi"}, {"name": "Not Lelouch"}]

@@ -26036,7 +26036,7 @@ DASH_LOGO_SVG = (
     '<g fill="#EADFFB"><rect x="227.5" y="329" width="5" height="16" rx="2.5"/><rect x="253.5" y="329" width="5" '
     'height="16" rx="2.5"/><rect x="279.5" y="329" width="5" height="16" rx="2.5"/></g>'
     '<circle cx="168" cy="337" r="8" fill="url(#pbG)"/><circle cx="344" cy="337" r="8" fill="url(#pbG)"/></svg>')
-APP_MARK_V = "2"
+APP_MARK_V = "3"
 DASH_FAVICON = "/icon-192.png?v=" + APP_MARK_V
 DASH_LOGO_HTML = (
     '<img src="/icon-192.png?v=' + APP_MARK_V + '" alt="" width="60" height="60">'
@@ -35110,6 +35110,17 @@ def app_splash_jpeg() -> bytes:
         return fh.read()
 
 
+def dash_mark_data_uri(size: int = 192) -> str:
+    """The crowned-robot mark inside the page, so the header does not wait on a second request."""
+    import base64
+    return "data:image/png;base64," + base64.b64encode(app_icon_png(size)).decode()
+
+
+# Header and tab icon are the file itself. Home Screen icons stay on /icon-*.png.
+DASH_FAVICON = dash_mark_data_uri(160)
+DASH_LOGO_HTML = '<img src="' + DASH_FAVICON + '" alt="" width="60" height="60">'
+
+
 async def dash_favicon(request):
     from aiohttp import web
     return web.Response(body=app_icon_png(64), content_type="image/png",
@@ -35138,11 +35149,12 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-152';"
+    "const CACHE='pb-shell-153';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
-    "const u=new URL(req.url);if(u.origin!==location.origin)return;if(u.pathname.startsWith('/api/')||u.pathname.startsWith('/img/'))return;"
+    "const u=new URL(req.url);if(u.origin!==location.origin)return;"
+    "if(u.pathname.startsWith('/api/')||u.pathname.startsWith('/img/')||u.pathname.indexOf('icon')>=0||u.pathname.indexOf('favicon')>=0||u.pathname.indexOf('apple-touch')>=0)return;"
     "e.respondWith(fetch(req).then(r=>{try{const copy=r.clone();caches.open(CACHE).then(c=>c.put(req,copy))}catch(x){}"
     "return r}).catch(()=>caches.match(req)))});"
 )
@@ -38118,7 +38130,7 @@ body{margin:0;background:radial-gradient(1200px 700px at 8% -12%,#7B3FE466,trans
 a{color:#c4a6ff;text-decoration:none}a:hover{color:#fff}
 .wrap{max-width:1080px;margin:0 auto;padding:0 22px}
 header{display:flex;align-items:center;gap:14px;padding:18px 0 8px;border-bottom:1px solid #F5C54222}
-.logo{width:52px;height:52px;flex:none;filter:drop-shadow(0 8px 16px #7B3FE466)}.logo svg{width:100%;height:100%}
+.logo{width:52px;height:52px;flex:none;filter:drop-shadow(0 8px 16px #7B3FE466)}.logo svg,.logo img{width:100%;height:100%;display:block;border-radius:50%;object-fit:cover}
 .brand{font-weight:850;letter-spacing:.14em;font-size:15px}.brand b{color:var(--gold)}
 nav{margin-left:auto;display:flex;gap:18px;align-items:center;font-weight:650;font-size:14px;color:var(--muted)}
 nav a.btn{background:linear-gradient(90deg,var(--brand),#5a22c8);color:#fff;padding:8px 14px;border-radius:999px;box-shadow:0 8px 20px -10px #7B3FE4}
@@ -52439,6 +52451,51 @@ HELP_EXTRA.append(("👋 Wake phrases", (
     "In the call, say the same phrase out loud and he answers there too.")))
 
 
+async def push_discord_mark(client) -> None:
+    """Set the Discord bot avatar and the application icon to the dashboard mark. Once per art hash."""
+    import base64
+    try:
+        raw = app_icon_png(256)
+    except Exception:
+        log.exception("App icon file missing")
+        return
+    digest = hashlib.sha256(raw).hexdigest()[:16]
+    try:
+        if get_setting(0, "app_icon_hash") == digest:
+            return
+    except Exception:
+        pass
+    uri = "data:image/png;base64," + base64.b64encode(raw).decode()
+    ok = False
+    try:
+        await client.user.edit(avatar=raw)
+        ok = True
+    except Exception:
+        log.exception("Could not set the bot avatar")
+    if TOKEN:
+        try:
+            import aiohttp
+            timeout = aiohttp.ClientTimeout(total=20)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.patch(
+                    "https://discord.com/api/v10/applications/@me",
+                    headers={"Authorization": "Bot " + TOKEN},
+                    json={"icon": uri},
+                ) as resp:
+                    if resp.status < 300:
+                        ok = True
+                    else:
+                        body = await resp.text()
+                        log.warning("Application icon HTTP %s %s", resp.status, body[:180])
+        except Exception:
+            log.exception("Could not set the application icon")
+    if ok:
+        try:
+            set_setting(0, "app_icon_hash", digest)
+        except Exception:
+            log.exception("Could not remember the app icon hash")
+
+
 class PicksBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
@@ -52503,6 +52560,7 @@ class PicksBot(discord.Client):
         if reason:
             self._recovery_reason = None
             asyncio.create_task(send_owner_recovery(self, reason))
+        asyncio.create_task(push_discord_mark(self))
         if not getattr(self, "_boot_said", False):
             try:
                 landed = await announce_boot(self)
