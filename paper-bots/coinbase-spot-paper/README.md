@@ -3,7 +3,7 @@
 Shadow sleeve for the paper desk. It reads public Coinbase Exchange candles. It
 places no orders, uses no API key, and spends no desk cash.
 
-## Why the base is "skip"
+## Why a 15-minute bar does not buy
 
 US Coinbase Advanced intro fees after 16 Sep 2026 are **0.50% maker / 0.90% taker**
 (help.coinbase.com advanced-trade fees; rechecked in Oct and Nov 2026 guides).
@@ -15,13 +15,20 @@ maker or EU rate.
 | Taker | 0.90% each side |
 | Slippage | 0.10% each side |
 | Round trip | 2.00% |
-| Capture haircut | 25% of the last 15-minute move |
-| Venue floor `coinbase_spot` | 0.05 excess return after that round trip |
-| z | ≥ 2 versus the prior 15-minute sigma |
+| Venue floor `coinbase_spot` | 0.05 mean net after that round trip |
+| Sample | n ≥ 20, hit rate ≥ 40%, median net > 0 |
 
-A buy needs a 15-minute bar of about **28%** (`(0.02 + 0.05) / 0.25`) and z ≥ 2.
-Ordinary ETH and SOL bars are a few tenths of a percent, so edge is negative.
-The check records the skip and does not invent a fill. Pace does not waive the floor.
+A 15-minute ETH or SOL bar is usually a few tenths of a percent. Keeping 25% of
+that bar never clears a 2% round trip plus a 0.05 floor, so that rule cannot
+trade. The book now uses a daily cross above the 50-day average, and it buys
+only when the closed trades of that same rule clear every row in the table.
+From 2020 through November 2026 the average of that rule was positive because a
+few large legs were large, and the typical trade still lost. The gate stays
+shut until the typical trade is a profit. The latest 20 closed trades have to
+clear that same bar, so old winners cannot hide a rule that has stopped paying.
+The current day's candle is ignored until it has closed. After 8 paper settles,
+the book itself has to show a positive median and a mean of at least 5% of the
+ticket. The floor is not lowered to force a fill.
 
 ## What it will and will not trade
 
@@ -32,11 +39,11 @@ The check records the skip and does not invent a fill. Pace does not waive the f
 - Learning skip after 8 settles on a product with under 40% hits.
 - Each close counts toward incubation (`COINBASE-ETH-USD`, `COINBASE-SOL-USD`). Staff graduate only at n ≥ 50. No auto-promote.
 
-## Exits (before the next entry)
+## Exits (the same ones the sample uses)
 
-Stop −1.5%, take-profit once the price move covers the round trip plus the 0.05 floor, model-flip when z ≤ −2, time stop at 24 hours.
+Stop −15% filled at the close, model-flip when the close is back under the 50-day average, time stop at 120 days.
 
-A 16-bar (~4 hour) return is written on the research row as `observe_return`. It does not buy.
+A fixed take-profit at round-trip plus the floor lost money on this daily sample, so it is not an exit. A 16-day return is written on the research row as `observe_return`. It does not buy.
 
 ## Run
 

@@ -20,7 +20,7 @@ pretend ("paper") account in local files.
 | `sports-gap-paper/` | Live sports "gap" paper bot: compares ESPN's live win probability with Kalshi game prices, paper-buys big gaps | ESPN scoreboard, Kalshi public API |
 | `memecoin-paper/` | Solana meme-coin paper bot: strict rug-pull filter, paper buys at real prices, stop/ladder/trailing exits | DexScreener, RugCheck |
 | `btc15m-signal/` | `btc15m_signal.py`: Bitcoin 15-minute Kalshi **paper** bot. Prints BUY or SKIP, paper-fills into `paper_account.json` when the checklist clears; **real TP + model-flip + settle** | Kalshi, Coinbase, Kraken, Bitstamp, Deribit DVOL, ForexFactory calendar |
-| `coinbase-spot-paper/` | Shadow Coinbase spot tower. Public 15m candles. Longs only when excess return clears the locked 0.05 floor after the US intro taker. Spends no desk cash | Coinbase Exchange public candles (no key) |
+| `coinbase-spot-paper/` | Shadow Coinbase spot tower. Public daily candles. Longs only when the 50-day cross's own trades clear the locked 0.05 floor after the US intro taker, including a positive median. Spends no desk cash | Coinbase Exchange public candles (no key) |
 | `TEAM_ROLES.md` | How the "desk" of helper bots was organized, and the safety rules | — |
 | `DESK_ROI_SYSTEM.md` | Desk-wide ROI rules every present bot must follow (paper only) | — |
 | `BUY_SELL_FAILSAFE_INVENTORY.md` | Per-bot buy / sell / failsafe thresholds + entry_gate map | — |
@@ -78,7 +78,7 @@ empty paper account: no trade history or saved state is included in this pack.
 
 ## Coinbase spot tower (shadow)
 
-`coinbase-spot-paper/` is a separate book from the BTC 15-minute Kalshi tower. Coinbase is only a price feed for that tower. This one paper-trades ETH-USD and SOL-USD on public candles, long only, and only when a 15-minute move still clears the US intro taker (0.90% a side) plus slippage plus the locked `coinbase_spot` floor of 0.05. Ordinary bars skip. BTC-USD is logged and never bought. The sleeve is shadow: $500 of its own paper cash, no desk risk share. New towers follow `TOWER_SETUP.md`.
+`coinbase-spot-paper/` is a separate book from the BTC 15-minute Kalshi tower. Coinbase is only a price feed for that tower. This one paper-trades ETH-USD and SOL-USD on public daily candles, long only. A buy requires the same 50-day cross, measured with the US intro taker (0.90% a side) plus slippage, to show n ≥ 20, a hit rate ≥ 40%, a positive median, and a mean at or above the locked `coinbase_spot` floor of 0.05. A winning average built from a few large moves does not buy while the typical trade loses. BTC-USD is logged and never bought. The sleeve is shadow: $500 of its own paper cash, no desk risk share. New towers follow `TOWER_SETUP.md`.
 
 ## Living Trading Upgrade (staff pulse)
 Paper-only living spine — floors locked, never auto-publishes Discord.
