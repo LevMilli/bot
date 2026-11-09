@@ -49,6 +49,15 @@ class DashGraphTests(unittest.TestCase):
             "🚀 Biggest hit: +$10 · Not Lelouch · Over 20.5"))
         self.assertFalse(bot.dashboard_hidden_line("📕 Closed week: this week"))
 
+    def test_app_icon_png_is_square(self):
+        raw = bot.app_icon_png(64)
+        self.assertTrue(raw.startswith(b"\x89PNG"))
+        splash = bot.app_splash_jpeg()
+        self.assertTrue(splash.startswith(b"\xff\xd8"))
+        body = bot.dash_manifest_body()
+        self.assertIn("/icon-512.png?v=2", body)
+        self.assertIn("pb-shell-152", bot.SW_JS)
+
     def test_group_stats_filter_matches_hidden_helper(self):
         rows = [{"name": "Lelouch"}, {"name": "LELOUCH"}, {"name": "Levi"}, {"name": "Not Lelouch"}]
         kept = [s["name"] for s in rows if not bot.dashboard_hidden_name(s.get("name"))]
