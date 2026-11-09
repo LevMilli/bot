@@ -295,7 +295,12 @@ def classify_skip(reason: str | None, *, weekday: int | None = None) -> str:
             return "WEEKEND"
     if "weekend" in text:
         return "WEEKEND"
-    if "correlation" in text or "correlated" in text:
+    if (
+        "correlation" in text
+        or "correlated" in text
+        or "portfolio corr" in text
+    ):
+        # Prefer-2: commodity family portfolio-corr must not invent DATA via other.
         return "correlation"
     if "entry_gate" in text or "daily loss" in text or "max open risk is reached" in text:
         return "entry_gate"
@@ -304,10 +309,13 @@ def classify_skip(reason: str | None, *, weekday: int | None = None) -> str:
         or "adverse cool" in text
         or "anti-revenge" in text
         or "anti revenge" in text
+        or "learn v2" in text
+        or ("paper bucket" in text and "under 40%" in text)
+        or ("probability bucket" in text and "under 40%" in text)
         or ("bucket" in text and "cool" in text)
     ):
-        # Prefer-2: anti-revenge is same-market LEARN lockout (adverse-cool sibling).
-        # Must not invent DATA via other→DATA while CARD names the cool.
+        # Prefer-2: learning_skip / learn-v2 / anti-revenge / adverse-cool are LEARN
+        # lockouts — must not invent DATA via other→DATA while CARD names them.
         return "learning"
     if "news" in text or "blackout" in text or "fomc" in text or "cpi" in text:
         return "news"
@@ -1570,6 +1578,20 @@ def self_check() -> None:
         "anti-revenge: btc15m blocked on KXTEST ~12m after hard-stop", weekday=1
     ) == "learning"
     assert stable_skip_code("learning") == "LEARN"
+    assert classify_skip(
+        "Skipping BTC YES hour=14 CT in 0.8-0.9. "
+        "Fine paper bucket has 2/8 hits under 40% (learn v2).",
+        weekday=1,
+    ) == "learning"
+    assert classify_skip(
+        "Skipping BTC in the 0.8-0.9 probability bucket. "
+        "That paper bucket has 3 hits out of 8 settles, which is under 40%.",
+        weekday=1,
+    ) == "learning"
+    assert classify_skip(
+        "No commodity paper buy. portfolio corr: already open a energy series.",
+        weekday=1,
+    ) == "correlation"
     assert classify_skip(
         "sticky-open SLA: 2 open(s) past settle window — exits first", weekday=1
     ) == "open_risk"
