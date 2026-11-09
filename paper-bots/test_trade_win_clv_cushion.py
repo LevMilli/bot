@@ -183,6 +183,33 @@ class TradeWinClvCushionTests(unittest.TestCase):
                 "espn",
             )
         self.assertAlmostEqual(fair, 0.9533, places=4)
+        # True finals append wipe 0/1 — walk back to last non-wipe line WP.
+        self.assertIn("def _espn_settle_line_wp", src)
+        with mock.patch.object(gap, "espn_summary", return_value={
+            "winprobability": [
+                {"homeWinPercentage": 0.8877},
+                {"homeWinPercentage": 1.0},
+            ],
+        }):
+            fair_ot = gap._post_settle_fair_home(
+                "football/nfl",
+                {"id": "401873039", "state": "post", "status": {}},
+                "espn",
+            )
+        self.assertAlmostEqual(fair_ot, 0.8877, places=4)
+        with mock.patch.object(gap, "espn_summary", return_value={
+            "winprobability": [
+                {"homeWinPercentage": 0.001},
+                {"homeWinPercentage": 0.0},
+            ],
+        }):
+            fair_wipe = gap._post_settle_fair_home(
+                "football/nfl",
+                {"id": "401873038", "state": "post", "status": {}},
+                "espn",
+            )
+        self.assertAlmostEqual(fair_wipe, 0.001, places=4)
+        # All-wipe trail still refuses binary (no line WP left).
         with mock.patch.object(gap, "espn_summary", return_value={
             "winprobability": [{"homeWinPercentage": 1.0}],
         }):
@@ -193,7 +220,16 @@ class TradeWinClvCushionTests(unittest.TestCase):
                     "espn",
                 )
             )
-
+        # Mid-open buy fair still uses trailing last WP (unchanged).
+        self.assertEqual(
+            gap.espn_home_wp({
+                "winprobability": [
+                    {"homeWinPercentage": 0.8877},
+                    {"homeWinPercentage": 1.0},
+                ],
+            }),
+            1.0,
+        )
     def test_repair_does_not_invent_binary_close(self):
         with tempfile.TemporaryDirectory() as tmp:
             desk_more.record_sports_clv(
