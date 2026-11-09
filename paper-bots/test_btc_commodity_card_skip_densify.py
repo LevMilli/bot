@@ -535,7 +535,8 @@ class CommodityCardSkipDensify(unittest.TestCase):
         # paper_buy honors cool (records cool but used to keep buying).
         buy_idx = cmd_src.find("def paper_buy(")
         self.assertGreater(buy_idx, 0)
-        buy_chunk = cmd_src[buy_idx:buy_idx + 900]
+        buy_chunk = cmd_src[buy_idx:buy_idx + 1400]
+        self.assertIn("desk_block_entries_reason", buy_chunk)
         self.assertIn('adverse_cool_blocks(DESK_ROOT, "commodity-15m")', buy_chunk)
         btc_src = BTC.read_text(encoding="utf-8")
         self.assertIn("btc adverse-cool densify", btc_src)

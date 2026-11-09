@@ -96,6 +96,20 @@ def honor_desk_entry_gate(root: str | None = None) -> str:
     return ""
 
 
+def desk_block_entries_reason(
+    fallback: str = "Desk entry_gate blocked a new paper buy. Settles still run.",
+) -> str:
+    """Prefer-1: when DESK_BLOCK_ENTRIES is on, surface DESK_BLOCK_REASON.
+
+    Honor stores the real daily-loss / max-open / open-risk line. Bots must not
+    invent a bland entry_gate skip while that reason is available.
+    """
+    if os.environ.get("DESK_BLOCK_ENTRIES") != "1":
+        return ""
+    why = str(os.environ.get("DESK_BLOCK_REASON") or "").strip()
+    return why or str(fallback or "").strip()
+
+
 def feature_store_path(root: str | None = None) -> str:
     return os.path.join(_root(root), FEATURE_STORE_NAME)
 

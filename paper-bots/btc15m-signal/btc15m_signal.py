@@ -531,7 +531,14 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
     if skip:
         return skip
     if os.environ.get("DESK_BLOCK_ENTRIES") == "1" and not IS_SHADOW:
-        return "Desk entry_gate blocked a new paper buy. Settles still run."
+        # Prefer-1: honor stored DESK_BLOCK_REASON — do not invent bland entry_gate.
+        try:
+            import desk_living
+            return desk_living.desk_block_entries_reason(
+                "Desk entry_gate blocked a new paper buy. Settles still run."
+            )
+        except Exception:
+            return "Desk entry_gate blocked a new paper buy. Settles still run."
     if not signal_buy:
         return none_msg
     edge_val = edge
@@ -1506,8 +1513,21 @@ def main():
             print(f"Stale-world: {stale}")
             max_buys_eff = 0
             _densify_gate_skip(stale, note="btc stale-world densify")
+        # Prefer-1: densify real entry_gate reason (not bland invent) when honor locked.
+        if not IS_SHADOW and os.environ.get("DESK_BLOCK_ENTRIES") == "1":
+            try:
+                import desk_living
+                gate_why = desk_living.desk_block_entries_reason(
+                    "Desk entry_gate blocked a new paper buy. Settles still run."
+                )
+            except Exception:
+                gate_why = ""
+            if gate_why:
+                print(f"Entry gate: {gate_why}")
+                max_buys_eff = 0
+                _densify_gate_skip(gate_why, note="btc entry-gate densify")
         # Daily R budget → settle-only after tower hits target (exits stay on).
-        # Insert last so settle-only stays skips[0] over cool/stale.
+        # Insert last so settle-only stays skips[0] over cool/stale/entry.
         r_block = desk_roi_plan.daily_r_blocks("btc15m", today_pnl)
         if r_block:
             print(f"Settle-only: {r_block}")
@@ -1549,9 +1569,12 @@ def main():
         if buys >= max_buys_eff:
             skips += 1
             max_note = f"max buys this check ({max_buys_eff})"
-            # Prefer-1: gate (settle-only / cool / stale) zeroed the cap — do not
-            # invent capacity skip into brain/Learning while CARD names the gate.
-            gate_keys = ("settle-only", "adverse cool", "stale-world", "clock-skew")
+            # Prefer-1: gate (settle-only / cool / stale / entry) zeroed the cap —
+            # do not invent capacity skip into brain while CARD names the gate.
+            gate_keys = (
+                "settle-only", "adverse cool", "stale-world", "clock-skew",
+                "entry_gate", "daily loss", "max open risk", "max open positions",
+            )
             gate_hits = [
                 str(s)
                 for s in skip_reasons
