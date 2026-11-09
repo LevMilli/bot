@@ -1134,6 +1134,66 @@ class PimpDeskTests(unittest.TestCase):
             "post-CPI blackout 30m",
         )
 
+    def test_kalshi_skip_surfaces_drawdown_halt_without_kill_flag(self):
+        """$444 bankroll ≤ $460 drawdown halt must densify even when halted=False."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sp = os.path.join(tmp, "kalshi-sp500-paper")
+            os.makedirs(sp, exist_ok=True)
+            with open(os.path.join(sp, "config.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "starting_bankroll": 500.0,
+                    "drawdown_halt_bankroll": 460.0,
+                    "kill_switch_bankroll": 400.0,
+                }, fh)
+            with open(os.path.join(sp, "calendar.json"), "w", encoding="utf-8") as fh:
+                json.dump({}, fh)
+            state = {"bankroll": 444.37, "halted": False, "open": [], "closed": []}
+            out = pimp_desk._kalshi_skip(tmp, state, summary="")
+            self.assertIn("drawdown halt", out.lower())
+            self.assertIn("444.37", out)
+            self.assertIn("460", out)
+            # Above halt → no mystery drawdown line.
+            ok = pimp_desk._kalshi_skip(
+                tmp, {"bankroll": 500.0, "halted": False}, summary="",
+            )
+            self.assertNotIn("drawdown halt", ok.lower())
+
+    def test_finish_bot_prefers_hold_why_over_entry_skip_card(self):
+        """Open BTC must not show speed-floor entry skips as the tower why."""
+        spec = {
+            "id": "btc15m",
+            "name": "BTC 15m signal",
+            "kind": "btc",
+            "folder": "btc15m-signal",
+            "state": "paper_account.json",
+            "log": "",
+            "empty": "empty",
+        }
+        view = {
+            "id": "btc15m",
+            "present": True,
+            "has_state": True,
+            "open_count": 1,
+            "positions": [{"ticker": "KXBTC15M-T"}],
+            "trades": [],
+            "history": [],
+            "cash": 96.49,
+            "realized": -2.03,
+            "today": 0.0,
+            "why": "p 0.619 < speed floor 0.70; p 0.619 < ask+fee+buf (accurate) = 0.710; z 0.30 < 0.60",
+            "skip": "",
+            "paused": False,
+            "read_error": "",
+            "central_check": "1:50 AM",
+            "last_check": "1:50 AM",
+        }
+        run = {"ok": True, "summary": "CARD: p 0.619 < speed floor 0.70\n", "at": ""}
+        # Bind run onto view the way _bot_view does before _finish_bot.
+        view["last_run"] = run
+        out = pimp_desk._finish_bot(view, spec, ".")
+        self.assertIn("Holding 1 open paper position", out.get("why") or "")
+        self.assertNotIn("speed floor", (out.get("why") or "").lower())
+
     def test_card_copy_is_plain_and_accounts_keep_cash(self):
         raw = (
             "No news calendar on this bot.\n"

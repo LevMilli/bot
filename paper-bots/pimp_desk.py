@@ -1450,6 +1450,23 @@ def _kalshi_skip(root: str, state: dict | None, summary: str = "") -> str:
     if state and state.get("halted"):
         halt = "The paper account is halted by its own kill switch."
         line = f"{line} {halt}".strip() if line else halt
+    # Drawdown halt blocks entries via check_can_trade without flipping halted=True
+    # (kill switch still owns that flag). Surface it so $444 idle is not a mystery.
+    if state and not state.get("halted"):
+        bankroll = _num(state.get("bankroll"))
+        cfg = _read_json(_under(root, "kalshi-sp500-paper", "config.json")) or {}
+        dd_halt = _num(cfg.get("drawdown_halt_bankroll"))
+        start = _num(cfg.get("starting_bankroll")) or 500.0
+        if (
+            bankroll is not None
+            and dd_halt is not None
+            and float(bankroll) <= float(dd_halt) + 1e-9
+        ):
+            dd = (
+                f"Tower drawdown halt: bankroll ${float(bankroll):.2f} ≤ "
+                f"${float(dd_halt):.2f} (start ${float(start):.0f}). New buys off; exits still run."
+            )
+            line = f"{line} {dd}".strip() if line else dd
     return line
 
 
@@ -5559,16 +5576,33 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
         view["why"] = plain_reason(view.get("skip") or "")
     summary = str(run.get("summary") or "")
     # Full book / desk gate: prefer a clear "waiting on exits" line over a dead BLOCKED look.
-    if int(view.get("open_count") or 0) > 0 and (
+    open_n = int(view.get("open_count") or 0)
+    why_low = str(view.get("why") or "").lower()
+    entry_skip_look = any(
+        token in why_low
+        for token in (
+            "speed floor",
+            "ask+fee",
+            "ask+fee+buf",
+            "no paper buy",
+            " < ",  # p/z gate fragments like "p 0.619 < …" / "z 0.30 < …"
+            "checked all open",
+        )
+    )
+    if open_n > 0 and (
         run.get("entries_blocked")
         or "max open" in summary.lower()
         or "open risk" in summary.lower()
         or "max_open" in (view.get("skip") or "").lower()
+        # Holding inventory: never let entry-gate CARD steal the why (BTC HUD sibling).
+        or entry_skip_look
+        or not why_low.strip()
     ):
-        view["why"] = (
-            f"Holding {int(view.get('open_count') or 0)} open paper position(s); "
-            "new buys stay off until an exit frees risk. Sell plan still runs each check."
-        )
+        if "holding" not in why_low and "sell plan" not in why_low:
+            view["why"] = (
+                f"Holding {open_n} open paper position(s); "
+                "sell plan still runs each check. Entry skips stay observe-only while risk is open."
+            )
         if run.get("ok") and not view.get("paused") and not view.get("read_error"):
             view["status"] = "running"
     if not view.get("warning") and spec.get("id") == "btc15m":
