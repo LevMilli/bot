@@ -68,6 +68,8 @@ export const FLOORS: FloorDef[] = [
     offices: [
       { officeId: 'calendar-helper', botId: null, label: 'Calendar cache', helper: true },
       { officeId: 'tape-helper', botId: null, label: 'Tape scout', helper: true },
+      { officeId: 'sports-sharp-lag', botId: 'sports-sharp-lag', label: 'Sports sharp lag' },
+      { officeId: 'fed-watch', botId: 'fed-watch', label: 'Fed Watch' },
     ],
   },
   {

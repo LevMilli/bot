@@ -13,6 +13,8 @@ export const BEAM_COLORS = [
   '#ff8c42', // coral — Sized Kalshi
   '#4d9fff', // sky — Coinbase spot
   '#ff4fd8', // pink — BTC carry
+  '#7cf5c0', // mint — Sports sharp lag (shadow)
+  '#c4a35a', // brass — Fed Watch (shadow / idea-bank)
 ] as const
 
 /** Stable id → color so reordering bots does not reshuffle building colors. */
@@ -25,6 +27,8 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'kalshi-sized': '#ff8c42',
   'coinbase-spot': '#4d9fff',
   'btc-carry': '#ff4fd8',
+  'sports-sharp-lag': '#7cf5c0',
+  'fed-watch': '#c4a35a',
 }
 
 function hashBotId(id: string): number {

@@ -22,6 +22,7 @@ LOCKED_VENUE_FLOORS = {
     "solana_dex": 0.02,
     "coinbase_spot": 0.05,
     "binance_btc_carry": 0.02,
+    "kalshi_econ": 0.05,
 }
 
 # Aliases helpers may use for venue keys.
@@ -42,6 +43,10 @@ _VENUE_ALIASES = {
     "coinbase_spot": "coinbase_spot",
     "btc_carry": "binance_btc_carry",
     "binance_btc_carry": "binance_btc_carry",
+    "econ": "kalshi_econ",
+    "fed": "kalshi_econ",
+    "fedwatch": "kalshi_econ",
+    "kalshi_econ": "kalshi_econ",
 }
 
 

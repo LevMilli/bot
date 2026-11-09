@@ -529,7 +529,7 @@ living-baseline-capture:
 living-fee-ledger:
 	python3 tools/staff_living_status.py fee-ledger
 
-.PHONY: living-half-kelly-crb living-fee-sim living-dutch-book living-sharp-lag-harvest
+.PHONY: living-half-kelly-crb living-fee-sim living-dutch-book living-sharp-lag-harvest living-fed-watch-harvest
 living-half-kelly-crb:
 	python3 tools/staff_living_status.py half-kelly-crb
 
@@ -541,6 +541,9 @@ living-dutch-book:
 
 living-sharp-lag-harvest:
 	python3 tools/staff_living_status.py sharp-lag-harvest
+
+living-fed-watch-harvest:
+	python3 tools/staff_living_status.py fed-watch-harvest
 
 living-commodity-tstop-status:
 	python3 tools/staff_living_status.py commodity-tstop-status
