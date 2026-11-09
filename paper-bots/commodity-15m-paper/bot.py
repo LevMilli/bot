@@ -1572,12 +1572,25 @@ def main() -> int:
             max_buys_eff = 0
             # Prepend so CARD/why densify settle-only ahead of evaluate ask/band noise.
             skip_reasons.insert(0, str(r_block))
+            # Sibling brain/skip_board densify (#482 leftover): empty ranked never
+            # hits max-buys; do not wait for capacity invent.
+            _densify_evaluate_skip(
+                reasons=[str(r_block)],
+                note="commodity daily-r densify",
+            )
     except Exception:
         pass
     for row in ranked:
         if buys >= max_buys_eff:
             max_note = f"max buys this check ({max_buys_eff})"
-            print(f"  → skip: {max_note}")
+            # Prefer-1: settle-only zeroed the cap — do not invent capacity skip
+            # into brain/Learning while CARD already names daily-R.
+            settle_lock = max_buys_eff == 0 and any(
+                "settle-only" in str(s).lower() for s in skip_reasons
+            )
+            print(f"  → skip: {str(skip_reasons[0]) if settle_lock else max_note}")
+            if settle_lock:
+                break
             skip_reasons.append(max_note)  # CARD densify parity with BTC
             ev_skip = (row.get("_ev") if isinstance(row, dict) else None) or row or {}
             try:

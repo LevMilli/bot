@@ -307,7 +307,15 @@ def classify_skip(reason: str | None, *, weekday: int | None = None) -> str:
         return "calendar"
     if "data" in text and ("error" in text or "missing" in text or "unavailable" in text):
         return "data"
-    if "tower budget" in text or "budget full" in text or "budget" in text and "left" in text:
+    # Daily-R settle-only is a budget lock (fee-clear profit target) — not DATA/other.
+    # Keeps zero-buy / skip_board BUDGET taxonomy honest beside CARD densify.
+    if (
+        "settle-only" in text
+        or "daily r budget" in text
+        or "tower budget" in text
+        or "budget full" in text
+        or ("budget" in text and "left" in text)
+    ):
         return "budget"
     if "cushion" in text:
         return "cushion"

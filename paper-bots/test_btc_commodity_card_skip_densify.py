@@ -74,16 +74,18 @@ class BtcCardSkipDensify(unittest.TestCase):
         src = BTC.read_text(encoding="utf-8")
         max_idx = src.find("if buys >= max_buys_eff:")
         self.assertGreater(max_idx, 0)
-        chunk = src[max_idx:max_idx + 1600]
+        chunk = src[max_idx:max_idx + 2400]
         self.assertIn("desk_brain.record_decision", chunk)
         self.assertIn("reasons=[max_note]", chunk)
+        self.assertIn("settle_lock", chunk)
         cmd_src = CMD.read_text(encoding="utf-8")
         cmd_idx = cmd_src.find("if buys >= max_buys_eff:")
         self.assertGreater(cmd_idx, 0)
-        cmd_chunk = cmd_src[cmd_idx:cmd_idx + 1400]
+        cmd_chunk = cmd_src[cmd_idx:cmd_idx + 2200]
         self.assertIn("skip_reasons.append(max_note)", cmd_chunk)
         self.assertIn("_densify_evaluate_skip", cmd_chunk)
         self.assertIn("commodity max-buys densify", cmd_chunk)
+        self.assertIn("settle_lock", cmd_chunk)
 
     def test_desk_block_path_densifies_brain_like_max_buys(self):
         """Desk/account blocked fill must call record_decision (#407 sibling)."""
@@ -494,8 +496,11 @@ class CommodityCardSkipDensify(unittest.TestCase):
             src = path.read_text(encoding="utf-8")
             idx = src.find("daily_r_blocks(")
             self.assertGreater(idx, 0, label)
-            chunk = src[idx:idx + 450]
+            chunk = src[idx:idx + 900]
             self.assertIn("skip_reasons.insert(0, str(r_block))", chunk, label)
+            # #482 leftover: brain densify at settle-only site (not max-buys invent).
+            self.assertIn("daily-r densify", chunk, label)
+            self.assertIn("settle_lock", src, label)
         cmd = _load(CMD, "commodity_daily_r_card_under_test")
         card = cmd._card_sentence(
             buys=0,
@@ -508,6 +513,43 @@ class CommodityCardSkipDensify(unittest.TestCase):
         self.assertTrue(card.lower().startswith("daily r") or "settle-only" in card.lower())
         # First skip wins CARD — settle-only must beat ask/band false-friend.
         self.assertNotEqual(card.lower().split(";")[0].strip()[:3], "ask")
+
+    def test_daily_r_settle_only_densifies_brain_not_max_buys_invent(self):
+        """Settle-only must hit desk_brain/skip_board as budget — not max buys (0)."""
+        import desk_brain
+        import desk_more
+        import desk_roi_plan
+
+        r_block = desk_roi_plan.daily_r_blocks("commodity-15m", 40.02)
+        self.assertIn("settle-only", r_block.lower())
+        self.assertEqual(desk_more.classify_skip(r_block), "budget")
+        self.assertEqual(
+            desk_more.stable_skip_code(desk_more.classify_skip(r_block)),
+            "BUDGET",
+        )
+        cmd = _load(CMD, "commodity_daily_r_brain_under_test")
+        with tempfile.TemporaryDirectory() as tmp:
+            cmd.DESK_ROOT = tmp
+            cmd._densify_evaluate_skip(
+                reasons=[r_block],
+                note="commodity daily-r densify",
+            )
+            journal = desk_brain.load_journal(tmp)
+            rows = journal.get("decisions") or []
+            self.assertTrue(rows)
+            last = rows[-1]
+            self.assertEqual(last.get("action"), "skip")
+            self.assertIn("settle-only", " ".join(last.get("reasons") or []).lower())
+            self.assertEqual(last.get("skip_codes"), ["budget"])
+            more = desk_more.load_more(tmp)
+            day = next(iter((more.get("skip_day") or {}).values()), {})
+            by_bot = (day.get("by_bot") or {}).get("commodity-15m") or {}
+            self.assertGreaterEqual(int(by_bot.get("budget") or 0), 1)
+            # Capacity invent must not classify as the settle-only truth code.
+            self.assertEqual(
+                desk_more.classify_skip("max buys this check (0)"),
+                "other",
+            )
 
     def test_btc_eth_commodity_near_miss_passes_ask(self):
         """#402 persist is a no-op unless callers pass ask — densify entry honesty."""

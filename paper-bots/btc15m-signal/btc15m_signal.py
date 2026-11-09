@@ -1489,6 +1489,17 @@ def main():
             max_buys_eff = 0
             # Prepend so CARD/why densify settle-only ahead of evaluate ask/band noise.
             skip_reasons.insert(0, str(r_block))
+            # Sibling brain/skip_board densify (#482 leftover): empty ranked never
+            # hits max-buys; do not wait for capacity invent.
+            if desk_brain and not IS_SHADOW:
+                try:
+                    desk_brain.record_decision(
+                        DESK_ROOT, bot="btc15m", action="skip",
+                        reasons=[str(r_block)],
+                        note="btc daily-r densify",
+                    )
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -1525,6 +1536,14 @@ def main():
         if buys >= max_buys_eff:
             skips += 1
             max_note = f"max buys this check ({max_buys_eff})"
+            # Prefer-1: settle-only zeroed the cap — do not invent capacity skip
+            # into brain/Learning while CARD already names daily-R.
+            settle_lock = max_buys_eff == 0 and any(
+                "settle-only" in str(s).lower() for s in skip_reasons
+            )
+            if settle_lock:
+                print(f"--- {ev.get('ticker')}  skip: {skip_reasons[0]}")
+                continue
             skip_reasons.append(max_note)
             print(f"--- {ev.get('ticker')}  skip: {max_note}")
             if not IS_SHADOW:
