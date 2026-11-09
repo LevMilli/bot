@@ -1464,6 +1464,36 @@ class PimpDeskTests(unittest.TestCase):
                 s.get("id") == "kalshi-sized" and s.get("action") == "run" for s in due
             ))
 
+    def test_next_for_never_past_inside_open_window(self):
+        """Open settle/run windows must not show a past clock start as next_run."""
+        with tempfile.TemporaryDirectory() as tmp:
+            now = dt.datetime(2026, 11, 9, 14, 39, tzinfo=pimp_desk.CT)
+            # Run already done today; settle window 13:00–15:55 still open → due now,
+            # not "1:00 PM" in the past.
+            pimp_desk._atomic_write(
+                pimp_desk.auto_path(tmp),
+                json.dumps({"kalshi-sized:run:12:05": "2026-11-09"}) + "\n",
+            )
+            text = pimp_desk._next_for("kalshi-sized", tmp, now)
+            self.assertNotIn("1:00 PM", text)
+            self.assertIn("2026", text)
+            # Parse-ish: afternoon next (settle due now → ~2:39) or evening settle.
+            self.assertTrue(
+                "2:39 PM" in text or "2:3" in text or "4:00 PM" in text or "4:05 PM" in text,
+                msg=text,
+            )
+            # All S&P scans done; settle open → next is now, not 1:00 PM.
+            pimp_desk._atomic_write(
+                pimp_desk.auto_path(tmp),
+                json.dumps({
+                    "kalshi-sp:run:12:05": "2026-11-09",
+                    "kalshi-sp:run:13:05": "2026-11-09",
+                    "kalshi-sp:run:13:40": "2026-11-09",
+                }) + "\n",
+            )
+            sp = pimp_desk._next_for("kalshi-sp", tmp, now)
+            self.assertNotIn("1:00 PM", sp)
+
     def test_card_copy_is_plain_and_accounts_keep_cash(self):
         raw = (
             "No news calendar on this bot.\n"

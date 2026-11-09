@@ -5745,6 +5745,8 @@ def _next_for(bot_id: str, root: str, now: dt.datetime) -> str:
     if bot_paused(root, bot_id):
         return "Paused"
     now_ct = now.astimezone(CT)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=dt.timezone.utc)
     saved = _load_auto(root)
     best = None
     for slot in AUTO:
@@ -5763,12 +5765,31 @@ def _next_for(bot_id: str, root: str, now: dt.datetime) -> str:
             if when < now:
                 when = now
         else:
+            # Clock window: never advertise a past start while the window is still
+            # open (sized/S&P HUD showed "1:00 PM" at 2:39 CT — settle start).
             start = dt.datetime.combine(now_ct.date(), _hhmm(slot["at_ct"]), CT)
             end = dt.datetime.combine(now_ct.date(), _hhmm(slot["until_ct"]), CT)
             key = _slot_key(slot)
-            if now_ct > end or saved.get(key) == now_ct.date().isoformat():
-                start = start + dt.timedelta(days=1)
-            when = start
+            day = now_ct.date().isoformat()
+            if saved.get(key) == day or now_ct > end:
+                when = start + dt.timedelta(days=1)
+            elif now_ct < start:
+                when = start
+            else:
+                # Inside an open, not-yet-finished window → due now (or after retry).
+                retry = _parsed(saved.get(key + ":retry") or "")
+                if retry is not None:
+                    when = retry + dt.timedelta(seconds=float(AUTO_RETRY_SEC))
+                    if when.tzinfo is None:
+                        when = when.replace(tzinfo=dt.timezone.utc)
+                    when_ct = when.astimezone(CT)
+                    if when_ct < now_ct:
+                        when = now
+                        when_ct = now_ct
+                    if when_ct > end:
+                        when = start + dt.timedelta(days=1)
+                else:
+                    when = now
         if best is None or when < best:
             best = when
     return central_text(best) if best is not None else ""
