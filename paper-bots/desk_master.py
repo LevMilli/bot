@@ -445,19 +445,17 @@ def master_summary(
         graduation = None
         retirement = None
         try:
-            # Refresh Chicago-day scorecard once per day for hillclimb reviews.
+            # Prefer live bots whenever provided — same-day stale scorecard m1
+            # must not lag Masters / hillclimb (#493 sports-calib twin).
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest = desk_roi_plan.latest_weekly_scorecard(root)
-            if root and bots and (
-                not isinstance(latest, dict) or str(latest.get("label") or "") != today
-            ):
+            if root and bots:
                 weekly = desk_roi_plan.capture_weekly_scorecard(
                     root, bots=bots, cfg=cfg, label=today,
                 )
             else:
-                weekly = latest
+                weekly = desk_roi_plan.latest_weekly_scorecard(root)
         except Exception:
             weekly = None
         try:

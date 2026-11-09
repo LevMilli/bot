@@ -98,7 +98,8 @@ class WeeklyScorecard(unittest.TestCase):
             self.assertTrue(card["fee_floors_locked"])
             latest = desk_roi_plan.latest_weekly_scorecard(tmp)
             self.assertEqual(latest["label"], "2026-11-03")
-            self.assertIsNone(desk_roi_plan.latest_weekly_scorecard(None))
+            # root=None reads package default path (may already have a live card).
+            self.assertIsNot(desk_roi_plan.latest_weekly_scorecard(None), latest)
 
     def test_master_wires_weekly_scorecard(self):
         import desk_master
@@ -126,6 +127,36 @@ class WeeklyScorecard(unittest.TestCase):
                 weekly.get("label"),
                 desk_roi_plan.latest_weekly_scorecard(tmp)["label"],
             )
+
+    def test_master_weekly_scorecard_prefers_live_bots_over_stale(self):
+        """Same-day stale scorecard m1 must not lag live history (#493 twin)."""
+        import desk_master
+
+        with tempfile.TemporaryDirectory() as tmp:
+            morning = [{
+                "id": "commodity-15m",
+                "today": 10.16,
+                "open_risk": 0,
+                "history": [{"pnl": 1.0}] * 4,
+                "gate_a": {},
+            }]
+            desk_roi_plan.capture_weekly_scorecard(
+                tmp, bots=morning, cfg={"max_open_risk": 100}, label="2026-11-09",
+            )
+            stale = desk_roi_plan.latest_weekly_scorecard(tmp) or {}
+            self.assertAlmostEqual(float(stale.get("m1") or 0), 0.99, places=2)
+            live = [{
+                "id": "commodity-15m",
+                "today": 35.02,
+                "open_risk": 0,
+                "history": [{"pnl": 2.0}] * 8,
+                "gate_a": {},
+            }]
+            summary = desk_master.master_summary(
+                tmp, bots=live, cfg={"max_open_risk": 100},
+            )
+            weekly = (summary.get("roi_plan") or {}).get("weekly_scorecard") or {}
+            self.assertAlmostEqual(float(weekly.get("m1") or 0), 1.99, places=2)
 
 
 if __name__ == "__main__":
