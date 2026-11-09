@@ -14,8 +14,10 @@ Empty quotes → `waiting on sharp book` (no invented fills). Desk entry gate st
 ## Run
 
 ```bash
-python bot.py
+python bot.py --harvest   # ESPN fair + Kalshi ask → sharp_quotes.json (opt-in)
+python bot.py             # decide from sharp_quotes.json
 python bot.py --reset
+make -C .. living-sharp-lag-harvest
 ```
 
-Incubation: graduate only at n ≥ 50 fee-aware settles. Staff only. No auto-promote.
+Incomplete fair/ask legs are skipped — never invented. Incubation: graduate only at n ≥ 50 fee-aware settles. Staff only. No auto-promote.

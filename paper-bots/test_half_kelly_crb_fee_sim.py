@@ -76,6 +76,24 @@ class HalfKellyCrbFeeSim(unittest.TestCase):
         )
         self.assertEqual(out["live_kelly_stake"], live)
 
+    def test_dutch_book_underround_and_overround(self):
+        under = desk_roi_plan.dutch_book_probe(
+            [{"side": "home", "ask": 0.44}, {"side": "away", "ask": 0.44}],
+            venue="kalshi_sports",
+        )
+        self.assertTrue(under["clear"])
+        self.assertGreaterEqual(under["edge"], 0.06 - 1e-9)
+        over = desk_roi_plan.dutch_book_probe(
+            [{"side": "home", "ask": 0.52}, {"side": "away", "ask": 0.52}],
+            venue="kalshi_sports",
+        )
+        self.assertFalse(over["clear"])
+        self.assertIn("overround", over["reason"].lower())
+        board = desk_roi_plan.dutch_book_observe(".")
+        self.assertTrue(board["observe_only"])
+        self.assertGreaterEqual(board["clears_n"], 1)
+        self.assertFalse(board["live_orders_enabled"])
+
 
 if __name__ == "__main__":
     unittest.main()
