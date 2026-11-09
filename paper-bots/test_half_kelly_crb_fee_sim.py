@@ -152,6 +152,36 @@ class HalfKellyCrbFeeSim(unittest.TestCase):
         self.assertGreaterEqual(board["clears_n"], 1)
         self.assertEqual(desk_profit.DEFAULT_VENUE_MIN_EDGE["kalshi_econ"], 0.05)
 
+    def test_vol_curve_btc_and_commodity(self):
+        thin_btc = desk_roi_plan.btc_vol_binary_probe({
+            "vol_fair": 0.54, "ask": 0.52, "dvol": 48.0,
+        })
+        self.assertFalse(thin_btc["clear"])
+        fat_btc = desk_roi_plan.btc_vol_binary_probe({
+            "vol_fair": 0.62, "ask": 0.50, "dvol": 55.0,
+        })
+        self.assertTrue(fat_btc["clear"])
+        self.assertEqual(fat_btc["venue"], "kalshi_btc15m")
+        thin_cmd = desk_roi_plan.commodity_curve_probe({
+            "curve_fair": 0.54, "ask": 0.52, "roll_yield": 0.001,
+        })
+        self.assertFalse(thin_cmd["clear"])
+        fat_cmd = desk_roi_plan.commodity_curve_probe({
+            "curve_fair": 0.61, "ask": 0.50,
+            "roll_yield": -0.012, "eia_regime": "draw",
+        })
+        self.assertTrue(fat_cmd["clear"])
+        self.assertEqual(fat_cmd["venue"], "kalshi_commodity15m")
+        incomplete = desk_roi_plan.btc_vol_binary_probe({"ask": 0.51})
+        self.assertIn("no invent", incomplete["reason"].lower())
+        board = desk_roi_plan.vol_curve_observe(".")
+        self.assertTrue(board["observe_only"])
+        self.assertFalse(board["live_orders_enabled"])
+        self.assertGreaterEqual(board["btc"]["clears_n"], 1)
+        self.assertGreaterEqual(board["commodity"]["clears_n"], 1)
+        self.assertEqual(desk_profit.DEFAULT_VENUE_MIN_EDGE["kalshi_btc15m"], 0.05)
+        self.assertEqual(desk_profit.DEFAULT_VENUE_MIN_EDGE["kalshi_commodity15m"], 0.05)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1740,7 +1740,7 @@ def main() -> int:
             "raise-phi-log", "sports-calib", "commodity-calib",
             "baseline-fee", "baseline-capture", "fee-ledger",
             "half-kelly-crb", "fee-sim", "dutch-book", "sharp-lag-harvest",
-            "fed-watch-harvest", "poly-arb", "cpi-nowcast",
+            "fed-watch-harvest", "poly-arb", "cpi-nowcast", "vol-curve",
             "commodity-tstop-status", "commodity-tstop-promote",
             "commodity-tstop-promote-ready",
             "sports-tfinal-status", "sports-tfinal-promote",
@@ -4381,6 +4381,10 @@ def main() -> int:
         return 0
     if args.action == "cpi-nowcast":
         out = desk_roi_plan.cpi_nowcast_observe(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "vol-curve":
+        out = desk_roi_plan.vol_curve_observe(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
     if args.action == "fee-ledger":
