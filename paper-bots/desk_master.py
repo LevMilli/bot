@@ -777,17 +777,16 @@ def master_summary(
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_sc = desk_roi_plan.latest_sports_calibration(root)
-            if root and bots and (
-                not isinstance(latest_sc, dict)
-                or str(latest_sc.get("label") or "") != today
-            ):
+            # Prefer live bots whenever provided — same-day stale calib card must
+            # not lag live sports history (#492 eth twin).
+            if root and bots:
                 plan["sports_calibration"] = desk_roi_plan.capture_sports_calibration(
                     root, bots=bots, label=today,
                 )
             else:
                 plan["sports_calibration"] = (
-                    latest_sc or desk_roi_plan.sports_calibration_report(bots)
+                    desk_roi_plan.latest_sports_calibration(root)
+                    or desk_roi_plan.sports_calibration_report(bots)
                 )
         except Exception:
             plan["sports_calibration"] = None
