@@ -232,13 +232,13 @@ ACTIONS = {
 }
 
 # One automatic pass. Intervals are seconds. Clock times are America/Chicago.
-# Daily slots run once per Chicago day, the first time the process is up inside
-# the window. The Kalshi scan uses the desk's paper scan (no --any-time) and
-# forced INX scans at 12:05 / 13:05 / 14:20 CT (up to 3/day). The morning brief stays
-# the desk's dry run. Settle is the desk's paper settle, once at 4:00 PM CT,
-# after the 3:00 PM contract time, so a closed paper trade can land in the
-# state file. Memecoin manages open exits about every 3 minutes (same script
-# still scans for new tickets; dual accurate/speed lanes; stop-bleed exits).
+# Daily clock slots: INX run windows retry on NO TRADE (see _remember) so fair/band
+# can clear later in-window — max 1 fill/day stays stone in the bots. The Kalshi
+# scan uses the desk's paper scan (no --any-time). Forced S&P scans at
+# 12:05 / 13:05 / 13:40 CT (up to 3/day) — third slot ends by 14:00 so it still
+# clears the stone 60m late-σ entry floor before 15:00 settle (old 14:20 slot was
+# always refuse). Morning brief stays dry run. Settle polls flip/exit; 4 PM lands
+# closed paper. Memecoin manages exits ~3m (still scans; dual lanes; stop-bleed).
 AUTO_RETRY_SEC = 900
 AUTO = (
     # Faster sports polls so tip-soon + dual lanes can land multiple fills.
@@ -254,9 +254,10 @@ AUTO = (
     {"id": "btc-carry", "action": "run", "every_sec": 300},
     {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "11:59"},
     # Forced INX scan slots (plan E1 #123) — up to 3 fee-aware scans / Chicago day.
+    # Third window ends ≤14:00 CT so late-σ 60m floor can still clear (15:00 settle).
     {"id": "kalshi-sp", "action": "run", "at_ct": "12:05", "until_ct": "12:25"},
     {"id": "kalshi-sp", "action": "run", "at_ct": "13:05", "until_ct": "13:25"},
-    {"id": "kalshi-sp", "action": "run", "at_ct": "14:20", "until_ct": "14:40"},
+    {"id": "kalshi-sp", "action": "run", "at_ct": "13:40", "until_ct": "14:00"},
     # Model-flip / settle polls before 15:00 CT binary settle (mirror sized).
     {"id": "kalshi-sp", "action": "settle", "at_ct": "13:00", "until_ct": "15:55"},
     {"id": "kalshi-sp", "action": "settle", "at_ct": "16:00", "until_ct": "23:30"},
@@ -498,7 +499,7 @@ BOT_PLANS = {
     },
     "kalshi-sized": {
         "buy": [
-            "KXINXU 3 PM CT; forced scans 12:05 / 13:05 / 14:20 CT",
+            "KXINXU 3 PM CT; S&P forced scans 12:05 / 13:05 / 13:40 CT; sized window retries on NO TRADE",
             "Ask band 80–92¢; order-book confirm",
             "Desk Kelly-lite stake (not fixed $25); venue kalshi_inx edge",
             "Anti-double vs kalshi-sp same ticker; residual edge ≥ venue + 1¢",
@@ -3504,7 +3505,7 @@ def timer_text() -> str:
         "and syncs the Kalshi public trade tape for desk series. "
         "Commodity 15m about every 90 seconds. "
         "Kalshi morning brief once at 8:00 AM, dry run. "
-        "Kalshi paper scans forced at 12:05, 13:05, and 14:20 CT (up to 3/day). "
+        "Kalshi paper scans forced at 12:05, 13:05, and 13:40 CT (up to 3/day). "
         "Kalshi paper settle once at 4:00 PM. "
         "Coinbase spot shadow about every 5 minutes (public candles, no desk cash). "
         "BTC carry shadow about every 5 minutes (public funding archive, no desk cash). "
@@ -3591,6 +3592,28 @@ def due_slots(now: dt.datetime, root: str) -> list:
     return due
 
 
+def _inx_run_should_retry(result: dict) -> bool:
+    """NO TRADE / empty scan inside an INX window — retry; do not burn the day stamp.
+
+    Max 1 fill/day stays stone in the tower risk_manager. Late-σ refuse ends
+    retries for that slot (no legal entry left before 15:00 settle).
+    """
+    if result.get("blocked"):
+        return True
+    if not result.get("ok"):
+        return False
+    summary = str(result.get("summary") or "").lower()
+    if "refuse late" in summary and "entry floor" in summary:
+        return False
+    if "no trade" in summary:
+        return True
+    if "no paper buy" in summary:
+        return True
+    if "no candidate cleared" in summary:
+        return True
+    return False
+
+
 def _remember(saved: dict, slot: dict, now: dt.datetime, result: dict) -> None:
     if result.get("error") == _BUSY:
         return
@@ -3601,7 +3624,17 @@ def _remember(saved: dict, slot: dict, now: dt.datetime, result: dict) -> None:
     if result.get("blocked"):
         saved[key + ":retry"] = _iso(now)
         return
-    # A finished check, or a hard failure, waits for the next clock slot.
+    # INX run windows: NO TRADE must not consume the daily stamp — fair/band can
+    # clear later in-window (stone late-σ / fee / max-1 stay locked).
+    if (
+        slot.get("id") in ("kalshi-sp", "kalshi-sized")
+        and slot.get("action") == "run"
+        and _inx_run_should_retry(result)
+    ):
+        saved[key + ":retry"] = _iso(now)
+        saved.pop(key, None)
+        return
+    # A finished check (fill / late-σ / hard fail) waits for the next clock slot.
     saved[key] = now.astimezone(CT).date().isoformat()
     saved.pop(key + ":retry", None)
 

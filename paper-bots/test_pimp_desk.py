@@ -291,7 +291,8 @@ class PimpDeskTests(unittest.TestCase):
         scans = [s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "run"]
         settles = [s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "settle"]
         self.assertEqual(brief["at_ct"], "08:00")
-        self.assertEqual([s["at_ct"] for s in scans], ["12:05", "13:05", "14:20"])
+        self.assertEqual([s["at_ct"] for s in scans], ["12:05", "13:05", "13:40"])
+        self.assertEqual(scans[2]["until_ct"], "14:00")
         self.assertEqual([s["at_ct"] for s in settles], ["13:00", "16:00"])
         self.assertEqual(settles[0]["until_ct"], "15:55")
         self.assertEqual(pimp_desk.ACTIONS["kalshi-sp"]["brief"]["argv"], ("bot.py", "brief", "--dry-run"))
@@ -308,7 +309,8 @@ class PimpDeskTests(unittest.TestCase):
         self.assertIn("8:00", text)
         self.assertIn("12:05", text)
         self.assertIn("13:05", text)
-        self.assertIn("14:20", text)
+        self.assertIn("13:40", text)
+        self.assertNotIn("14:20", text)
         self.assertIn("dry run", text)
         self.assertNotIn("guarantee", text)
         with tempfile.TemporaryDirectory() as tmp:
@@ -317,7 +319,7 @@ class PimpDeskTests(unittest.TestCase):
             morning = dt.datetime(2026, 10, 30, 8, 5, tzinfo=pimp_desk.CT)
             noon = dt.datetime(2026, 10, 30, 12, 10, tzinfo=pimp_desk.CT)
             mid = dt.datetime(2026, 10, 30, 13, 10, tzinfo=pimp_desk.CT)
-            late_slot = dt.datetime(2026, 10, 30, 14, 25, tzinfo=pimp_desk.CT)
+            third_slot = dt.datetime(2026, 10, 30, 13, 45, tzinfo=pimp_desk.CT)
             late = dt.datetime(2026, 10, 30, 14, 56, tzinfo=pimp_desk.CT)
             night = dt.datetime(2026, 10, 30, 3, 0, tzinfo=pimp_desk.CT)
             saturday = dt.datetime(2026, 10, 31, 12, 10, tzinfo=pimp_desk.CT)
@@ -325,7 +327,7 @@ class PimpDeskTests(unittest.TestCase):
             self.assertNotIn(("kalshi-sp", "run", "12:05"), names(morning))
             self.assertIn(("kalshi-sp", "run", "12:05"), names(noon))
             self.assertIn(("kalshi-sp", "run", "13:05"), names(mid))
-            self.assertIn(("kalshi-sp", "run", "14:20"), names(late_slot))
+            self.assertIn(("kalshi-sp", "run", "13:40"), names(third_slot))
             self.assertNotIn(("kalshi-sp", "brief", "08:00"), names(noon))
             self.assertIn(("memecoin", "run", None), names(noon))
             self.assertNotIn(("kalshi-sp", "run", "12:05"), names(late))
@@ -1424,6 +1426,43 @@ class PimpDeskTests(unittest.TestCase):
             saved = pimp_desk._load_runs(tmp).get("kalshi-sized") or {}
             self.assertIn("60m entry floor", saved.get("summary") or "")
             self.assertEqual(saved.get("action"), "run")
+
+    def test_inx_no_trade_retries_inside_window(self):
+        """NO TRADE must not burn the daily INX stamp — retry so band can clear."""
+        slot = {"id": "kalshi-sized", "action": "run", "at_ct": "12:05", "until_ct": "14:55"}
+        now = dt.datetime(2026, 11, 9, 13, 10, tzinfo=pimp_desk.CT)
+        saved = {}
+        pimp_desk._remember(
+            saved, slot, now,
+            {"ok": True, "summary": "NO TRADE: inx fair p 0.66 < 0.80\nCARD: inx fair p 0.66 < 0.80"},
+        )
+        key = "kalshi-sized:run:12:05"
+        self.assertIsNone(saved.get(key))
+        self.assertIn(key + ":retry", saved)
+        # Late-σ ends retries (stone 60m floor — no legal entry left).
+        saved_late = {}
+        pimp_desk._remember(
+            saved_late, slot, now,
+            {
+                "ok": True,
+                "summary": (
+                    "CARD: inx fair: 38m to settle < 60m entry floor "
+                    "(refuse late σ-collapse arm)"
+                ),
+            },
+        )
+        self.assertEqual(saved_late.get(key), "2026-11-09")
+        with tempfile.TemporaryDirectory() as tmp:
+            # After retry cooldown, sized run is due again inside the window.
+            pimp_desk._atomic_write(
+                pimp_desk.auto_path(tmp),
+                json.dumps({key + ":retry": pimp_desk._iso(now)}) + "\n",
+            )
+            later = now + dt.timedelta(seconds=pimp_desk.AUTO_RETRY_SEC + 1)
+            due = pimp_desk.due_slots(later, tmp)
+            self.assertTrue(any(
+                s.get("id") == "kalshi-sized" and s.get("action") == "run" for s in due
+            ))
 
     def test_card_copy_is_plain_and_accounts_keep_cash(self):
         raw = (
