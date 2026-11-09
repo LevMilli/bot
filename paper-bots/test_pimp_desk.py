@@ -1480,7 +1480,11 @@ class PimpDeskTests(unittest.TestCase):
         import desk_profit
         self.assertTrue(desk_profit.model_flip_adverse("YES", 0.85, 0.70, 0.08))
         self.assertFalse(desk_profit.model_flip_adverse("YES", 0.85, 0.80, 0.08))
-        self.assertTrue(desk_profit.model_flip_adverse("NO", 0.20, 0.35, 0.08))
+        # Held-side fair: away/NO adverse is a DROP, not a rise (LALDET false-flip class).
+        self.assertTrue(desk_profit.model_flip_adverse("away", 0.8907, 0.8277, 0.06))
+        self.assertFalse(desk_profit.model_flip_adverse("away", 0.826, 0.915, 0.06))
+        self.assertTrue(desk_profit.model_flip_adverse("NO", 0.85, 0.70, 0.08))
+        self.assertFalse(desk_profit.model_flip_adverse("NO", 0.20, 0.35, 0.08))
 
     def test_midnight_reloads_broke_towers_only(self):
         broke = {

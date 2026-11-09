@@ -677,19 +677,21 @@ def capital_weights(bot_rows: list) -> dict:
 
 
 def model_flip_adverse(side: str, fair_at_entry, fair_now, delta: float) -> bool:
-    """True when fair moved against the held side by ≥ delta."""
+    """True when held-contract fair fell by ≥ delta.
+
+    Callers (sports / BTC / commodity) stash and pass *held-side* fair
+    (away = 1−home WP; NO = NO model p). Adverse is always a drop in that
+    held fair — never invert for NO/away (that false-flipped rising away
+    winners and missed falling away losers).
+    """
     entry = _num(fair_at_entry)
     now = _num(fair_now)
     d = _num(delta)
     if entry is None or now is None or d is None or d < 0:
         return False
-    s = str(side or "").strip().lower()
-    # YES/home: adverse if fair drops; NO/away: adverse if fair rises (against short-ish)
-    if s in ("yes", "home", "buy", "long"):
-        return (entry - now) >= d - 1e-12
-    if s in ("no", "away", "sell", "short"):
-        return (now - entry) >= d - 1e-12
-    return abs(now - entry) >= d - 1e-12
+    # side is accepted for API compat / logging; fair_* are already held-side.
+    _ = str(side or "").strip().lower()
+    return (entry - now) >= d - 1e-12
 
 
 def shadow_promote_ready(expectancy_row: dict, promote_after: dict | None) -> bool:
