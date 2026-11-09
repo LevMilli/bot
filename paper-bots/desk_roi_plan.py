@@ -7385,6 +7385,230 @@ def cpi_nowcast_observe(
     }
 
 
+KALSHI_PUBLIC = "https://api.elections.kalshi.com/trade-api/v2"
+MACRO_HARVEST_UA = {"User-Agent": "paper-bots-macro-harvest/1.0 (paper-only)"}
+
+
+def _kalshi_yes_ask(row: dict) -> float | None:
+    """Parse Kalshi yes ask from dollars fields. Never invent."""
+    for key in ("yes_ask_dollars", "yes_ask", "ask"):
+        n = _finite(row.get(key))
+        if n is None:
+            continue
+        # Legacy integer cents → dollars when clearly out of [0,1].
+        if n > 1.0 + 1e-12 and n <= 100.0:
+            n = n / 100.0
+        if 0.0 < n < 1.0:
+            return float(n)
+    return None
+
+
+def _fetch_kalshi_series_markets(
+    series: str,
+    *,
+    opener=None,
+    limit: int = 100,
+) -> list[dict]:
+    """Public Kalshi open markets for one series. Empty on network miss."""
+    import urllib.error
+    import urllib.request
+
+    series = str(series or "").strip().upper()
+    if not series:
+        return []
+    url = f"{KALSHI_PUBLIC}/markets?series_ticker={series}&status=open&limit={int(limit)}"
+    opener = opener or (
+        lambda u: urllib.request.urlopen(
+            urllib.request.Request(u, headers=MACRO_HARVEST_UA), timeout=12,
+        ).read()
+    )
+    try:
+        blob = opener(url)
+    except Exception:
+        return []
+    if not blob:
+        return []
+    try:
+        if isinstance(blob, bytes):
+            data = json.loads(blob.decode("utf-8", errors="replace"))
+        elif isinstance(blob, str):
+            data = json.loads(blob)
+        elif isinstance(blob, dict):
+            data = blob
+        else:
+            return []
+    except json.JSONDecodeError:
+        return []
+    rows = data.get("markets") if isinstance(data, dict) else None
+    return [r for r in (rows or []) if isinstance(r, dict)]
+
+
+def macro_kalshi_harvest(
+    root: str | None = None,
+    *,
+    opener=None,
+    limit: int = 100,
+) -> dict:
+    """Harvest public Kalshi Fed/CPI asks into idea-bank fixtures.
+
+    Writes asks only — FedWatch CME fair and Cleveland CPI nowcast fair are
+    left null until staff drops them (never invent). Also builds dutch-book
+    baskets for exclusive KXFEDDECISION outcomes at one meeting.
+    """
+    root = root or _root()
+    fed_mkts = _fetch_kalshi_series_markets(
+        "KXFEDDECISION", opener=opener, limit=limit,
+    )
+    # Threshold series is secondary — keep decision markets primary for dutch.
+    fed_thr = _fetch_kalshi_series_markets("KXFED", opener=opener, limit=limit)
+    cpi_mkts = _fetch_kalshi_series_markets("KXCPI", opener=opener, limit=limit)
+
+    fed_bins: list[dict] = []
+    for row in fed_mkts + fed_thr:
+        ask = _kalshi_yes_ask(row)
+        if ask is None:
+            continue
+        fed_bins.append({
+            "outcome": str(row.get("ticker") or row.get("subtitle") or "fed"),
+            "ticker": str(row.get("ticker") or ""),
+            "meeting": str(row.get("event_ticker") or ""),
+            "title": str(row.get("title") or row.get("subtitle") or "")[:120],
+            "ask": round(ask, 4),
+            # Fair stays null — CME FedWatch not wired; never invent.
+            "fedwatch_fair": None,
+            "source": "kalshi_public",
+        })
+
+    cpi_rows: list[dict] = []
+    for row in cpi_mkts:
+        ask = _kalshi_yes_ask(row)
+        if ask is None:
+            continue
+        cpi_rows.append({
+            "label": str(row.get("ticker") or "cpi"),
+            "strike": str(row.get("ticker") or ""),
+            "title": str(row.get("title") or row.get("subtitle") or "")[:120],
+            "ask": round(ask, 4),
+            # Fair stays null — Cleveland nowcast not wired; never invent.
+            "nowcast_fair": None,
+            "source": "kalshi_public",
+        })
+
+    # Exclusive Fed decision baskets by event for dutch observe.
+    by_event: dict[str, list[dict]] = {}
+    for row in fed_mkts:
+        ask = _kalshi_yes_ask(row)
+        if ask is None:
+            continue
+        event = str(row.get("event_ticker") or "").strip()
+        if not event:
+            continue
+        by_event.setdefault(event, []).append({
+            "side": str(row.get("ticker") or row.get("subtitle") or ""),
+            "ask": round(ask, 4),
+        })
+    dutch_baskets = []
+    dutch_clears = 0
+    for event, legs in sorted(by_event.items()):
+        if len(legs) < 2:
+            continue
+        probe = dutch_book_probe(legs, venue="kalshi_econ")
+        probe["label"] = event
+        if probe.get("clear"):
+            dutch_clears += 1
+        dutch_baskets.append(probe)
+
+    tower = os.path.join(root, "fed-watch-paper")
+    os.makedirs(tower, exist_ok=True)
+    bins_path = os.path.join(tower, "fedwatch_bins.json")
+    cpi_path = os.path.join(root, "desk_cpi_nowcast.json")
+    bins_payload = {
+        "paper_only": True,
+        "shadow_only": True,
+        "idea_bank_only": True,
+        "fee_floors_locked": True,
+        "note": (
+            "Kalshi public asks only. fedwatch_fair left null until CME "
+            "FedWatch is dropped by staff — never invent."
+        ),
+        "bins": fed_bins,
+    }
+    cpi_payload = {
+        "paper_only": True,
+        "idea_bank_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "note": (
+            "Kalshi public CPI asks only. nowcast_fair left null until a "
+            "Cleveland-style nowcast is dropped — never invent."
+        ),
+        "strikes": cpi_rows,
+    }
+    try:
+        with open(bins_path, "w", encoding="utf-8") as handle:
+            json.dump(bins_payload, handle, indent=2)
+            handle.write("\n")
+        with open(cpi_path, "w", encoding="utf-8") as handle:
+            json.dump(cpi_payload, handle, indent=2)
+            handle.write("\n")
+        wrote = True
+    except OSError as exc:
+        return {
+            "ok": False,
+            "paper_only": True,
+            "idea_bank_only": True,
+            "reason": f"write failed: {exc.__class__.__name__}",
+        }
+
+    # Refresh fed-watch quotes from bins (still no fair → empty quotes).
+    quotes_n = 0
+    try:
+        bot_path = os.path.join(tower, "bot.py")
+        if os.path.isfile(bot_path):
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("fed_watch_harvest", bot_path)
+            mod = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(mod)
+            harvested = mod.harvest_from_bins(
+                root, fed_bins, note="kalshi asks; fair null until CME",
+            )
+            quotes_n = int(harvested.get("n") or 0)
+    except Exception:
+        quotes_n = 0
+
+    return {
+        "ok": True,
+        "paper_only": True,
+        "idea_bank_only": True,
+        "observe_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "wrote": wrote,
+        "fed_ask_n": len(fed_bins),
+        "cpi_ask_n": len(cpi_rows),
+        "fed_quotes_n": quotes_n,
+        "waiting_on_fedwatch_fair": True,
+        "waiting_on_cpi_nowcast_fair": True,
+        "dutch_baskets_n": len(dutch_baskets),
+        "dutch_clears_n": dutch_clears,
+        "dutch_baskets": dutch_baskets[:12],
+        "fedwatch_bins_path": bins_path,
+        "cpi_path": cpi_path,
+        "label": (
+            f"macro_harvest fed_asks={len(fed_bins)} cpi_asks={len(cpi_rows)} "
+            f"dutch_clear={dutch_clears}/{len(dutch_baskets)} "
+            "waiting_on_external_fair"
+        ),
+        "note": (
+            "Public Kalshi Fed/CPI asks harvested. Fairs stay null until CME "
+            "FedWatch / CPI nowcast are staff-dropped — never invent. "
+            "Dutch underrounds on exclusive Fed decision legs are fee-true."
+        ),
+    }
+
+
 def _fee_clear_probe(
     *,
     fair,
