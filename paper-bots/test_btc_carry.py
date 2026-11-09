@@ -101,8 +101,12 @@ class BtcCarryRules(unittest.TestCase):
             os.makedirs(os.path.join(tmp, "btc-carry-paper"))
             out = _capture(bot, tmp, {"funding": [], "premium": [], "error": "no archive rows"}, now)
             self.assertIn("CARD: " + bot.FLAT_CARD, out)
+            self.assertIn("marks no archive rows", out)
             self.assertIn("no trade", out)
-            self.assertEqual(pimp_desk.card_copy(out), bot.FLAT_CARD)
+            self.assertEqual(
+                pimp_desk.card_copy(out),
+                bot.densified_flat_card(error="no archive rows"),
+            )
             state = json.load(open(os.path.join(tmp, "btc-carry-paper", "paper_account.json"), encoding="utf-8"))
             self.assertEqual(state["open"], [])
             self.assertTrue(state["shadow_only"])
@@ -127,6 +131,8 @@ class BtcCarryRules(unittest.TestCase):
             opened = bot._parse_time("2026-02-01T00:00:00+00:00")
             out = _capture(bot, tmp, first, opened)
             self.assertIn("CARD: " + bot.HOLD_CARD, out)
+            self.assertIn("open 1 since 2026-02-01", out)
+            self.assertIn("RT fee $0.75 paid once", out)
             self.assertNotIn("no trade", out)
             state = json.load(open(os.path.join(tmp, "btc-carry-paper", "paper_account.json"), encoding="utf-8"))
             self.assertEqual(len(state["open"]), 1)
@@ -147,10 +153,13 @@ class BtcCarryRules(unittest.TestCase):
             later = bot._parse_time("2026-02-01T08:00:00+00:00")
             out = _capture(bot, tmp, red, later)
             self.assertIn("CARD: " + bot.HOLD_CARD, out)
+            self.assertIn("open 1 since 2026-02-01", out)
             state = json.load(open(os.path.join(tmp, "btc-carry-paper", "paper_account.json"), encoding="utf-8"))
             self.assertEqual(len(state["open"]), 1)
             self.assertEqual(state["entry_fees"], 1)
             self.assertEqual(state["open"][0]["notional"], 500.0)
+            # Hold heartbeats price_at to the check clock so doctor is not weeks-stale.
+            self.assertEqual(state["open"][0]["price_at"], "2026-02-01T08:00:00+00:00")
             # Short pays 0.0002 funding and pays 1 bp more premium: 500 * (0.0002 + 0.0001).
             self.assertAlmostEqual(state["cash"], 499.1, places=2)
             self.assertEqual(state["closed"], [])
