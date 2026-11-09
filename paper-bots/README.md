@@ -20,6 +20,7 @@ pretend ("paper") account in local files.
 | `sports-gap-paper/` | Live sports "gap" paper bot: compares ESPN's live win probability with Kalshi game prices, paper-buys big gaps | ESPN scoreboard, Kalshi public API |
 | `memecoin-paper/` | Solana meme-coin paper bot: strict rug-pull filter, paper buys at real prices, stop/ladder/trailing exits | DexScreener, RugCheck |
 | `btc15m-signal/` | `btc15m_signal.py`: Bitcoin 15-minute Kalshi **paper** bot. Prints BUY or SKIP, paper-fills into `paper_account.json` when the checklist clears; **real TP + model-flip + settle** | Kalshi, Coinbase, Kraken, Bitstamp, Deribit DVOL, ForexFactory calendar |
+| `coinbase-spot-paper/` | Shadow Coinbase spot tower. Public 15m candles. Longs only when excess return clears the locked 0.05 floor after the US intro taker. Spends no desk cash | Coinbase Exchange public candles (no key) |
 | `TEAM_ROLES.md` | How the "desk" of helper bots was organized, and the safety rules | — |
 | `DESK_ROI_SYSTEM.md` | Desk-wide ROI rules every present bot must follow (paper only) | — |
 | `BUY_SELL_FAILSAFE_INVENTORY.md` | Per-bot buy / sell / failsafe thresholds + entry_gate map | — |
@@ -74,6 +75,10 @@ empty paper account: no trade history or saved state is included in this pack.
 - Take-profit: fill + 15¢, capped at 99¢ — **executed** via `manage_take_profits` → `paper_sell`. Model-flip flatten + settle remain.
 - Venue floor `kalshi_btc15m` **0.05** locked (sports 0.06 / commodity 0.05 / INX+DEX 0.02).
 - On the PIMP desk, BTC `run` is an **entry** action: desk daily loss / max open / open risk gate it like the other towers. See `DESK_ROI_SYSTEM.md`.
+
+## Coinbase spot tower (shadow)
+
+`coinbase-spot-paper/` is a separate book from the BTC 15-minute Kalshi tower. Coinbase is only a price feed for that tower. This one paper-trades ETH-USD and SOL-USD on public candles, long only, and only when a 15-minute move still clears the US intro taker (0.90% a side) plus slippage plus the locked `coinbase_spot` floor of 0.05. Ordinary bars skip. BTC-USD is logged and never bought. The sleeve is shadow: $500 of its own paper cash, no desk risk share. New towers follow `TOWER_SETUP.md`.
 
 ## Living Trading Upgrade (staff pulse)
 Paper-only living spine — floors locked, never auto-publishes Discord.

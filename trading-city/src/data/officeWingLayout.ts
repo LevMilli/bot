@@ -17,13 +17,14 @@ export type WingRoom = {
   side: 'left' | 'right' | 'end'
 }
 
-/** Five worker desks + boss suite — matches the six paper towers. */
+/** Worker desks + boss suite. Coinbase spot is the shadow tower on the crypto side. */
 export const WORKER_BOT_IDS = [
   'sports-gap',
   'kalshi-sp',
   'btc15m',
   'commodity-15m',
   'memecoin',
+  'coinbase-spot',
 ] as const
 
 export const BOSS_BOT_ID = 'kalshi-sized'
@@ -75,6 +76,14 @@ export const SPINE_ROOMS: WingRoom[] = [
     side: 'left',
   },
   {
+    id: 'coinbase-spot',
+    botId: 'coinbase-spot',
+    label: 'Coinbase spot',
+    position: [21.2, 0, 5.55],
+    yaw: Math.PI,
+    side: 'right',
+  },
+  {
     id: 'boss',
     botId: BOSS_BOT_ID,
     label: 'Boss · Sized Kalshi',
@@ -104,6 +113,7 @@ export const WING_LAYOUTS: Record<
       { id: 'btc15m', botId: 'btc15m', label: 'BTC 15m', position: [16, 0, 0], yaw: -Math.PI / 2, side: 'left' },
       { id: 'commodity-15m', botId: 'commodity-15m', label: 'Commodity 15m', position: [22, 0, -6], yaw: 0, side: 'left' },
       { id: 'memecoin', botId: 'memecoin', label: 'Memecoin', position: [22, 0, 6], yaw: Math.PI, side: 'right' },
+      { id: 'coinbase-spot', botId: 'coinbase-spot', label: 'Coinbase spot', position: [16, 0, 6], yaw: Math.PI, side: 'right' },
       {
         id: 'boss',
         botId: BOSS_BOT_ID,
@@ -124,6 +134,7 @@ export const WING_LAYOUTS: Record<
       { id: 'btc15m', botId: 'btc15m', label: 'BTC 15m', position: [16, 0, -6], yaw: 0, side: 'left' },
       { id: 'commodity-15m', botId: 'commodity-15m', label: 'Commodity 15m', position: [4, 0, 6], yaw: Math.PI, side: 'right' },
       { id: 'memecoin', botId: 'memecoin', label: 'Memecoin', position: [10, 0, 6], yaw: Math.PI, side: 'right' },
+      { id: 'coinbase-spot', botId: 'coinbase-spot', label: 'Coinbase spot', position: [16, 0, 6], yaw: Math.PI, side: 'right' },
       {
         id: 'boss',
         botId: BOSS_BOT_ID,

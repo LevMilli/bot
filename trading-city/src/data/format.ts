@@ -23,6 +23,7 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'commodity-15m': '#f9c80e',
   memecoin: '#b967ff',
   'kalshi-sized': '#ff8c42',
+  'coinbase-spot': '#4d9fff',
 }
 
 function hashBotId(id: string): number {

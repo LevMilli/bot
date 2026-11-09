@@ -4903,7 +4903,7 @@ def fee_floors_assert(root: str | None = None, cfg: dict | None = None) -> dict:
     soft_copy = (
         f"**Fee floors assert** (locked · never soften)\n"
         f"{label}\n"
-        f"_sports 0.06 · BTC/commodity 0.05 · INX/DEX 0.02 · live=False_"
+        f"_sports 0.06 · BTC/commodity 0.05 · INX/DEX 0.02 · Coinbase spot 0.05 · live=False_"
     )
     return {
         "paper_only": True,

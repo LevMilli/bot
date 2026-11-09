@@ -64,7 +64,7 @@ Bot-local stops that are **tighter** than desk (Kalshi −$50, meme −$50, max 
 | **weak** | Settle-only with hard entry filters | *(avoid — upgrade)* |
 | **absent** | No script | *(legacy only)* |
 
-**Locked venue floors (cannot lower):** sports 0.06 · BTC/commodity 0.05 · INX/DEX 0.02.  
+**Locked venue floors (cannot lower):** sports 0.06 · BTC/commodity 0.05 · INX/DEX 0.02 · Coinbase spot 0.05 (excess return after the round trip, not a probability).  
 **Starve defaults:** `starve_min_n=4`, `starve_factor=0.15`. **Meme red lock:** −$8 / stop −12% / max 1 open when red. **INX drawdown halt:** cash ≤ $460.
 
 **ROI system target:** no present bot may stay below **partial** without an explicit waiver in `roi_system.waivers`. Weak books must at least: (a) hard entry filters, (b) calendar/news blocks where relevant, (c) desk entry_gate, (d) invalidation logging.
@@ -91,6 +91,14 @@ Bot-local stops that are **tighter** than desk (Kalshi −$50, meme −$50, max 
 ### Memecoin → **strong** reference implementation
 - Facts fail-closed; stop/ladder/trail/time/liq.
 - Flat $25 is an approved fixed-ticket waiver (`fixed_ticket_25`).
+
+### Coinbase spot → **partial**, shadow only
+- Public 15m candles. ETH-USD and SOL-USD longs. BTC-USD research-only.
+- Edge = 25% of the last move minus the US intro taker round trip (0.90% + 0.10% slip each side). Buy only if that edge ≥ 0.05 and z ≥ 2.
+- Ordinary bars skip. That skip is the base.
+- Exits: −1.5% stop, take-profit at round-trip + floor, model-flip, 24h time stop.
+- Own $500 sleeve, fixed $25, max 1 open. No desk cash and no tower risk share until a person graduates incubation (n ≥ 50).
+- Waiver: `fixed_ticket_25`, `shadow_only`.
 
 ### Sized Kalshi → **partial**
 - KXINXU 84–92¢ band; desk Kelly-lite stake; model-flip under 50¢ + settle.
