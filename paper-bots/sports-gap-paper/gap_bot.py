@@ -2006,7 +2006,9 @@ def run():
         r_block = desk_roi_plan.daily_r_blocks("sports-gap", red_pnl)
         if r_block:
             lines.append(f"| {ts} | | | | | | | | {r_block} |")
-            summary_out.setdefault("skips", []).append(r_block)
+            # Prepend so CARD/why densify settle-only ahead of evaluate/cool noise (#482 twin).
+            skips = summary_out.setdefault("skips", [])
+            skips.insert(0, r_block)
             max_buys_eff = 0
     except Exception:
         pass
