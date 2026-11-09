@@ -1225,6 +1225,47 @@ class PimpDeskTests(unittest.TestCase):
         self.assertIn("Holding 1 open paper position", out.get("why") or "")
         self.assertNotIn("speed floor", (out.get("why") or "").lower())
 
+    def test_finish_bot_inx_settle_empty_leads_with_next_scan(self):
+        """Settle empty must not lead tip why (#497 twin)."""
+        from unittest import mock
+
+        spec = {
+            "id": "kalshi-sp",
+            "name": "Kalshi S&P",
+            "kind": "kalshi",
+            "folder": "kalshi-sp500-paper",
+            "state": "paper_state.json",
+            "log": "",
+            "empty": "empty",
+        }
+        view = {
+            "id": "kalshi-sp",
+            "present": True,
+            "has_state": True,
+            "open_count": 0,
+            "positions": [],
+            "trades": [],
+            "history": [],
+            "cash": 500.0,
+            "realized": 0.0,
+            "today": 0.0,
+            "why": "No open paper positions.",
+            "skip": "",
+            "paused": False,
+            "read_error": "",
+            "central_check": "12:30 PM",
+            "last_check": "12:30 PM",
+            "last_run": {"ok": True, "summary": "No open paper positions.", "action": "settle"},
+        }
+        with mock.patch.object(
+            pimp_desk, "next_inx_scan_line", return_value="Next scan 13:05 CT.",
+        ):
+            out = pimp_desk._finish_bot(view, spec, ".")
+        why = out.get("why") or ""
+        self.assertTrue(why.startswith("Next scan 13:05 CT."))
+        self.assertIn("Settle smoke: empty book", why)
+        self.assertFalse(why.lower().startswith("no open paper"))
+
     def test_card_copy_is_plain_and_accounts_keep_cash(self):
         raw = (
             "No news calendar on this bot.\n"

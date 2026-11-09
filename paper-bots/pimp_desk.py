@@ -5723,12 +5723,15 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
                 view["idle_copy"] = f"{view['idle_copy']} {heartbeat}"
             why = str(view.get("why") or "")
             if why and "Next scan" not in why and "In scan window" not in why and "Next " not in why:
-                # Keep CARD why; append schedule on no-buy / empty-settle / staff-clear DD.
+                # Keep CARD why; densify schedule on no-buy / empty-settle / staff-clear DD.
+                # Empty settle must not lead the why outside/inside scan (#497 twin) —
+                # lead with next-scan heartbeat so HUD is not a false empty-book miss.
                 why_low = why.lower()
-                if (
+                if "no open paper" in why_low:
+                    view["why"] = f"{heartbeat} Settle smoke: empty book."
+                elif (
                     "no paper buy" in why_low
                     or "check finished" in why_low
-                    or "no open paper" in why_low
                     or "staff cleared soft drawdown" in why_low
                     or not why.strip()
                 ):
