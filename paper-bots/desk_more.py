@@ -299,13 +299,22 @@ def classify_skip(reason: str | None, *, weekday: int | None = None) -> str:
         return "correlation"
     if "entry_gate" in text or "daily loss" in text or "max open risk is reached" in text:
         return "entry_gate"
-    if "learning" in text or ("bucket" in text and "cool" in text):
+    if (
+        "learning" in text
+        or "adverse cool" in text
+        or ("bucket" in text and "cool" in text)
+    ):
         return "learning"
     if "news" in text or "blackout" in text or "fomc" in text or "cpi" in text:
         return "news"
     if "calendar" in text or "forexfactory" in text or "ff event" in text:
         return "calendar"
-    if "data" in text and ("error" in text or "missing" in text or "unavailable" in text):
+    # Stale-world / clock-skew are feed freshness — not capacity invent (DATA).
+    if (
+        "stale-world" in text
+        or "clock-skew" in text
+        or ("data" in text and ("error" in text or "missing" in text or "unavailable" in text))
+    ):
         return "data"
     # Daily-R settle-only is a budget lock (fee-clear profit target) — not DATA/other.
     # Keeps zero-buy / skip_board BUDGET taxonomy honest beside CARD densify.

@@ -214,11 +214,10 @@ class SportsGapSkipDensify(unittest.TestCase):
         idx = src.find('daily_r_blocks("sports-gap"')
         self.assertGreater(idx, 0)
         chunk = src[idx:idx + 900]
-        self.assertIn("skips.insert(0, r_block)", chunk)
-        self.assertNotIn("skips\"].append(r_block)", chunk)
+        self.assertIn('_densify_gate_skip(r_block, note="sports daily-r densify")', chunk)
         # #482 leftover: brain densify at settle-only + refuse max-buys invent.
         self.assertIn("sports daily-r densify", chunk)
-        self.assertIn("settle_lock", src)
+        self.assertIn("gate_lock", src)
         gap = _load_gap()
         card = gap._card_line({
             "trades": [],
@@ -232,6 +231,43 @@ class SportsGapSkipDensify(unittest.TestCase):
         self.assertIn("settle-only", card.lower())
         self.assertNotIn("gap < 6", card)
 
+    def test_cool_stale_gate_densify_refuses_max_buys_invent(self):
+        """#519 leftover: cool/stale zeroing max_buys must not invent capacity skip."""
+        src = GAP.read_text(encoding="utf-8")
+        cool_idx = src.find('adverse_cool_blocks(DESK_ROOT, "sports-gap")')
+        self.assertGreater(cool_idx, 0)
+        gate_chunk = src[cool_idx:cool_idx + 2200]
+        self.assertIn("sports adverse-cool densify", gate_chunk)
+        self.assertIn("sports stale-world densify", gate_chunk)
+        self.assertIn("_densify_gate_skip", gate_chunk)
+        self.assertIn("gate_lock", gate_chunk)
+        self.assertIn("adverse cool", gate_chunk)
+        self.assertIn("stale-world", gate_chunk)
+        # CARD prepend: cool/stale beat evaluate noise.
+        gap = _load_gap()
+        cool_card = gap._card_line({
+            "trades": [],
+            "skips": [
+                "adverse cool-off: sports-gap paused ~12m after 0.2 drop on ABC",
+                "gap < 6 (accurate) - no trade",
+            ],
+            "live_games": 4,
+            "matched": 4,
+        })
+        self.assertIn("adverse cool", cool_card.lower())
+        self.assertNotIn("gap < 6", cool_card)
+        stale_card = gap._card_line({
+            "trades": [],
+            "skips": [
+                "stale-world: last loop 90.0s > 60s bar (sports-gap); skip new entries",
+                "gap < 6 (accurate) - no trade",
+            ],
+            "live_games": 4,
+            "matched": 4,
+        })
+        self.assertIn("stale-world", stale_card.lower())
+        self.assertNotIn("gap < 6", stale_card)
+
     def test_daily_r_settle_only_classifies_budget_not_other(self):
         """Settle-only skip taxonomy is BUDGET (fee-clear profit lock), not DATA/other."""
         import desk_more
@@ -241,6 +277,24 @@ class SportsGapSkipDensify(unittest.TestCase):
         self.assertIn("settle-only", msg.lower())
         self.assertEqual(desk_more.classify_skip(msg), "budget")
         self.assertEqual(desk_more.stable_skip_code("budget"), "BUDGET")
+
+    def test_cool_stale_classify_not_capacity_other(self):
+        """Cool→LEARN and stale→DATA so fee-clear zero-buy taxonomy stays honest."""
+        import desk_more
+
+        cool = "adverse cool-off: sports-gap paused ~12m after 0.2 drop on ABC"
+        stale = "stale-world: last loop 90.0s > 60s bar (sports-gap); skip new entries"
+        skew = "clock-skew: source offset 120s > 90s; skip new entries"
+        self.assertEqual(desk_more.classify_skip(cool), "learning")
+        self.assertEqual(desk_more.stable_skip_code("learning"), "LEARN")
+        self.assertEqual(desk_more.classify_skip(stale), "data")
+        self.assertEqual(desk_more.classify_skip(skew), "data")
+        self.assertEqual(desk_more.stable_skip_code("data"), "DATA")
+        # Capacity invent remains other — not the gate truth code.
+        self.assertEqual(
+            desk_more.classify_skip("max buys this check (0)"),
+            "other",
+        )
 
 
 if __name__ == "__main__":
