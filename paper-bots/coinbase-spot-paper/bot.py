@@ -621,13 +621,36 @@ def run_once(
     elif bought:
         lines.append(f"CARD: paper buy {bought}")
     else:
-        trade_rows = [decisions[name] for name in cfg["products_trade"] if name in decisions]
-        first = trade_rows[0] if trade_rows else next(iter(decisions.values()), {})
-        lines.append("CARD: " + (first.get("reason") or "flat"))
+        lines.append("CARD: " + _card_skip_reason(decisions, cfg.get("products_trade") or []))
     if not bought:
         lines.append("no trade")
     print("\n".join(lines))
     return 0
+
+
+def _card_skip_reason(decisions: dict, products_trade: list | None = None) -> str:
+    """CARD must densify feed-down ahead of an ordinary profit skip.
+
+    A candle TimeoutError on a later product has to beat the first product's
+    flat reason. Otherwise the city hides a dead feed.
+    """
+    data_reasons = []
+    for decision in (decisions or {}).values():
+        if not isinstance(decision, dict):
+            continue
+        reason = str(decision.get("reason") or "").strip()
+        if reason.lower().startswith("data "):
+            data_reasons.append(reason)
+    if data_reasons:
+        return data_reasons[0]
+    for name in products_trade or []:
+        decision = (decisions or {}).get(name)
+        if isinstance(decision, dict) and decision.get("reason"):
+            return str(decision["reason"])
+    first = next(iter((decisions or {}).values()), {}) if decisions else {}
+    if isinstance(first, dict):
+        return str(first.get("reason") or "flat")
+    return "flat"
 
 
 def _record_incubation(desk_root: str, product: str, pnl) -> None:
