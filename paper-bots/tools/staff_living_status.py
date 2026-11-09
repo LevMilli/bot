@@ -1739,6 +1739,7 @@ def main() -> int:
             "eligible-funnel", "insight-ratio", "edge08-compare", "cadence-health",
             "raise-phi-log", "sports-calib", "commodity-calib",
             "baseline-fee", "baseline-capture", "fee-ledger",
+            "half-kelly-crb", "fee-sim",
             "commodity-tstop-status", "commodity-tstop-promote",
             "commodity-tstop-promote-ready",
             "sports-tfinal-status", "sports-tfinal-promote",
@@ -4308,6 +4309,28 @@ def main() -> int:
         )
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("baseline", {}).get("has_baseline") else 2
+    if args.action == "half-kelly-crb":
+        bots = []
+        cfg = None
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+            try:
+                cfg = pimp_desk.load_settings(root)
+            except Exception:
+                cfg = None
+        except Exception:
+            bots = []
+        out = desk_roi_plan.half_kelly_crb_observe(root, bots=bots, cfg=cfg)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "fee-sim":
+        out = desk_roi_plan.fee_sim_observe(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
     if args.action == "fee-ledger":
         bots = []
         try:

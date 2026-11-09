@@ -6822,6 +6822,184 @@ def baseline_fee_observe(
     }
 
 
+# Money-machine plan slice 1 — Thorp/GS CRB observe + RenTech fee sim.
+# Counterfactual only. Never writes kelly_fraction, never LIVE, never softens floors.
+LIVE_KELLY_FRACTION = 0.25
+HALF_KELLY_FRACTION = 0.50
+FEE_CLEAR_CRB_BOTS = ("sports-gap", "btc15m", "commodity-15m")
+
+
+def fee_sim_probe(
+    *,
+    venue: str,
+    fair: float,
+    ask: float,
+    contracts: float = 1.0,
+) -> dict:
+    """Fee-true binary probe: does fair−ask−fee clear the locked venue floor?"""
+    import desk_profit
+
+    venue_key = str(venue or "").strip()
+    floor = float(desk_profit.DEFAULT_VENUE_MIN_EDGE.get(venue_key) or 0.0)
+    p = _finite(fair)
+    a = _finite(ask)
+    n = _finite(contracts) or 1.0
+    if p is None or a is None or not (0.0 < a < 1.0):
+        return {
+            "ok": False,
+            "clear": False,
+            "reason": "need fair + ask in (0,1)",
+            "venue": venue_key,
+            "floor": floor,
+            "paper_only": True,
+            "fee_floors_locked": True,
+        }
+    fee = estimate_kalshi_fee(a, n)
+    fee_per = fee / n if n else fee
+    edge = float(p) - float(a) - float(fee_per)
+    clear = edge + 1e-12 >= floor
+    return {
+        "ok": True,
+        "clear": clear,
+        "venue": venue_key,
+        "fair": round(float(p), 4),
+        "ask": round(float(a), 4),
+        "fee": round(float(fee), 4),
+        "fee_per_contract": round(float(fee_per), 4),
+        "edge_after_fee": round(float(edge), 4),
+        "floor": floor,
+        "contracts": round(float(n), 4),
+        "reason": (
+            "clears floor" if clear else f"edge {edge:.4f} < floor {floor:g}"
+        ),
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+    }
+
+
+def fee_sim_observe(
+    root: str | None = None,
+    *,
+    probes: list | None = None,
+) -> dict:
+    """RenTech-style cost gate: kill strategies that cannot clear floors after fees."""
+    del root  # reserved for future ledger join; probes are pure math today
+    default = probes or [
+        {"venue": "kalshi_sports", "fair": 0.62, "ask": 0.52, "label": "sports_lag_ok"},
+        {"venue": "kalshi_sports", "fair": 0.55, "ask": 0.52, "label": "sports_thin"},
+        {"venue": "kalshi_btc15m", "fair": 0.70, "ask": 0.62, "label": "btc_mid"},
+        {"venue": "kalshi_commodity15m", "fair": 0.68, "ask": 0.60, "label": "cmd_mid"},
+        {"venue": "kalshi_inx", "fair": 0.88, "ask": 0.84, "label": "inx_band"},
+    ]
+    rows = []
+    clears = 0
+    for raw in default:
+        if not isinstance(raw, dict):
+            continue
+        row = fee_sim_probe(
+            venue=str(raw.get("venue") or ""),
+            fair=float(raw.get("fair") or 0),
+            ask=float(raw.get("ask") or 0),
+            contracts=float(raw.get("contracts") or 1),
+        )
+        row["label"] = str(raw.get("label") or row.get("venue") or "")
+        if row.get("clear"):
+            clears += 1
+        rows.append(row)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "ok": True,
+        "n": len(rows),
+        "clears_n": clears,
+        "probes": rows,
+        "label": f"fee_sim clears={clears}/{len(rows)} floors_locked",
+        "note": (
+            "Fee-true probe board — strategies that fail here never get desk cash. "
+            "Does not invent fills. Floors locked."
+        ),
+    }
+
+
+def half_kelly_crb_observe(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+    cfg: dict | None = None,
+) -> dict:
+    """GS CRB + Thorp half-Kelly counterfactual vs live kelly_fraction=0.25.
+
+    Observe only. Does not change live sizing, profit-lock, or venue floors.
+    """
+    import desk_profit
+
+    del root
+    cfg = dict(cfg or {})
+    live_bots = [b for b in (bots or []) if isinstance(b, dict) and not b.get("shadow_only")]
+    desk_open = sum(float(_finite(b.get("open_risk")) or 0.0) for b in live_bots)
+    max_risk = float(_finite(cfg.get("max_open_risk")) or 100.0)
+    remaining = max(0.0, max_risk - desk_open)
+    # Shared probe ticket: fee-clear edge that would size under kelly-lite.
+    probe_p, probe_edge, probe_ask = 0.62, 0.08, 0.52
+    live_cfg = {**cfg, "sizing": "kelly_lite", "kelly_fraction": LIVE_KELLY_FRACTION}
+    half_cfg = {**cfg, "sizing": "kelly_lite", "kelly_fraction": HALF_KELLY_FRACTION}
+    live_stake = desk_profit.kelly_lite_dollars(
+        probe_p, probe_edge, live_cfg, open_risk_used=desk_open, ask=probe_ask,
+    )
+    half_stake = desk_profit.kelly_lite_dollars(
+        probe_p, probe_edge, half_cfg, open_risk_used=desk_open, ask=probe_ask,
+    )
+    by_bot = []
+    for bot_id in FEE_CLEAR_CRB_BOTS:
+        bot = next((b for b in live_bots if str(b.get("id") or "") == bot_id), None)
+        open_risk = float(_finite((bot or {}).get("open_risk")) or 0.0) if bot else 0.0
+        by_bot.append({
+            "bot": bot_id,
+            "open_risk": round(open_risk, 2),
+            "live_kelly_stake": live_stake,
+            "half_kelly_stake": half_stake,
+            "delta_usd": round(float(half_stake) - float(live_stake), 2),
+        })
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "ok": True,
+        "live_kelly_fraction": LIVE_KELLY_FRACTION,
+        "observe_kelly_fraction": HALF_KELLY_FRACTION,
+        "desk_open_risk": round(desk_open, 2),
+        "max_open_risk": round(max_risk, 2),
+        "remaining_open_risk": round(remaining, 2),
+        "probe": {
+            "prob": probe_p,
+            "edge": probe_edge,
+            "ask": probe_ask,
+            "note": "Synthetic fee-clear ticket for CRB contrast only",
+        },
+        "live_kelly_stake": live_stake,
+        "half_kelly_stake": half_stake,
+        "delta_usd": round(float(half_stake) - float(live_stake), 2),
+        "towers": by_bot,
+        "label": (
+            f"half_kelly_crb live={LIVE_KELLY_FRACTION:g} observe={HALF_KELLY_FRACTION:g} "
+            f"Δ=${float(half_stake) - float(live_stake):+.2f} "
+            f"open=${desk_open:.2f}/{max_risk:.0f}"
+        ),
+        "note": (
+            "Counterfactual half-Kelly vs live kelly_fraction=0.25 on fee-clear towers. "
+            "Does not resize live stakes. Floors locked. Never LIVE."
+        ),
+    }
+
+
 def ops_observe(
     root: str | None = None,
     *,
