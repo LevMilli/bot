@@ -140,6 +140,33 @@ class DeskMoreTests(unittest.TestCase):
         # Capacity invent stays OTHER→DATA so real gates stay distinct.
         self.assertEqual(desk_more.classify_skip("max buys this check (0)"), "other")
 
+    def test_learn_v2_portfolio_corr_classify_not_data_invent(self):
+        """Prefer-2: learning_skip + portfolio-corr must not invent DATA (#526 leftover)."""
+        learn_v2 = (
+            "Skipping BTC YES hour=14 CT in 0.8-0.9. "
+            "Fine paper bucket has 2/8 hits under 40% (learn v2)."
+        )
+        learn_coarse = (
+            "Skipping BTC in the 0.8-0.9 probability bucket. "
+            "That paper bucket has 3 hits out of 8 settles, which is under 40%. "
+            "This is only a count of paper settles."
+        )
+        portfolio = (
+            "No commodity paper buy. portfolio corr: already open a energy series "
+            "(max 1 energy + 1 metal)."
+        )
+        self.assertEqual(desk_more.classify_skip(learn_v2), "learning")
+        self.assertEqual(desk_more.classify_skip(learn_coarse), "learning")
+        self.assertEqual(
+            desk_more.stable_skip_code(desk_more.classify_skip(learn_v2)),
+            "LEARN",
+        )
+        self.assertEqual(desk_more.classify_skip(portfolio), "correlation")
+        self.assertEqual(
+            desk_more.stable_skip_code(desk_more.classify_skip(portfolio)),
+            "CORR",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
