@@ -26,6 +26,11 @@ PRE_FOMC_BLOCK_HOUR = 12  # CT — no new INX entries afternoon before FOMC day
 SPX_YAHOO = "^GSPC"
 # Afternoon INX: ~0.5% of spot per √hour until 15:00 CT (conservative).
 INX_SIGMA_FRAC = 0.005
+# Stop-bleed: never collapse σ below 60m of clock — a 15m floor made the
+# 14:20 CT scan invent p≈1 on mildly ITM band asks midday fair refused.
+INX_SIGMA_MIN_MINUTES = 60.0
+# Refuse new Φ entries inside the last hour before 15:00 CT settle.
+MIN_MINUTES_LEFT_FOR_ENTRY = 60.0
 MIN_FAIR_P = 0.80
 MIN_FAIR_Z = 0.60
 _UA = {"User-Agent": "desk-inx-paper/1.0"}
@@ -122,7 +127,7 @@ def minutes_to_inx_settle(
 
 def inx_sigma(spot: float, minutes_left: float) -> float:
     s = float(spot)
-    m = max(float(minutes_left), 15.0)
+    m = max(float(minutes_left), float(INX_SIGMA_MIN_MINUTES))
     return max(s * float(INX_SIGMA_FRAC) * math.sqrt(m / 60.0), 1e-6)
 
 
@@ -177,6 +182,14 @@ def fair_evaluate(
     out["spot"] = px
     minutes_left = minutes_to_inx_settle(now, settle_time_ct=settle_time_ct)
     out["minutes_left"] = round(minutes_left, 2)
+    # Last-hour entries: σ collapse invented edge on the 14:20 scan → asymmetric wipe.
+    if float(minutes_left) + 1e-12 < float(MIN_MINUTES_LEFT_FOR_ENTRY):
+        out["reason"] = (
+            f"inx fair: {minutes_left:.0f}m to settle < "
+            f"{float(MIN_MINUTES_LEFT_FOR_ENTRY):.0f}m entry floor "
+            "(refuse late σ-collapse arm)"
+        )
+        return out
     sigma = inx_sigma(px, minutes_left)
     out["sigma"] = round(sigma, 4)
     z_yes = (px - strike) / sigma
@@ -654,6 +667,14 @@ def self_check() -> None:
         venue_edge=0.02, spot=7500.0, now=now,
     )
     assert thin["ok"] is False
+    # Late σ-collapse arm: 14:45 would invent p≈1 under a 15m floor — refuse.
+    late = fair_evaluate(
+        {"ticker": "T", "side": "yes", "ask": 0.85, "strike": 7450},
+        venue_edge=0.02, spot=7500.0,
+        now=datetime(2026, 11, 10, 14, 45, tzinfo=CT),
+    )
+    assert late["ok"] is False and "entry floor" in (late.get("reason") or "")
+    assert inx_sigma(7500.0, 10.0) >= inx_sigma(7500.0, 60.0) - 1e-9
     # Highest-ask RICH fails fair; VALUE clears — pick_by_fair must choose VALUE.
     board = [
         {"ticker": "RICH", "side": "yes", "ask": 0.90, "strike": 7480},
