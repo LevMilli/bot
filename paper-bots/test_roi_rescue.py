@@ -60,13 +60,15 @@ class RoiRescueTests(unittest.TestCase):
         self.assertTrue(sp.get("staff_clear_drawdown_halt"))
 
     def test_firm_roi_rescue_flags_overnight_board(self):
+        # Force soft-DD still on so board keeps entries_off (ignore live staff clear).
         rescue = desk_master.firm_roi_rescue(
             [
                 {"id": "memecoin", "today": -10.58, "cash": 7.01},
                 {"id": "kalshi-sp", "cash": 444.37, "realized": -55.63},
                 {"id": "sports-gap", "today": -16.25, "cash": 83.75},
                 {"id": "commodity-15m", "today": 0, "cash": 100},
-            ]
+            ],
+            cfg={"staff_clear_drawdown_halt": False},
         )
         bots = {f["bot"] for f in rescue["flags"]}
         self.assertIn("memecoin", bots)
@@ -74,6 +76,26 @@ class RoiRescueTests(unittest.TestCase):
         self.assertIn("sports-gap", bots)
         self.assertNotIn("commodity-15m", bots)
         self.assertTrue(rescue["paper_only"])
+        sp = next(f for f in rescue["flags"] if f["bot"] == "kalshi-sp")
+        self.assertEqual(sp["action"], "entries_off")
+
+    def test_firm_roi_rescue_honors_staff_clear_soft_dd(self):
+        """Staff approval: soft $460 catch-22 cleared; kill/fees/bands stay stone."""
+        rescue = desk_master.firm_roi_rescue(
+            [
+                {"id": "kalshi-sp", "cash": 444.37, "realized": -10.0},
+                {"id": "kalshi-sized", "cash": 444.0},
+            ],
+            cfg={"staff_clear_drawdown_halt": True},
+            root=ROOT,
+        )
+        sp_flags = [f for f in rescue["flags"] if f["bot"] == "kalshi-sp"]
+        self.assertTrue(any(f["action"] == "staff_cleared_soft_dd" for f in sp_flags))
+        self.assertFalse(any(f["action"] == "entries_off" for f in sp_flags))
+        self.assertIn("stone", sp_flags[0]["why"].lower())
+        # Sized twin stays entries_off until its own staff clear lands.
+        sized = next(f for f in rescue["flags"] if f["bot"] == "kalshi-sized")
+        self.assertEqual(sized["action"], "entries_off")
 
     def test_sports_red_rescue_uses_sticky_realized(self):
         # today flat, sticky realized −16.62 → still red-rescue.
