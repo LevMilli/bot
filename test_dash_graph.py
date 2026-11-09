@@ -55,8 +55,10 @@ class DashGraphTests(unittest.TestCase):
         splash = bot.app_splash_jpeg()
         self.assertTrue(splash.startswith(b"\xff\xd8"))
         body = bot.dash_manifest_body()
-        self.assertIn("/icon-512.png?v=5", body)
-        self.assertIn("pb-shell-155", bot.SW_JS)
+        self.assertIn("/pimp-mark-512.png", body)
+        self.assertIn("/pimp-mark-180.png", bot.PWA_HEAD)
+        self.assertIn("pb-shell-156", bot.SW_JS)
+        self.assertIn("/pimp-mark-180.png", bot.DASHBOARD_HTML_V4)
         from PIL import Image, ImageChops, ImageStat
         import io
         icon = Image.open(io.BytesIO(raw)).convert("RGB")
