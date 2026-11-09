@@ -101,6 +101,7 @@ helpers/multi_ex_disagree_digest.json
 helpers/funding_scout_digest.json
 helpers/metals_heat_digest.json
 helpers/energy_heat_digest.json
+helpers/inx_band_occupancy_digest.json
 helpers/calib_nag_digest.json
 helpers/hard_stop_clerk_digest.json
 helpers/near_miss_clerk_digest.json

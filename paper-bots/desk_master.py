@@ -1285,6 +1285,11 @@ def master_summary(
             if isinstance(living, dict)
             else None
         ),
+        "inx_band_occupancy": (
+            (living or {}).get("inx_band_occupancy")
+            if isinstance(living, dict)
+            else None
+        ),
         "skip_historian": (
             (living or {}).get("skip_historian")
             if isinstance(living, dict)

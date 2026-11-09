@@ -1746,6 +1746,7 @@ def main() -> int:
             "nhl-poisson-audit", "dvol-regime",
             "multi-ex-disagree", "funding-scout",
             "metals-heat", "energy-heat",
+            "inx-band-occupancy",
             "commodity-tstop-status", "commodity-tstop-promote",
             "commodity-tstop-promote-ready",
             "sports-tfinal-status", "sports-tfinal-promote",
@@ -4446,6 +4447,11 @@ def main() -> int:
     if args.action == "energy-heat":
         from helpers import energy_heat
         out = energy_heat.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "inx-band-occupancy":
+        from helpers import inx_band_occupancy
+        out = inx_band_occupancy.write_digest_from_desk(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
     if args.action == "fee-ledger":
