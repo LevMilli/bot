@@ -3048,6 +3048,8 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         dv = desk_living.dvol_regime_chip(root)
         mx = desk_living.multi_ex_disagree_chip(root)
         fs = desk_living.funding_scout_chip(root)
+        mh = desk_living.metals_heat_chip(root)
+        eh = desk_living.energy_heat_chip(root)
         desk_row["injury_wire"] = iw
         desk_row["eia_scout"] = es
         desk_row["line_shopper"] = ls
@@ -3056,6 +3058,8 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["dvol_regime"] = dv
         desk_row["multi_ex_disagree"] = mx
         desk_row["funding_scout"] = fs
+        desk_row["metals_heat"] = mh
+        desk_row["energy_heat"] = eh
         if isinstance(desk_row.get("master"), dict):
             desk_row["master"]["injury_wire"] = desk_row["master"].get("injury_wire") or iw
             desk_row["master"]["eia_scout"] = desk_row["master"].get("eia_scout") or es
@@ -3073,6 +3077,8 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
             desk_row["master"]["funding_scout"] = (
                 desk_row["master"].get("funding_scout") or fs
             )
+            desk_row["master"]["metals_heat"] = desk_row["master"].get("metals_heat") or mh
+            desk_row["master"]["energy_heat"] = desk_row["master"].get("energy_heat") or eh
     except Exception as exc:  # noqa: BLE001
         desk_row["injury_wire"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["eia_scout"] = {"paper_only": True, "error": type(exc).__name__}
@@ -3082,6 +3088,8 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["dvol_regime"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["multi_ex_disagree"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["funding_scout"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["metals_heat"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["energy_heat"] = {"paper_only": True, "error": type(exc).__name__}
     try:
         import desk_living
         sh = desk_living.skip_historian_chip(root)

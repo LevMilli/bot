@@ -1275,6 +1275,16 @@ def master_summary(
             if isinstance(living, dict)
             else None
         ),
+        "metals_heat": (
+            (living or {}).get("metals_heat")
+            if isinstance(living, dict)
+            else None
+        ),
+        "energy_heat": (
+            (living or {}).get("energy_heat")
+            if isinstance(living, dict)
+            else None
+        ),
         "skip_historian": (
             (living or {}).get("skip_historian")
             if isinstance(living, dict)

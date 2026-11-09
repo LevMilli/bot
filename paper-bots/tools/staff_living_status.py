@@ -1745,6 +1745,7 @@ def main() -> int:
             "poly-arb-harvest", "line-shopper", "btc-basis-scout",
             "nhl-poisson-audit", "dvol-regime",
             "multi-ex-disagree", "funding-scout",
+            "metals-heat", "energy-heat",
             "commodity-tstop-status", "commodity-tstop-promote",
             "commodity-tstop-promote-ready",
             "sports-tfinal-status", "sports-tfinal-promote",
@@ -4435,6 +4436,16 @@ def main() -> int:
     if args.action == "funding-scout":
         from helpers import funding_scout
         out = funding_scout.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "metals-heat":
+        from helpers import metals_heat
+        out = metals_heat.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "energy-heat":
+        from helpers import energy_heat
+        out = energy_heat.write_digest_from_desk(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
     if args.action == "fee-ledger":

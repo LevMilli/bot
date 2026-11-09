@@ -41,6 +41,8 @@ INSIGHT_HELPER_DIGESTS = (
     "dvol_regime_digest.json",
     "multi_ex_disagree_digest.json",
     "funding_scout_digest.json",
+    "metals_heat_digest.json",
+    "energy_heat_digest.json",
     "calib_nag_digest.json",
     "hard_stop_clerk_digest.json",
     "near_miss_clerk_digest.json",
@@ -2290,6 +2292,66 @@ def funding_scout_chip(root: str | None = None) -> dict:
     }
 
 
+def metals_heat_chip(root: str | None = None) -> dict:
+    """Metals 15m heat chip (vol prior + |z|)."""
+    digest: dict = {}
+    try:
+        from helpers import metals_heat
+        path = metals_heat.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("helper") is None:
+            digest = metals_heat.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "hottest": digest.get("hottest"),
+        "hottest_heat": digest.get("hottest_heat"),
+        "n": digest.get("n"),
+        "label": (
+            f"metals heat hottest={digest.get('hottest')} "
+            f"score={digest.get('hottest_heat')} n={digest.get('n')}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only metals heat — never softens commodity 0.05."
+        ),
+    }
+
+
+def energy_heat_chip(root: str | None = None) -> dict:
+    """Energy 15m heat chip (vol prior + |z| + EIA/roll)."""
+    digest: dict = {}
+    try:
+        from helpers import energy_heat
+        path = energy_heat.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("helper") is None:
+            digest = energy_heat.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "hottest": digest.get("hottest"),
+        "hottest_heat": digest.get("hottest_heat"),
+        "n": digest.get("n"),
+        "label": (
+            f"energy heat hottest={digest.get('hottest')} "
+            f"score={digest.get('hottest_heat')} n={digest.get('n')}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only energy heat — never softens commodity 0.05."
+        ),
+    }
+
+
 def tip_radar_chip(root: str | None = None) -> dict:
     """T-5 / T-15 / T-180 tip windows chip from tip_radar digest / quote cache."""
     digest = {}
@@ -2811,6 +2873,8 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "dvol_regime": dvol_regime_chip(root),
         "multi_ex_disagree": multi_ex_disagree_chip(root),
         "funding_scout": funding_scout_chip(root),
+        "metals_heat": metals_heat_chip(root),
+        "energy_heat": energy_heat_chip(root),
         "skip_historian": skip_historian_chip(root),
         "distance_clerk": distance_clerk_chip(root),
         "quant_clerk": quant_clerk_chip(root),
@@ -3173,7 +3237,7 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         "living_ai", "skip_taxonomy", "empty_card", "helper_gate_a", "skip_regret",
         "tip_radar", "calib_nag", "injury_wire", "eia_scout",
         "line_shopper", "btc_basis_scout", "nhl_poisson_audit", "dvol_regime",
-        "multi_ex_disagree", "funding_scout",
+        "multi_ex_disagree", "funding_scout", "metals_heat", "energy_heat",
         "distance_clerk",
         "quant_clerk", "bookkeeper", "empty_card_bee", "near_miss", "near_miss_clerk",
         "hard_stop", "hard_stop_clerk", "skip_twin_clerk", "timer_digest",
