@@ -97,6 +97,8 @@ helpers/line_shopper_digest.json
 helpers/btc_basis_scout_digest.json
 helpers/nhl_poisson_audit_digest.json
 helpers/dvol_regime_digest.json
+helpers/multi_ex_disagree_digest.json
+helpers/funding_scout_digest.json
 helpers/calib_nag_digest.json
 helpers/hard_stop_clerk_digest.json
 helpers/near_miss_clerk_digest.json

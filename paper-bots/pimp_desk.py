@@ -3046,12 +3046,16 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         bs = desk_living.btc_basis_scout_chip(root)
         nhl = desk_living.nhl_poisson_audit_chip(root)
         dv = desk_living.dvol_regime_chip(root)
+        mx = desk_living.multi_ex_disagree_chip(root)
+        fs = desk_living.funding_scout_chip(root)
         desk_row["injury_wire"] = iw
         desk_row["eia_scout"] = es
         desk_row["line_shopper"] = ls
         desk_row["btc_basis_scout"] = bs
         desk_row["nhl_poisson_audit"] = nhl
         desk_row["dvol_regime"] = dv
+        desk_row["multi_ex_disagree"] = mx
+        desk_row["funding_scout"] = fs
         if isinstance(desk_row.get("master"), dict):
             desk_row["master"]["injury_wire"] = desk_row["master"].get("injury_wire") or iw
             desk_row["master"]["eia_scout"] = desk_row["master"].get("eia_scout") or es
@@ -3063,6 +3067,12 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
                 desk_row["master"].get("nhl_poisson_audit") or nhl
             )
             desk_row["master"]["dvol_regime"] = desk_row["master"].get("dvol_regime") or dv
+            desk_row["master"]["multi_ex_disagree"] = (
+                desk_row["master"].get("multi_ex_disagree") or mx
+            )
+            desk_row["master"]["funding_scout"] = (
+                desk_row["master"].get("funding_scout") or fs
+            )
     except Exception as exc:  # noqa: BLE001
         desk_row["injury_wire"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["eia_scout"] = {"paper_only": True, "error": type(exc).__name__}
@@ -3070,6 +3080,8 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["btc_basis_scout"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["nhl_poisson_audit"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["dvol_regime"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["multi_ex_disagree"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["funding_scout"] = {"paper_only": True, "error": type(exc).__name__}
     try:
         import desk_living
         sh = desk_living.skip_historian_chip(root)

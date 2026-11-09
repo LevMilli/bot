@@ -1265,6 +1265,16 @@ def master_summary(
             if isinstance(living, dict)
             else None
         ),
+        "multi_ex_disagree": (
+            (living or {}).get("multi_ex_disagree")
+            if isinstance(living, dict)
+            else None
+        ),
+        "funding_scout": (
+            (living or {}).get("funding_scout")
+            if isinstance(living, dict)
+            else None
+        ),
         "skip_historian": (
             (living or {}).get("skip_historian")
             if isinstance(living, dict)

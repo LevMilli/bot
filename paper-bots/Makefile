@@ -529,7 +529,7 @@ living-baseline-capture:
 living-fee-ledger:
 	python3 tools/staff_living_status.py fee-ledger
 
-.PHONY: living-half-kelly-crb living-fee-sim living-dutch-book living-sharp-lag-harvest living-fed-watch-harvest living-poly-arb living-poly-arb-harvest living-cpi-nowcast living-vol-curve living-vol-curve-harvest living-funding-twins living-macro-harvest living-line-shopper living-btc-basis-scout living-nhl-poisson-audit living-dvol-regime
+.PHONY: living-half-kelly-crb living-fee-sim living-dutch-book living-sharp-lag-harvest living-fed-watch-harvest living-poly-arb living-poly-arb-harvest living-cpi-nowcast living-vol-curve living-vol-curve-harvest living-funding-twins living-macro-harvest living-line-shopper living-btc-basis-scout living-nhl-poisson-audit living-dvol-regime living-multi-ex-disagree living-funding-scout
 living-half-kelly-crb:
 	python3 tools/staff_living_status.py half-kelly-crb
 
@@ -577,6 +577,12 @@ living-nhl-poisson-audit:
 
 living-dvol-regime:
 	python3 tools/staff_living_status.py dvol-regime
+
+living-multi-ex-disagree:
+	python3 tools/staff_living_status.py multi-ex-disagree
+
+living-funding-scout:
+	python3 tools/staff_living_status.py funding-scout
 
 living-commodity-tstop-status:
 	python3 tools/staff_living_status.py commodity-tstop-status

@@ -39,6 +39,8 @@ INSIGHT_HELPER_DIGESTS = (
     "btc_basis_scout_digest.json",
     "nhl_poisson_audit_digest.json",
     "dvol_regime_digest.json",
+    "multi_ex_disagree_digest.json",
+    "funding_scout_digest.json",
     "calib_nag_digest.json",
     "hard_stop_clerk_digest.json",
     "near_miss_clerk_digest.json",
@@ -2227,6 +2229,67 @@ def dvol_regime_chip(root: str | None = None) -> dict:
     }
 
 
+def multi_ex_disagree_chip(root: str | None = None) -> dict:
+    """BTC multi-exchange spot disagree chip (observe-only)."""
+    digest: dict = {}
+    try:
+        from helpers import multi_ex_disagree
+        path = multi_ex_disagree.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("helper") is None:
+            digest = multi_ex_disagree.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "present_n": digest.get("present_n"),
+        "range_bps": digest.get("range_bps"),
+        "alert": digest.get("alert"),
+        "label": (
+            f"multi-ex n={digest.get('present_n')} range_bps={digest.get('range_bps')} "
+            f"alert={bool(digest.get('alert'))}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only BTC multi-ex disagree — never invent missing venues."
+        ),
+    }
+
+
+def funding_scout_chip(root: str | None = None) -> dict:
+    """BTC perpetual funding scout chip — observe only; no desk cash."""
+    digest: dict = {}
+    try:
+        from helpers import funding_scout
+        path = funding_scout.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("helper") is None:
+            digest = funding_scout.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "opens_desk_cash": False,
+        "funding_8h": digest.get("funding_8h"),
+        "current_funding": digest.get("current_funding"),
+        "hot": digest.get("hot"),
+        "label": (
+            f"funding scout 8h={digest.get('funding_8h')} "
+            f"cur={digest.get('current_funding')} hot={bool(digest.get('hot'))}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only funding scout — never LIVE."
+        ),
+    }
+
+
 def tip_radar_chip(root: str | None = None) -> dict:
     """T-5 / T-15 / T-180 tip windows chip from tip_radar digest / quote cache."""
     digest = {}
@@ -2746,6 +2809,8 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "btc_basis_scout": btc_basis_scout_chip(root),
         "nhl_poisson_audit": nhl_poisson_audit_chip(root),
         "dvol_regime": dvol_regime_chip(root),
+        "multi_ex_disagree": multi_ex_disagree_chip(root),
+        "funding_scout": funding_scout_chip(root),
         "skip_historian": skip_historian_chip(root),
         "distance_clerk": distance_clerk_chip(root),
         "quant_clerk": quant_clerk_chip(root),
@@ -3108,6 +3173,7 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         "living_ai", "skip_taxonomy", "empty_card", "helper_gate_a", "skip_regret",
         "tip_radar", "calib_nag", "injury_wire", "eia_scout",
         "line_shopper", "btc_basis_scout", "nhl_poisson_audit", "dvol_regime",
+        "multi_ex_disagree", "funding_scout",
         "distance_clerk",
         "quant_clerk", "bookkeeper", "empty_card_bee", "near_miss", "near_miss_clerk",
         "hard_stop", "hard_stop_clerk", "skip_twin_clerk", "timer_digest",

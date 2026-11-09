@@ -1744,6 +1744,7 @@ def main() -> int:
             "vol-curve-harvest", "funding-twins", "macro-harvest",
             "poly-arb-harvest", "line-shopper", "btc-basis-scout",
             "nhl-poisson-audit", "dvol-regime",
+            "multi-ex-disagree", "funding-scout",
             "commodity-tstop-status", "commodity-tstop-promote",
             "commodity-tstop-promote-ready",
             "sports-tfinal-status", "sports-tfinal-promote",
@@ -4424,6 +4425,16 @@ def main() -> int:
     if args.action == "dvol-regime":
         from helpers import dvol_regime
         out = dvol_regime.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "multi-ex-disagree":
+        from helpers import multi_ex_disagree
+        out = multi_ex_disagree.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "funding-scout":
+        from helpers import funding_scout
+        out = funding_scout.write_digest_from_desk(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
     if args.action == "fee-ledger":
