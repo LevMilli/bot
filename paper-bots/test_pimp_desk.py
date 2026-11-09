@@ -1328,6 +1328,103 @@ class PimpDeskTests(unittest.TestCase):
         self.assertIn("Settle smoke: empty book", why)
         self.assertFalse(why.lower().startswith("no open paper"))
 
+    def test_finish_bot_inx_in_scan_prefers_skip_over_settle_smoke(self):
+        """In-window sized tip must keep densified NO TRADE, not settle boilerplate."""
+        from unittest import mock
+
+        spec = {
+            "id": "kalshi-sized",
+            "name": "Sized Kalshi",
+            "kind": "kalshi",
+            "folder": "kalshi-sized-paper",
+            "state": "paper_state.json",
+            "log": "",
+            "empty": "empty",
+        }
+        view = {
+            "id": "kalshi-sized",
+            "present": True,
+            "has_state": True,
+            "open_count": 0,
+            "positions": [],
+            "trades": [],
+            "history": [],
+            "cash": 500.0,
+            "realized": 0.0,
+            "today": 0.0,
+            "why": "No open paper positions.",
+            "skip": "inx fair: 45m to settle < 60m entry floor (refuse late σ-collapse arm)",
+            "paused": False,
+            "read_error": "",
+            "central_check": "2:14 PM",
+            "last_check": "2:14 PM",
+            "last_run": {"ok": True, "summary": "No open paper positions.", "action": "settle"},
+        }
+        with mock.patch.object(
+            pimp_desk, "next_inx_scan_line",
+            return_value="In scan window until 14:55 CT.",
+        ):
+            out = pimp_desk._finish_bot(view, spec, ".")
+        why = (out.get("why") or "").lower()
+        self.assertIn("60m entry floor", why)
+        self.assertNotIn("settle smoke", why)
+
+    def test_inx_settle_keeps_scan_tip_in_run_window(self):
+        """Empty settle during sized scan window must not wipe densified CARD."""
+        from unittest import mock
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            prior = (
+                "NO TRADE 2026-11-09: inx fair: 45m to settle < 60m entry floor "
+                "(refuse late σ-collapse arm)\n"
+                "CARD: inx fair: 45m to settle < 60m entry floor "
+                "(refuse late σ-collapse arm)"
+            )
+            pimp_desk._save_run(tmp, "kalshi-sized", {
+                "at": "2026-11-09 20:00:00 UTC",
+                "ok": True,
+                "summary": prior,
+                "action": "run",
+            })
+
+            def fake_popen(*_a, **_k):
+                class Proc:
+                    returncode = 0
+
+                    def communicate(self, timeout=None):
+                        return ("No open paper positions.\n", None)
+
+                    def kill(self):
+                        return None
+                return Proc()
+
+            with mock.patch.object(pimp_desk, "inx_in_run_window", return_value=True), \
+                 mock.patch.object(pimp_desk.subprocess, "Popen", side_effect=fake_popen), \
+                 mock.patch.object(pimp_desk, "keep_closed_settlements"), \
+                 mock.patch.object(pimp_desk, "ensure_paper_accounts"), \
+                 mock.patch.object(pimp_desk, "_folder_ok", return_value=True), \
+                 mock.patch.object(pimp_desk, "_paper_ok", return_value=""), \
+                 mock.patch.object(pimp_desk, "_kalshi_paper", return_value=True), \
+                 mock.patch.object(pimp_desk, "_note_state_mtime"), \
+                 mock.patch.object(pimp_desk, "_lock") as lock_m:
+                lock = mock.Mock()
+                lock.acquire.return_value = True
+                lock_m.return_value = lock
+                # Need real folder layout for script path check — stub argv via ACTIONS.
+                sized_dir = os.path.join(tmp, "kalshi-sized-paper")
+                os.makedirs(sized_dir, exist_ok=True)
+                with open(os.path.join(sized_dir, "bot.py"), "w", encoding="utf-8") as fh:
+                    fh.write("print('hi')\n")
+                with open(os.path.join(sized_dir, "config.json"), "w", encoding="utf-8") as fh:
+                    fh.write('{"paper_mode": true}\n')
+                out = pimp_desk.run_bot("kalshi-sized", "settle", tmp)
+            self.assertTrue(out.get("kept_scan_tip"))
+            self.assertIn("60m entry floor", out.get("summary") or "")
+            saved = pimp_desk._load_runs(tmp).get("kalshi-sized") or {}
+            self.assertIn("60m entry floor", saved.get("summary") or "")
+            self.assertEqual(saved.get("action"), "run")
+
     def test_card_copy_is_plain_and_accounts_keep_cash(self):
         raw = (
             "No news calendar on this bot.\n"
