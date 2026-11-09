@@ -475,11 +475,16 @@ def settle_account(state: dict) -> None:
         payout = float(pos.get("contracts") or 0) * (1.0 if won else 0.0)
         pnl = round(payout - float(pos.get("cost") or 0), 2)
         state["cash"] = round(float(state.get("cash") or 0) + payout, 2)
+        # Honest binary settle mark — catchup densify reads exit_price|exit_bid|mark_bid
+        # only (never entry companion bid). Losers with exit_price=0 can recover
+        # time-stop shadow when settle-retro market bid fields are missing; winners
+        # with exit_price=1 stay non-hits (mark PnL > 0 / wipe invent guard).
         pos.update({
             "closed": now.strftime("%Y-%m-%d %H:%M:%S UTC"),
             "pnl": pnl,
             "payout": round(payout, 2),
             "exit": "settled",
+            "exit_price": 1.0 if won else 0.0,
         })
         state.setdefault("closed", []).append(pos)
         try:

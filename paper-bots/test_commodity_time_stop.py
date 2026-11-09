@@ -304,8 +304,10 @@ class CommodityTimeStop(unittest.TestCase):
                 "exit": "settled",
                 "closed": "2026-11-08 12:15:02 UTC",
             }
-            # Loser settle without exit_price — settle-retro live path densifies;
-            # catchup must not invent from entry companion.
+            # Legacy loser settle without exit_price (pre-stamp accounts) —
+            # settle-retro live path densifies; catchup must not invent from
+            # entry companion bid. New settles stamp exit_price=0|1 (see
+            # test_settle_stamps_binary_exit_price_for_catchup).
             loser_bid_only = {
                 "ticker": "KXWTI-LOSE-BID",
                 "side": "YES",
@@ -354,6 +356,67 @@ class CommodityTimeStop(unittest.TestCase):
             self.assertEqual(rows[0].get("ticker"), "KXWTI-FLIP-EXIT")
             note = str(out.get("note") or "")
             self.assertIn("never entry companion bid", note)
+
+    def test_settle_stamps_binary_exit_price_for_catchup(self):
+        """Settle stamps exit_price 0|1 so catchup densifies losers without invent."""
+        bot_src = os.path.join(HERE, "commodity-15m-paper", "bot.py")
+        with open(bot_src, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertIn('"exit_price": 1.0 if won else 0.0', text)
+        with tempfile.TemporaryDirectory() as tmp:
+            cmd_dir = os.path.join(tmp, "commodity-15m-paper")
+            os.makedirs(cmd_dir, exist_ok=True)
+            close_iso = "2026-11-08T12:15:00Z"
+            # Winner binary mark — catchup must not invent t-stop (pnl≥0).
+            winner = {
+                "ticker": "KXWTI-WIN-EXIT1",
+                "side": "YES",
+                "series": "KXWTI15M",
+                "close_time": close_iso,
+                "entry": 0.60,
+                "ask": 0.60,
+                "bid": 0.40,  # entry companion — ignored when exit_price present
+                "exit_price": 1.0,
+                "cost": 6.0,
+                "contracts": 10,
+                "pnl": 4.0,
+                "exit": "settled",
+                "closed": "2026-11-08 12:15:02 UTC",
+            }
+            # Loser binary mark — honest settle exit densifies via catchup.
+            loser = {
+                "ticker": "KXWTI-LOSE-EXIT0",
+                "side": "YES",
+                "series": "KXWTI15M",
+                "close_time": close_iso,
+                "entry": 0.60,
+                "ask": 0.60,
+                "bid": 0.55,
+                "exit_price": 0.0,
+                "cost": 6.0,
+                "contracts": 10,
+                "pnl": -6.0,
+                "exit": "settled",
+                "closed": "2026-11-08 12:15:02 UTC",
+            }
+            with open(os.path.join(cmd_dir, "paper_account.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "cash": 98.0,
+                    "open": [],
+                    "closed": [winner, loser],
+                    "paper_only": True,
+                }, fh)
+            out = desk_roi_plan.backfill_commodity_time_stop_from_closed(tmp)
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out["recorded"], 1, out)
+            summ = desk_roi_plan.commodity_time_stop_shadow_summary(tmp)
+            self.assertEqual(summ["n"], 1)
+            rows = desk_roi_plan._load(
+                desk_roi_plan._path(desk_roi_plan.COMMODITY_TIME_STOP_SHADOW, tmp),
+                {"rows": []},
+            ).get("rows") or []
+            self.assertEqual(rows[0].get("ticker"), "KXWTI-LOSE-EXIT0")
+            self.assertAlmostEqual(float(rows[0].get("bid")), 0.0)
 
     def test_bot_densify_before_model_flip(self):
         bot_src = os.path.join(HERE, "commodity-15m-paper", "bot.py")
