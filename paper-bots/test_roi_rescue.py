@@ -31,11 +31,21 @@ class RoiRescueTests(unittest.TestCase):
         from datetime import date
 
         day = date(2026, 10, 27)  # non-skip weekday in calendar.json
-        ok, why = mod.check_can_trade(day, 444.37, 0, 0)
+        dd_on = dict(mod.CFG)
+        dd_on["staff_clear_drawdown_halt"] = False
+        ok, why = mod.check_can_trade(day, 444.37, 0, 0, cfg=dd_on)
         self.assertFalse(ok)
         self.assertIn("drawdown", why.lower())
-        ok2, _ = mod.check_can_trade(day, 500.0, 0, 0)
+        ok2, _ = mod.check_can_trade(day, 500.0, 0, 0, cfg=dd_on)
         self.assertTrue(ok2)
+        # Staff clear resumes buys under the soft bar; kill switch stays stone.
+        dd_clear = dict(mod.CFG)
+        dd_clear["staff_clear_drawdown_halt"] = True
+        ok3, _ = mod.check_can_trade(day, 444.37, 0, 0, cfg=dd_clear)
+        self.assertTrue(ok3)
+        ok_kill, why_kill = mod.check_can_trade(day, 399.0, 0, 0, cfg=dd_clear)
+        self.assertFalse(ok_kill)
+        self.assertIn("kill", why_kill.lower())
 
     def test_inx_configs_rescue_limits(self):
         for folder in ("kalshi-sp500-paper", "kalshi-sized-paper"):
@@ -44,6 +54,10 @@ class RoiRescueTests(unittest.TestCase):
             self.assertEqual(cfg["max_trades_per_day"], 1)
             self.assertEqual(cfg["daily_loss_limit"], 25.0)
             self.assertEqual(cfg["drawdown_halt_bankroll"], 460.0)
+            self.assertEqual(cfg["kill_switch_bankroll"], 400.0)
+        with open(os.path.join(ROOT, "kalshi-sp500-paper", "config.json"), encoding="utf-8") as handle:
+            sp = json.load(handle)
+        self.assertTrue(sp.get("staff_clear_drawdown_halt"))
 
     def test_firm_roi_rescue_flags_overnight_board(self):
         rescue = desk_master.firm_roi_rescue(

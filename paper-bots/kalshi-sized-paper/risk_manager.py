@@ -62,7 +62,12 @@ def check_can_trade(day, bankroll, trades_today, realised_pnl_today, cfg=CFG, ig
             "Halted for human review."
         )
     dd_halt = cfg.get("drawdown_halt_bankroll")
-    if dd_halt is not None and float(bankroll) <= float(dd_halt) + 1e-9:
+    staff_clear_dd = bool(cfg.get("staff_clear_drawdown_halt"))
+    if (
+        dd_halt is not None
+        and not staff_clear_dd
+        and float(bankroll) <= float(dd_halt) + 1e-9
+    ):
         return False, (
             f"tower drawdown halt: bankroll ${float(bankroll):.2f} <= "
             f"${float(dd_halt):.2f} (start ${float(cfg.get('starting_bankroll') or 0):.0f})"

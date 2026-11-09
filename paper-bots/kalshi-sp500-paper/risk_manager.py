@@ -68,8 +68,14 @@ def check_can_trade(day, bankroll, trades_today, realised_pnl_today, cfg=CFG, ig
     if bankroll <= cfg["kill_switch_bankroll"]:
         return False, f"KILL SWITCH: bankroll ${bankroll:.2f} <= ${cfg['kill_switch_bankroll']:.2f}. Halted for human review."
     # ROI rescue: halt new entries after ~8% bankroll drawdown (exits/settles still run elsewhere).
+    # Staff may clear the soft DD halt (catch-22 under the bar) without touching kill/fees/bands.
     dd_halt = cfg.get("drawdown_halt_bankroll")
-    if dd_halt is not None and float(bankroll) <= float(dd_halt) + 1e-9:
+    staff_clear_dd = bool(cfg.get("staff_clear_drawdown_halt"))
+    if (
+        dd_halt is not None
+        and not staff_clear_dd
+        and float(bankroll) <= float(dd_halt) + 1e-9
+    ):
         return False, (
             f"tower drawdown halt: bankroll ${float(bankroll):.2f} <= "
             f"${float(dd_halt):.2f} (start ${float(cfg.get('starting_bankroll') or 0):.0f})"
@@ -100,5 +106,11 @@ if __name__ == "__main__":
     assert check_can_trade(dt.date(2026, 10, 27), 500, 0, -50)[0] is False
     assert check_can_trade(dt.date(2026, 10, 27), 500, 0, -25)[0] is False
     assert check_can_trade(dt.date(2026, 10, 27), 500, 0, 0)[0] is True
-    assert check_can_trade(dt.date(2026, 10, 27), 444.0, 0, 0)[0] is False  # drawdown halt
+    dd_on = dict(CFG)
+    dd_on["staff_clear_drawdown_halt"] = False
+    assert check_can_trade(dt.date(2026, 10, 27), 444.0, 0, 0, cfg=dd_on)[0] is False
+    dd_clear = dict(CFG)
+    dd_clear["staff_clear_drawdown_halt"] = True
+    assert check_can_trade(dt.date(2026, 10, 27), 444.0, 0, 0, cfg=dd_clear)[0] is True
+    assert check_can_trade(dt.date(2026, 10, 27), 399.0, 0, 0, cfg=dd_clear)[0] is False  # kill still stone
     print("risk_manager self-test OK; Oct 28 2026 ->", news_skip_reason(dt.date(2026, 10, 28)))
