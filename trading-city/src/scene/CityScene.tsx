@@ -16,7 +16,7 @@ import { CityOrbitCamera } from './CityControls'
 import { BorderScreens } from './BorderScreens'
 
 /** Trade towers sit inside the rail loop — well clear of ballast. */
-export const RING_R = 7.15
+export const RING_R = 8.35
 /** Matches <Vault position={[0,0,5.2]} /> pad (~3.45r) plus building half-width. */
 export const VAULT_XZ = { x: 0, z: 5.2 }
 export const VAULT_CLEAR_R = 4.55
@@ -29,7 +29,7 @@ const TRADE_LINK_R = 3.2
 /** Drop this fraction of unlinked fillers. */
 const UNLINKED_DROP = 0.55
 /** Minimum footprint separation between any two buildings. */
-const BUILDING_GAP = 2.35
+const BUILDING_GAP = 2.7
 
 type Props = {
   bots: BotRow[]
@@ -137,26 +137,45 @@ export function layoutCity(bots: BotRow[]): { slots: CitySlot[]; fillers: Filler
     const a = -Math.PI / 2 + (i / n) * Math.PI * 2 + 0.18
     let x = Math.cos(a) * RING_R
     let z = Math.sin(a) * RING_R - 0.4
-    const halfW = 1.05
-    // Extra vault clearance for BTC, then clamp so it can't ride the tracks.
+    const halfW = 1.3
     const vaultMin =
       bot.id === 'btc15m' || /btc/i.test(bot.name || '') ? TOWER_VAULT_MIN + 0.85 : TOWER_VAULT_MIN
     ;[x, z] = clearFromVault(x, z, vaultMin)
     ;[x, z] = settleFootprint(x, z, halfW)
-
-    // Separate from already-placed trade towers.
-    for (let t = 0; t < 5; t++) {
-      if (!overlapsAny(x, z, halfW, placed)) break
-      const bump = 0.55 + t * 0.35
-      const d = Math.hypot(x, z + 1) || 1
-      x = (x / d) * Math.min(d + bump, TOWER_RAIL_MAX)
-      z = -1 + ((z + 1) / d) * Math.min(d + bump, TOWER_RAIL_MAX)
-      ;[x, z] = settleFootprint(x, z, halfW)
-    }
-
-    placed.push({ x, z, halfW })
-    return { bot, index: i, position: [x, 0, z] as [number, number, number] }
+    const slot = { bot, index: i, x, z, halfW }
+    placed.push(slot)
+    return slot
   })
+
+  // Vault clearance slides the front towers sideways. Push every pair apart,
+  // then settle, so Memecoin and Sized Kalshi cannot share a pad.
+  for (let pass = 0; pass < 28; pass++) {
+    for (let i = 0; i < placed.length; i++) {
+      for (let j = i + 1; j < placed.length; j++) {
+        const a = placed[i]
+        const b = placed[j]
+        const dx = a.x - b.x
+        const dz = a.z - b.z
+        const dist = Math.hypot(dx, dz) || 0.001
+        const min = BUILDING_GAP + a.halfW + b.halfW
+        if (dist >= min) continue
+        const push = (min - dist) / 2
+        a.x += (dx / dist) * push
+        a.z += (dz / dist) * push
+        b.x -= (dx / dist) * push
+        b.z -= (dz / dist) * push
+      }
+    }
+    for (const slot of placed) {
+      ;[slot.x, slot.z] = settleFootprint(slot.x, slot.z, slot.halfW)
+    }
+  }
+
+  const tradeSlots = slots.map((slot) => ({
+    bot: slot.bot,
+    index: slot.index,
+    position: [slot.x, 0, slot.z] as [number, number, number],
+  }))
 
   const candidates: FillerSlot[] = []
 
@@ -214,13 +233,13 @@ export function layoutCity(bots: BotRow[]): { slots: CitySlot[]; fillers: Filler
   const unlinked: FillerSlot[] = []
   for (const f of candidates) {
     const [x, , z] = f.position
-    if (nearTrade(x, z, slots)) linked.push(f)
+    if (nearTrade(x, z, tradeSlots)) linked.push(f)
     else unlinked.push(f)
   }
 
   const keepUnlinked = unlinked.filter((_, i) => rand(i + 77) > UNLINKED_DROP)
 
-  return { slots, fillers: [...linked, ...keepUnlinked] }
+  return { slots: tradeSlots, fillers: [...linked, ...keepUnlinked] }
 }
 
 export function CityScene({ bots, desk, selectedId, onSelect, onOpenVault }: Props) {

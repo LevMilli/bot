@@ -176,7 +176,7 @@ export function Tower({ bot, index, position, selected, onSelect, vista = false 
           <meshBasicMaterial color={color} transparent opacity={offline ? 0.18 : 1} depthWrite={false} toneMapped={false} />
         </mesh>
         <mesh position={[0, hero ? 6.4 : 5.6, 0]}>
-          <cylinderGeometry args={[hero ? 0.16 : 0.11, hero ? 0.22 : 0.17, hero ? 12.8 : 11.2, 12]} />
+          <cylinderGeometry args={[hero ? 0.09 : 0.06, hero ? 0.12 : 0.09, hero ? 12.8 : 11.2, 12]} />
           <meshBasicMaterial color="#ffffff" transparent opacity={offline ? 0.14 : 1} depthWrite={false} toneMapped={false} />
         </mesh>
         <mesh position={[0, hero ? 6.4 : 5.6, 0]}>

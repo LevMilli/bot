@@ -4,7 +4,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import type { PerspectiveCamera as Cam } from 'three'
 import * as THREE from 'three'
 
-const LOOK = new THREE.Vector3(0, 0.4, -0.5)
+const LOOK = new THREE.Vector3(0, 7.2, -0.5)
 /** Close enough to read a tower face, far enough to see the wall charts and tower tops. */
 const MIN_DIST = 3.5
 const MAX_DIST = 64
@@ -38,9 +38,10 @@ export function CityOrbitCamera() {
 
   const state = useRef({
     theta: Math.PI / 4,
-    phi: 1.2,
-    dist: 20,
-    targetDist: 20,
+    phi: 1.16,
+    dist: 40,
+    targetDist: 40,
+    targetPhi: 1.16,
     /** Active pointers (mouse + touch share Pointer Events). */
     pointers: new Map<number, Ptr>(),
     /** One-finger / mouse orbit */
@@ -52,7 +53,8 @@ export function CityOrbitCamera() {
     /** Two-finger pinch */
     pinching: false,
     pinchStartSpan: 0,
-    pinchStartDist: 20,
+    pinchStartDist: 40,
+    framing: false,
     /** Ignore tiny moves so a tap still selects towers. */
     moved: false,
   })
@@ -138,6 +140,8 @@ export function CityOrbitCamera() {
       const dPhi = -dy * 0.0045
       st.theta += dTheta
       st.phi = clamp(st.phi + dPhi, MIN_PHI, MAX_PHI)
+      st.targetPhi = st.phi
+      st.framing = false
       st.velTheta = dTheta
       st.velPhi = dPhi
     }
@@ -167,11 +171,20 @@ export function CityOrbitCamera() {
       e.preventDefault()
       const st = s()
       st.targetDist = clamp(st.targetDist + e.deltaY * 0.05, MIN_DIST, MAX_DIST)
+      st.framing = false
     }
 
     // Block browser page-zoom / scroll gestures on the canvas.
     const onGesture = (e: Event) => e.preventDefault()
 
+    const onFrame = () => {
+      const st = s()
+      st.targetDist = 58
+      st.targetPhi = 1.32
+      st.framing = true
+      st.velPhi = 0
+      st.velTheta = 0
+    }
     el.addEventListener('pointerdown', onDown)
     el.addEventListener('pointermove', onMove)
     el.addEventListener('pointerup', onUp)
@@ -180,7 +193,9 @@ export function CityOrbitCamera() {
     el.addEventListener('wheel', onWheel, { passive: false })
     el.addEventListener('gesturestart', onGesture as EventListener)
     el.addEventListener('gesturechange', onGesture as EventListener)
+    window.addEventListener('apex-frame-towers', onFrame)
     return () => {
+      window.removeEventListener('apex-frame-towers', onFrame)
       el.removeEventListener('pointerdown', onDown)
       el.removeEventListener('pointermove', onMove)
       el.removeEventListener('pointerup', onUp)
@@ -197,8 +212,14 @@ export function CityOrbitCamera() {
     const st = state.current
     const t = Math.min(1, dt * ZOOM_SMOOTH)
     st.dist += (st.targetDist - st.dist) * (reduced ? 1 : t)
+    if (st.framing) {
+      st.phi += (st.targetPhi - st.phi) * (reduced ? 1 : t)
+      if (Math.abs(st.targetPhi - st.phi) < 0.01 && Math.abs(st.targetDist - st.dist) < 0.2) {
+        st.framing = false
+      }
+    }
 
-    if (!st.orbiting && !st.pinching && !reduced) {
+    if (!st.orbiting && !st.pinching && !reduced && !st.framing) {
       st.theta += st.velTheta
       st.phi = clamp(st.phi + st.velPhi, MIN_PHI, MAX_PHI)
       const damp = Math.exp(-dt * ORBIT_DAMP)
