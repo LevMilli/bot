@@ -523,16 +523,14 @@ def master_summary(
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_r = desk_roi_plan.latest_daily_r_board(root)
-            if root and bots and (
-                not isinstance(latest_r, dict)
-                or str(latest_r.get("label") or "") != today
-            ):
+            # Prefer live bots.today whenever provided — same-day stale
+            # settle_only=[] must not hide 1.5R profit-lock (#484 twin).
+            if root and bots:
                 plan["daily_r"] = desk_roi_plan.capture_daily_r_board(
                     root, bots, label=today,
                 )
             else:
-                plan["daily_r"] = latest_r
+                plan["daily_r"] = desk_roi_plan.latest_daily_r_board(root)
         except Exception:
             plan["daily_r"] = None
         try:

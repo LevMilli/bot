@@ -11190,7 +11190,12 @@ def plan_summary(
         "hillclimb_kill": hillclimb_kill_status(root),
         "profit_lock": profit_lock_status(root),
         "skip_regret_weekly": latest_skip_regret_weekly(root),
-        "daily_r": latest_daily_r_board(root),
+        # Prefer live bots.today when provided (#484 firm_health twin).
+        "daily_r": (
+            capture_daily_r_board(root, bots=bots)
+            if (root and bots)
+            else latest_daily_r_board(root)
+        ),
         "inx_band_promote": inx_band_promote_status(root),
         "incubation": incubation_board(root),
         "ruin_drill": ruin_drill_status(root),
