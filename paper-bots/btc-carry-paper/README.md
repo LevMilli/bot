@@ -41,10 +41,17 @@ Shadow until a person graduates it. Nothing auto-promotes.
 
 The pass bar is: the after-fee monthly median stays positive. Flipping every month is a reject. On the 2026 archive months (January through October) the held median is +0.30% after the 0.03% haircut, and the flip-every-month mean is −0.04%.
 
+## Twins (observe only)
+
+ETH is the **same factor** as BTC — a research line inside this sleeve, not a
+second tower and not desk cash. SOL’s 2026 held mean is red after the haircut —
+**reject**. Staff board: `make -C .. living-funding-twins` or `python bot.py --twins`.
+
 ## Run
 
 ```bash
 python bot.py --research   # print the locked card, write nothing
+python bot.py --twins      # ETH observe / SOL reject (no cash)
 python bot.py              # one paper check
 python bot.py --reset
 ```
