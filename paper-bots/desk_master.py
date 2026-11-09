@@ -1245,6 +1245,16 @@ def master_summary(
             if isinstance(living, dict)
             else None
         ),
+        "line_shopper": (
+            (living or {}).get("line_shopper")
+            if isinstance(living, dict)
+            else None
+        ),
+        "btc_basis_scout": (
+            (living or {}).get("btc_basis_scout")
+            if isinstance(living, dict)
+            else None
+        ),
         "skip_historian": (
             (living or {}).get("skip_historian")
             if isinstance(living, dict)

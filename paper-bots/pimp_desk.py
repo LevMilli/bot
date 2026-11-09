@@ -3042,14 +3042,24 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         import desk_living
         iw = desk_living.injury_wire_chip(root)
         es = desk_living.eia_scout_chip(root)
+        ls = desk_living.line_shopper_chip(root)
+        bs = desk_living.btc_basis_scout_chip(root)
         desk_row["injury_wire"] = iw
         desk_row["eia_scout"] = es
+        desk_row["line_shopper"] = ls
+        desk_row["btc_basis_scout"] = bs
         if isinstance(desk_row.get("master"), dict):
             desk_row["master"]["injury_wire"] = desk_row["master"].get("injury_wire") or iw
             desk_row["master"]["eia_scout"] = desk_row["master"].get("eia_scout") or es
+            desk_row["master"]["line_shopper"] = desk_row["master"].get("line_shopper") or ls
+            desk_row["master"]["btc_basis_scout"] = (
+                desk_row["master"].get("btc_basis_scout") or bs
+            )
     except Exception as exc:  # noqa: BLE001
         desk_row["injury_wire"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["eia_scout"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["line_shopper"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["btc_basis_scout"] = {"paper_only": True, "error": type(exc).__name__}
     try:
         import desk_living
         sh = desk_living.skip_historian_chip(root)
