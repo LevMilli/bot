@@ -55,8 +55,26 @@ class DashGraphTests(unittest.TestCase):
         splash = bot.app_splash_jpeg()
         self.assertTrue(splash.startswith(b"\xff\xd8"))
         body = bot.dash_manifest_body()
-        self.assertIn("/icon-512.png?v=3", body)
-        self.assertIn("pb-shell-153", bot.SW_JS)
+        self.assertIn("/icon-512.png?v=4", body)
+        self.assertIn("pb-shell-154", bot.SW_JS)
+        from PIL import Image
+        import io
+        icon = Image.open(io.BytesIO(raw)).convert("RGBA")
+        self.assertEqual(icon.size, (64, 64))
+        # The gold ring sits near the edge once the dark margin is cropped off.
+        near = False
+        px = icon.load()
+        for y in range(64):
+            for x in range(64):
+                if min(x, y, 63 - x, 63 - y) > 6:
+                    continue
+                r, g, b, _a = px[x, y]
+                if r > 170 and g > 120 and b < 150 and r > b + 40:
+                    near = True
+                    break
+            if near:
+                break
+        self.assertTrue(near)
         self.assertTrue(bot.DASH_FAVICON.startswith("data:image/png;base64,"))
         self.assertIn(bot.DASH_FAVICON, bot.DASHBOARD_HTML_V4)
         self.assertNotIn("id=\"pbP\"", bot.DASHBOARD_HTML_V4)
