@@ -1203,6 +1203,54 @@ class PimpDeskTests(unittest.TestCase):
             )
             self.assertIn("staff cleared soft drawdown", bland_clear.lower())
 
+    def test_kalshi_sized_skip_reads_own_staff_clear_not_sp(self):
+        """Sized tip must not inherit S&P staff-clear when its own soft DD is still on."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sp = os.path.join(tmp, "kalshi-sp500-paper")
+            sized = os.path.join(tmp, "kalshi-sized-paper")
+            os.makedirs(sp, exist_ok=True)
+            os.makedirs(sized, exist_ok=True)
+            with open(os.path.join(sp, "config.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "starting_bankroll": 500.0,
+                    "drawdown_halt_bankroll": 460.0,
+                    "kill_switch_bankroll": 400.0,
+                    "staff_clear_drawdown_halt": True,
+                }, fh)
+            with open(os.path.join(sized, "config.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "starting_bankroll": 500.0,
+                    "drawdown_halt_bankroll": 460.0,
+                    "kill_switch_bankroll": 400.0,
+                    "staff_clear_drawdown_halt": False,
+                }, fh)
+            for folder in (sp, sized):
+                with open(os.path.join(folder, "calendar.json"), "w", encoding="utf-8") as fh:
+                    json.dump({}, fh)
+            state = {"bankroll": 444.0, "halted": False, "open": [], "closed": []}
+            # Default (S&P folder) still shows staff clear.
+            sp_line = pimp_desk._kalshi_skip(tmp, state, summary="")
+            self.assertIn("staff cleared soft drawdown", sp_line.lower())
+            # Sized folder must densify halt — not the S&P clear lie.
+            sized_line = pimp_desk._kalshi_skip(
+                tmp, state, summary="", bot_id="kalshi-sized", folder="kalshi-sized-paper",
+            )
+            self.assertIn("drawdown halt", sized_line.lower())
+            self.assertNotIn("staff cleared", sized_line.lower())
+            # Sized staff clear densifies resume truth on its own tower.
+            with open(os.path.join(sized, "config.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "starting_bankroll": 500.0,
+                    "drawdown_halt_bankroll": 460.0,
+                    "kill_switch_bankroll": 400.0,
+                    "staff_clear_drawdown_halt": True,
+                }, fh)
+            sized_clear = pimp_desk._kalshi_skip(
+                tmp, state, summary="CARD: No open paper positions.\n",
+                bot_id="kalshi-sized", folder="kalshi-sized-paper",
+            )
+            self.assertIn("staff cleared soft drawdown", sized_clear.lower())
+
     def test_finish_bot_prefers_hold_why_over_entry_skip_card(self):
         """Open BTC must not show speed-floor entry skips as the tower why."""
         spec = {

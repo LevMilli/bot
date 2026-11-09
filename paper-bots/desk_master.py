@@ -310,10 +310,15 @@ def _inx_staff_clear_soft_dd(root: str | None, bot_id: str, cfg: dict | None = N
     """True when staff waived soft $460 DD for that INX tower (kill $400 stays stone)."""
     cfg = cfg or {}
     # Explicit desk cfg wins; else read tower config.json.
+    # Sized accepts twin key staff_clear_sized_drawdown_halt OR shared staff_clear_drawdown_halt
+    # (risk_manager + config.json use the shared key).
     if bot_id == "kalshi-sp" and "staff_clear_drawdown_halt" in cfg:
         return bool(cfg.get("staff_clear_drawdown_halt"))
-    if bot_id == "kalshi-sized" and "staff_clear_sized_drawdown_halt" in cfg:
-        return bool(cfg.get("staff_clear_sized_drawdown_halt"))
+    if bot_id == "kalshi-sized":
+        if "staff_clear_sized_drawdown_halt" in cfg:
+            return bool(cfg.get("staff_clear_sized_drawdown_halt"))
+        if "staff_clear_drawdown_halt" in cfg:
+            return bool(cfg.get("staff_clear_drawdown_halt"))
     folder = {
         "kalshi-sp": "kalshi-sp500-paper",
         "kalshi-sized": "kalshi-sized-paper",

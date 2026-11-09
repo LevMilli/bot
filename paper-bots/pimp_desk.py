@@ -1481,12 +1481,28 @@ def _kalshi_skip_run_body(summary: str) -> str:
     return ""
 
 
-def _kalshi_drawdown_halt_line(root: str, state: dict | None) -> str:
+def _kalshi_tower_folder(bot_id: str | None = None, folder: str | None = None) -> str:
+    """Resolve INX paper folder — sized must not inherit S&P staff-clear truth."""
+    if folder:
+        return folder
+    if bot_id == "kalshi-sized":
+        return "kalshi-sized-paper"
+    return "kalshi-sp500-paper"
+
+
+def _kalshi_drawdown_halt_line(
+    root: str,
+    state: dict | None,
+    *,
+    bot_id: str | None = None,
+    folder: str | None = None,
+) -> str:
     """Entry-block truth when bankroll ≤ drawdown_halt (halted flag stays kill-only)."""
     if not state or state.get("halted"):
         return ""
     bankroll = _num(state.get("bankroll"))
-    cfg = _read_json(_under(root, "kalshi-sp500-paper", "config.json")) or {}
+    tower = _kalshi_tower_folder(bot_id, folder)
+    cfg = _read_json(_under(root, tower, "config.json")) or {}
     dd_halt = _num(cfg.get("drawdown_halt_bankroll"))
     start = _num(cfg.get("starting_bankroll")) or 500.0
     under_dd = (
@@ -1509,10 +1525,18 @@ def _kalshi_drawdown_halt_line(root: str, state: dict | None) -> str:
     )
 
 
-def _kalshi_skip(root: str, state: dict | None, summary: str = "") -> str:
+def _kalshi_skip(
+    root: str,
+    state: dict | None,
+    summary: str = "",
+    *,
+    bot_id: str | None = None,
+    folder: str | None = None,
+) -> str:
     # Drawdown / kill beat bland settle CARD ("No open paper positions") so $444
     # idle is not read as a healthy empty book.
-    dd = _kalshi_drawdown_halt_line(root, state)
+    tower = _kalshi_tower_folder(bot_id, folder)
+    dd = _kalshi_drawdown_halt_line(root, state, bot_id=bot_id, folder=tower)
     if dd:
         return dd
     run_skip = _kalshi_skip_run_body(summary)
@@ -1526,7 +1550,7 @@ def _kalshi_skip(root: str, state: dict | None, summary: str = "") -> str:
     reasons = []
     if day.weekday() >= 5:
         reasons.append("WEEKEND")
-    cal = _read_json(_under(root, "kalshi-sp500-paper", "calendar.json")) or {}
+    cal = _read_json(_under(root, tower, "calendar.json")) or {}
     key = day.isoformat()
     for name, days in cal.items():
         if str(name).startswith("_") or not isinstance(days, list):
@@ -1992,7 +2016,9 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
         view["empty"] = spec["empty"]
         view["warning"] = _calendar_warning(root, spec["id"])
         if spec["kind"] == "kalshi":
-            view["skip"] = _kalshi_skip(root, None)
+            view["skip"] = _kalshi_skip(
+                root, None, bot_id=spec["id"], folder=spec.get("folder"),
+            )
         view["why"] = plain_reason(view["skip"]) if view["skip"] else ""
         return _finish_bot(view, spec, root)
     view["has_state"] = True
@@ -2006,7 +2032,10 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
         positions, trades, realized, today, risk, count, history = _kalshi_positions(state, day)
         view["cash"] = _num(state.get("bankroll"))
         # Prefer densified CARD/NO TRADE from last scan over calendar-only (#414 sibling).
-        view["skip"] = _kalshi_skip(root, state, summary=summary)
+        # Sized reads its own config — never inherit S&P staff-clear tip (#501 twin).
+        view["skip"] = _kalshi_skip(
+            root, state, summary=summary, bot_id=spec["id"], folder=spec.get("folder"),
+        )
     else:
         trades_path = _under(root, spec["folder"], "trades.csv")
         cap_log(trades_path)
