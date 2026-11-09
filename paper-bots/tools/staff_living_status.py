@@ -1742,7 +1742,7 @@ def main() -> int:
             "half-kelly-crb", "fee-sim", "dutch-book", "sharp-lag-harvest",
             "fed-watch-harvest", "poly-arb", "cpi-nowcast", "vol-curve",
             "vol-curve-harvest", "funding-twins", "macro-harvest",
-            "poly-arb-harvest",
+            "poly-arb-harvest", "line-shopper", "btc-basis-scout",
             "commodity-tstop-status", "commodity-tstop-promote",
             "commodity-tstop-promote-ready",
             "sports-tfinal-status", "sports-tfinal-promote",
@@ -4405,6 +4405,16 @@ def main() -> int:
         out = desk_roi_plan.poly_kalshi_ask_harvest(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
+    if args.action == "line-shopper":
+        from helpers import line_shopper
+        out = line_shopper.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "btc-basis-scout":
+        from helpers import btc_basis_scout
+        out = btc_basis_scout.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
     if args.action == "fee-ledger":
         bots = []
         try:

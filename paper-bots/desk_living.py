@@ -35,6 +35,8 @@ INSIGHT_HELPER_DIGESTS = (
     "clv_closer_digest.json",
     "injury_wire_digest.json",
     "eia_scout_digest.json",
+    "line_shopper_digest.json",
+    "btc_basis_scout_digest.json",
     "calib_nag_digest.json",
     "hard_stop_clerk_digest.json",
     "near_miss_clerk_digest.json",
@@ -2097,6 +2099,71 @@ def eia_scout_chip(root: str | None = None) -> dict:
     }
 
 
+def line_shopper_chip(root: str | None = None) -> dict:
+    """Sharp→Kalshi line shopper + CLV honesty chip (observe-only)."""
+    digest: dict = {}
+    try:
+        from helpers import line_shopper
+        path = line_shopper.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = line_shopper.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "n": digest.get("n"),
+        "clear_n": digest.get("clear_n"),
+        "best_edge": digest.get("best_edge"),
+        "clv_pass_n": digest.get("clv_pass_n"),
+        "label": (
+            f"line shopper n={digest.get('n')} clear={digest.get('clear_n')} "
+            f"best={digest.get('best_edge')} clv_pass={digest.get('clv_pass_n')}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only sharp lag + CLV — never softens sports 0.06."
+        ),
+    }
+
+
+def btc_basis_scout_chip(root: str | None = None) -> dict:
+    """BTC funding/basis scout chip — ETH observe / SOL reject; no desk cash."""
+    digest: dict = {}
+    try:
+        from helpers import btc_basis_scout
+        path = btc_basis_scout.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("helper") is None:
+            digest = btc_basis_scout.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "opens_desk_cash": False,
+        "btc_open_n": digest.get("btc_open_n"),
+        "funding_pnl": digest.get("funding_pnl"),
+        "basis_pnl": digest.get("basis_pnl"),
+        "eth_stance": digest.get("eth_stance"),
+        "sol_stance": digest.get("sol_stance"),
+        "label": (
+            f"basis scout btc_open={digest.get('btc_open_n')} "
+            f"fund={digest.get('funding_pnl')} basis={digest.get('basis_pnl')} "
+            f"eth={digest.get('eth_stance')} sol={digest.get('sol_stance')}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only BTC basis scout — never LIVE."
+        ),
+    }
+
+
 def tip_radar_chip(root: str | None = None) -> dict:
     """T-5 / T-15 / T-180 tip windows chip from tip_radar digest / quote cache."""
     digest = {}
@@ -2612,6 +2679,8 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "calib_nag": calib_nag_chip(root, bots=bots),
         "injury_wire": injury_wire_chip(root),
         "eia_scout": eia_scout_chip(root),
+        "line_shopper": line_shopper_chip(root),
+        "btc_basis_scout": btc_basis_scout_chip(root),
         "skip_historian": skip_historian_chip(root),
         "distance_clerk": distance_clerk_chip(root),
         "quant_clerk": quant_clerk_chip(root),
@@ -2972,7 +3041,8 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         "sunday_packet", "reporter", "ritual_observe", "feature_store", "skip_historian",
         # clerks / helpers / gates (surface export; already on board — no new chips)
         "living_ai", "skip_taxonomy", "empty_card", "helper_gate_a", "skip_regret",
-        "tip_radar", "calib_nag", "injury_wire", "eia_scout", "distance_clerk",
+        "tip_radar", "calib_nag", "injury_wire", "eia_scout",
+        "line_shopper", "btc_basis_scout", "distance_clerk",
         "quant_clerk", "bookkeeper", "empty_card_bee", "near_miss", "near_miss_clerk",
         "hard_stop", "hard_stop_clerk", "skip_twin_clerk", "timer_digest",
         "calendar_scanner", "eia_blackout", "clerk_pulse", "dual_control_chip",
