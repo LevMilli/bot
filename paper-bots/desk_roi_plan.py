@@ -6927,6 +6927,129 @@ def fee_sim_observe(
     }
 
 
+def dutch_book_probe(
+    legs: list | None = None,
+    *,
+    venue: str = "kalshi_sports",
+) -> dict:
+    """Exclusive-outcome underround probe after Kalshi fees.
+
+    Buy-all only when sum(ask + fee) < 1 − floor. Overround is the house edge
+    (observe, never invent a fade). Floors stay locked.
+    """
+    import desk_profit
+
+    venue_key = str(venue or "kalshi_sports")
+    floor = float(desk_profit.DEFAULT_VENUE_MIN_EDGE.get(venue_key) or 0.0)
+    rows = []
+    total = 0.0
+    for raw in legs or []:
+        if not isinstance(raw, dict):
+            continue
+        ask = _finite(raw.get("ask"))
+        if ask is None or not (0.0 < ask < 1.0):
+            continue
+        fee = estimate_kalshi_fee(ask, 1.0)
+        cost = float(ask) + float(fee)
+        total += cost
+        rows.append({
+            "side": str(raw.get("side") or raw.get("game") or ""),
+            "ask": round(float(ask), 4),
+            "fee": round(float(fee), 4),
+            "cost": round(cost, 4),
+        })
+    if len(rows) < 2:
+        return {
+            "ok": False,
+            "clear": False,
+            "reason": "need ≥2 exclusive legs with asks",
+            "venue": venue_key,
+            "floor": floor,
+            "legs": rows,
+            "sum_ask_fee": round(total, 4),
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "observe_only": True,
+            "auto_promote": False,
+            "live_orders_enabled": False,
+        }
+    edge = 1.0 - total
+    clear = edge + 1e-12 >= floor
+    return {
+        "ok": True,
+        "clear": clear,
+        "venue": venue_key,
+        "floor": floor,
+        "legs": rows,
+        "sum_ask_fee": round(total, 4),
+        "edge": round(edge, 4),
+        "reason": (
+            "underround clears floor" if clear
+            else (
+                "overround — house edge" if edge < 0
+                else f"underround edge {edge:.4f} < floor {floor:g}"
+            )
+        ),
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+    }
+
+
+def dutch_book_observe(
+    root: str | None = None,
+    *,
+    baskets: list | None = None,
+) -> dict:
+    """Dutch-book / mutual-exclusion completer observe board."""
+    del root
+    default = baskets or [
+        {
+            "label": "underround_sports",
+            "venue": "kalshi_sports",
+            "legs": [{"side": "home", "ask": 0.44}, {"side": "away", "ask": 0.44}],
+        },
+        {
+            "label": "overround_sports",
+            "venue": "kalshi_sports",
+            "legs": [{"side": "home", "ask": 0.52}, {"side": "away", "ask": 0.52}],
+        },
+        {
+            "label": "thin_underround",
+            "venue": "kalshi_sports",
+            "legs": [{"side": "home", "ask": 0.47}, {"side": "away", "ask": 0.47}],
+        },
+    ]
+    rows = []
+    clears = 0
+    for raw in default:
+        if not isinstance(raw, dict):
+            continue
+        probe = dutch_book_probe(raw.get("legs") or [], venue=str(raw.get("venue") or "kalshi_sports"))
+        probe["label"] = str(raw.get("label") or "")
+        if probe.get("clear"):
+            clears += 1
+        rows.append(probe)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "ok": True,
+        "n": len(rows),
+        "clears_n": clears,
+        "baskets": rows,
+        "label": f"dutch_book clears={clears}/{len(rows)} floors_locked",
+        "note": (
+            "Exclusive-outcome underround board after fees. "
+            "Overround is observe-only (not a short). Floors locked. Never LIVE."
+        ),
+    }
+
+
 def half_kelly_crb_observe(
     root: str | None = None,
     *,

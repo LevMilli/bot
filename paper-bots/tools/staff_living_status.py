@@ -1739,7 +1739,7 @@ def main() -> int:
             "eligible-funnel", "insight-ratio", "edge08-compare", "cadence-health",
             "raise-phi-log", "sports-calib", "commodity-calib",
             "baseline-fee", "baseline-capture", "fee-ledger",
-            "half-kelly-crb", "fee-sim",
+            "half-kelly-crb", "fee-sim", "dutch-book", "sharp-lag-harvest",
             "commodity-tstop-status", "commodity-tstop-promote",
             "commodity-tstop-promote-ready",
             "sports-tfinal-status", "sports-tfinal-promote",
@@ -4331,6 +4331,29 @@ def main() -> int:
         out = desk_roi_plan.fee_sim_observe(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
+    if args.action == "dutch-book":
+        out = desk_roi_plan.dutch_book_observe(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "sharp-lag-harvest":
+        # Opt-in live ESPN fair + Kalshi ask → sports-sharp-lag sharp_quotes.json.
+        tower = os.path.join(root, "sports-sharp-lag-paper")
+        bot_path = os.path.join(tower, "bot.py")
+        if not os.path.isfile(bot_path):
+            print(json.dumps({
+                "ok": False,
+                "paper_only": True,
+                "reason": "sports-sharp-lag tower missing",
+            }, indent=2))
+            return 2
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("sports_sharp_lag_bot", bot_path)
+        mod = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(mod)
+        out = mod.harvest_live(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
     if args.action == "fee-ledger":
         bots = []
         try:

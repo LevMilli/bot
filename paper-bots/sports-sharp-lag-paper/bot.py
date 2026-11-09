@@ -102,6 +102,85 @@ def load_quotes(tower: str) -> list[dict]:
     return [row for row in data if isinstance(row, dict)]
 
 
+def quotes_from_matched(matched: list[dict]) -> list[dict]:
+    """Build lag quote rows from ESPN fair + Kalshi asks. Skip incomplete legs."""
+    out = []
+    for row in matched or []:
+        if not isinstance(row, dict):
+            continue
+        fair_home = _num(row.get("fair_home") if row.get("fair_home") is not None else row.get("sharp_fair_home"))
+        home_ask = _num(row.get("home_ask"))
+        away_ask = _num(row.get("away_ask"))
+        game = str(row.get("game") or row.get("name") or "game")
+        league = str(row.get("league") or "")
+        if fair_home is None:
+            continue
+        if home_ask is not None and 0.0 < home_ask < 1.0:
+            out.append({
+                "game": f"{game} HOME",
+                "sharp_fair": round(float(fair_home), 4),
+                "ask": round(float(home_ask), 4),
+                "side": "home",
+                "league": league,
+                "ticker": str(row.get("home_ticker") or ""),
+                "source": str(row.get("source") or "espn_fair"),
+            })
+        if away_ask is not None and 0.0 < away_ask < 1.0:
+            out.append({
+                "game": f"{game} AWAY",
+                "sharp_fair": round(1.0 - float(fair_home), 4),
+                "ask": round(float(away_ask), 4),
+                "side": "away",
+                "league": league,
+                "ticker": str(row.get("away_ticker") or ""),
+                "source": str(row.get("source") or "espn_fair"),
+            })
+    return out
+
+
+def write_sharp_quotes(tower: str, quotes: list[dict], *, note: str = "") -> str:
+    path = os.path.join(tower, "sharp_quotes.json")
+    payload = {
+        "paper_only": True,
+        "shadow_only": True,
+        "fee_floors_locked": True,
+        "floor": LOCKED_FLOOR,
+        "note": note or "ESPN/de-vig fair vs Kalshi ask — never invent",
+        "quotes": list(quotes or []),
+    }
+    _write_json(path, payload)
+    return path
+
+
+def harvest_from_matched(
+    desk_root: str | None,
+    matched: list[dict],
+    *,
+    note: str = "",
+) -> dict:
+    """Write sharp_quotes.json from matched fair/ask rows. No network. No invent."""
+    desk_root = desk_root or DESK_ROOT
+    tower = os.path.join(desk_root, "sports-sharp-lag-paper")
+    os.makedirs(tower, exist_ok=True)
+    quotes = quotes_from_matched(matched)
+    path = write_sharp_quotes(
+        tower,
+        quotes,
+        note=note or "harvested matched fair/ask rows",
+    )
+    return {
+        "ok": True,
+        "paper_only": True,
+        "shadow_only": True,
+        "fee_floors_locked": True,
+        "path": path,
+        "n": len(quotes),
+        "matched_n": len(matched or []),
+        "quotes": quotes,
+        "note": "Incomplete fair/ask legs skipped — no invent",
+    }
+
+
 def empty_state(cfg: dict) -> dict:
     return {
         "cash": float(cfg["starter_cash"]),
@@ -256,6 +335,122 @@ def _append_research(tower: str, now: dt.datetime, decisions: list) -> None:
         return
 
 
+def harvest_live(desk_root: str | None = None) -> dict:
+    """Pull tip-soon ESPN fair + Kalshi asks via sports-gap helpers. Opt-in only.
+
+    Skips any game missing fair or asks. Never invents quotes. Floor stays 0.06.
+    """
+    desk_root = desk_root or DESK_ROOT
+    if desk_root not in sys.path:
+        sys.path.insert(0, desk_root)
+    gap_dir = os.path.join(desk_root, "sports-gap-paper")
+    if gap_dir not in sys.path:
+        sys.path.insert(0, gap_dir)
+    try:
+        import gap_bot
+    except Exception as exc:
+        return {
+            "ok": False,
+            "paper_only": True,
+            "reason": f"gap_bot import failed: {exc.__class__.__name__}",
+            "n": 0,
+            "quotes": [],
+        }
+    matched = []
+    skipped = []
+    sports = getattr(gap_bot, "SPORTS", None) or {}
+    if not isinstance(sports, dict):
+        return {
+            "ok": False,
+            "paper_only": True,
+            "reason": "gap_bot.SPORTS missing",
+            "n": 0,
+            "quotes": [],
+        }
+    for league, meta in sports.items():
+        try:
+            path, series = meta[0], meta[1]
+            if hasattr(gap_bot, "espn_games"):
+                games = gap_bot.espn_games(path)
+            else:
+                scoreboard = gap_bot.get(f"{gap_bot.ESPN}/{path}/scoreboard")
+                games = []
+                for ev in (scoreboard or {}).get("events") or []:
+                    comps = ((ev.get("competitions") or [{}])[0])
+                    state = str((comps.get("status") or {}).get("type", {}).get("state") or "")
+                    g = {
+                        "date": ev.get("date"),
+                        "state": "in" if state == "in" else state,
+                        "home": {},
+                        "away": {},
+                        "id": ev.get("id"),
+                    }
+                    for c in comps.get("competitors") or []:
+                        if c.get("homeAway") == "home":
+                            g["home"] = c
+                        elif c.get("homeAway") == "away":
+                            g["away"] = c
+                    games.append(g)
+            markets = gap_bot.kalshi_markets(series)
+            for g in games:
+                if not isinstance(g, dict) or not g.get("home") or not g.get("away"):
+                    skipped.append("no teams")
+                    continue
+                state = str(g.get("state") or "")
+                if state != "in" and not gap_bot.tip_within_minutes(g):
+                    continue
+                name = (
+                    f"{(g['away'].get('team') or {}).get('abbreviation', '?')} @ "
+                    f"{(g['home'].get('team') or {}).get('abbreviation', '?')}"
+                )
+                pair = gap_bot.match_event(g, markets)
+                if not pair:
+                    skipped.append("no Kalshi match")
+                    continue
+                eid = g.get("id") or g.get("event_id")
+                try:
+                    summ = gap_bot.espn_summary(path, eid) if eid else {}
+                except Exception:
+                    summ = {}
+                fair = None
+                if state != "in":
+                    fair = gap_bot.espn_pregame_fair_home(summ or {})
+                else:
+                    try:
+                        fair = gap_bot.espn_fair_home(summ or {}, g)
+                    except Exception:
+                        fair = gap_bot.espn_pregame_fair_home(summ or {})
+                if fair is None:
+                    skipped.append("no fair")
+                    continue
+                ha = gap_bot.px(pair["home"], "yes_ask_dollars")
+                aa = gap_bot.px(pair["away"], "yes_ask_dollars")
+                if ha is None or aa is None:
+                    skipped.append("no ask")
+                    continue
+                matched.append({
+                    "game": name,
+                    "league": league,
+                    "fair_home": fair,
+                    "home_ask": ha,
+                    "away_ask": aa,
+                    "home_ticker": (pair["home"] or {}).get("ticker"),
+                    "away_ticker": (pair["away"] or {}).get("ticker"),
+                    "source": "espn_fair",
+                })
+        except Exception as exc:
+            skipped.append(exc.__class__.__name__)
+            continue
+    out = harvest_from_matched(
+        desk_root,
+        matched,
+        note="live ESPN fair + Kalshi ask harvest (tip-soon/live only)",
+    )
+    out["skipped_n"] = len(skipped)
+    out["live_harvest"] = True
+    return out
+
+
 def main() -> int:
     if "--reset" in sys.argv:
         path = os.path.join(HERE, "paper_account.json")
@@ -263,6 +458,10 @@ def main() -> int:
             os.remove(path)
         print("reset paper account")
         return 0
+    if "--harvest" in sys.argv:
+        out = harvest_live(DESK_ROOT)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 1
     return run_once()
 
 

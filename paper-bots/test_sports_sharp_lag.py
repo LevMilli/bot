@@ -60,13 +60,40 @@ class SportsSharpLag(unittest.TestCase):
                 )
             out = buf.getvalue()
             self.assertIn("BUY NYG@PHI", out)
-            state = json.load(open(
+            with open(
                 os.path.join(tmp, "sports-sharp-lag-paper", "paper_account.json"),
                 encoding="utf-8",
-            ))
+            ) as handle:
+                state = json.load(handle)
             self.assertEqual(len(state["open"]), 1)
             self.assertTrue(state["shadow_only"])
             self.assertAlmostEqual(state["cash"], 475.0, places=2)
+
+    def test_harvest_from_matched_writes_quotes(self):
+        bot = _bot()
+        with tempfile.TemporaryDirectory() as tmp:
+            out = bot.harvest_from_matched(
+                tmp,
+                [{
+                    "game": "DAL@PHI",
+                    "league": "NFL",
+                    "fair_home": 0.58,
+                    "home_ask": 0.50,
+                    "away_ask": 0.48,
+                    "home_ticker": "HOME",
+                    "away_ticker": "AWAY",
+                }],
+            )
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["n"], 2)
+            path = os.path.join(tmp, "sports-sharp-lag-paper", "sharp_quotes.json")
+            self.assertTrue(os.path.isfile(path))
+            with open(path, encoding="utf-8") as handle:
+                payload = json.load(handle)
+            self.assertEqual(len(payload["quotes"]), 2)
+            # Incomplete fair skipped — no invent.
+            thin = bot.quotes_from_matched([{"game": "X@Y", "home_ask": 0.5}])
+            self.assertEqual(thin, [])
 
     def test_desk_registers_shadow(self):
         spec = next(b for b in pimp_desk.BOTS if b["id"] == "sports-sharp-lag")
