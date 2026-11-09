@@ -601,6 +601,44 @@ class DeskLivingTests(unittest.TestCase):
             os.environ.pop("DESK_BLOCK_ENTRIES", None)
             os.environ.pop("DESK_BLOCK_REASON", None)
 
+    def test_desk_block_entries_reason_prefers_real_gate(self):
+        """Prefer-1: DESK_BLOCK_REASON must beat bland entry_gate invent."""
+        os.environ.pop("DESK_BLOCK_ENTRIES", None)
+        os.environ.pop("DESK_BLOCK_REASON", None)
+        self.assertEqual(desk_living.desk_block_entries_reason(), "")
+        os.environ["DESK_BLOCK_ENTRIES"] = "1"
+        os.environ["DESK_BLOCK_REASON"] = (
+            "Daily loss stop is hit ($150.00 against $150.00). "
+            "Entry checks stay off until the next Chicago day."
+        )
+        try:
+            why = desk_living.desk_block_entries_reason("Desk entry_gate blocked invent")
+            self.assertIn("daily loss", why.lower())
+            self.assertNotIn("blocked invent", why.lower())
+            # Missing reason falls back without inventing a different gate.
+            os.environ.pop("DESK_BLOCK_REASON", None)
+            fallback = desk_living.desk_block_entries_reason(
+                "Desk entry_gate blocked a new paper buy."
+            )
+            self.assertIn("entry_gate", fallback.lower())
+        finally:
+            os.environ.pop("DESK_BLOCK_ENTRIES", None)
+            os.environ.pop("DESK_BLOCK_REASON", None)
+
+    def test_fee_clear_bots_surface_desk_block_reason(self):
+        """BTC/commodity/sports honor DESK_BLOCK_REASON densify (not bland invent)."""
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent
+        for rel, note in (
+            ("btc15m-signal/btc15m_signal.py", "btc entry-gate densify"),
+            ("commodity-15m-paper/bot.py", "commodity entry-gate densify"),
+            ("sports-gap-paper/gap_bot.py", "desk_block_entries_reason"),
+        ):
+            src = (root / rel).read_text(encoding="utf-8")
+            self.assertIn("desk_block_entries_reason", src, rel)
+            self.assertIn(note, src, rel)
+
     def test_fee_floors_untouched(self):
         floors = desk_profit.DEFAULT_VENUE_MIN_EDGE
         self.assertEqual(floors["kalshi_sports"], 0.06)

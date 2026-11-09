@@ -845,7 +845,18 @@ def run():
     if today_pnl <= -stop:
         entries_off = f"Daily loss stop is hit (${abs(today_pnl):.2f} against ${stop:.2f})."
     if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
-        entries_off = entries_off or (
+        # Prefer-1: honor stored DESK_BLOCK_REASON — do not invent bland entry_gate.
+        gate_why = ""
+        try:
+            if DESK_ROOT not in sys.path:
+                sys.path.insert(0, DESK_ROOT)
+            import desk_living
+            gate_why = desk_living.desk_block_entries_reason(
+                "Desk entry_gate blocked new paper buys. Exits and settles still run."
+            )
+        except Exception:
+            gate_why = ""
+        entries_off = entries_off or gate_why or (
             "Desk entry_gate blocked new paper buys. Exits and settles still run."
         )
     before_book = json.dumps(

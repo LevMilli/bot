@@ -770,7 +770,14 @@ def paper_buy(state: dict, ev: dict) -> str:
     if any(isinstance(p, dict) and p.get("ticker") == ticker for p in state.get("open") or []):
         return none_msg + " already open."
     if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
-        return "Desk entry_gate blocked a new paper buy."
+        # Prefer-1: honor stored DESK_BLOCK_REASON — do not invent bland entry_gate.
+        try:
+            import desk_living
+            return desk_living.desk_block_entries_reason(
+                "Desk entry_gate blocked a new paper buy."
+            )
+        except Exception:
+            return "Desk entry_gate blocked a new paper buy."
     try:
         import desk_roi_plan
         # Prefer-1: commodity records adverse cool on deep mark-downs but used to
@@ -1587,8 +1594,21 @@ def main() -> int:
             print(f"Stale-world: {stale}")
             max_buys_eff = 0
             _densify_gate_skip(stale, note="commodity stale-world densify")
+        # Prefer-1: densify real entry_gate reason (not bland invent) when honor locked.
+        if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
+            try:
+                import desk_living
+                gate_why = desk_living.desk_block_entries_reason(
+                    "Desk entry_gate blocked a new paper buy."
+                )
+            except Exception:
+                gate_why = ""
+            if gate_why:
+                print(f"Entry gate: {gate_why}")
+                max_buys_eff = 0
+                _densify_gate_skip(gate_why, note="commodity entry-gate densify")
         # Daily R budget → settle-only after tower hits target (exits stay on).
-        # Insert last so settle-only stays skips[0] over cool/stale (#521 twin).
+        # Insert last so settle-only stays skips[0] over cool/stale/entry (#521 twin).
         r_block = desk_roi_plan.daily_r_blocks("commodity-15m", today_pnl)
         if r_block:
             print(f"Settle-only: {r_block}")
@@ -1599,9 +1619,12 @@ def main() -> int:
     for row in ranked:
         if buys >= max_buys_eff:
             max_note = f"max buys this check ({max_buys_eff})"
-            # Prefer-1: gate (settle-only / cool / stale) zeroed the cap — do not
-            # invent capacity skip into brain/Learning while CARD names the gate.
-            gate_keys = ("settle-only", "adverse cool", "stale-world", "clock-skew")
+            # Prefer-1: gate (settle-only / cool / stale / entry) zeroed the cap —
+            # do not invent capacity skip into brain while CARD names the gate.
+            gate_keys = (
+                "settle-only", "adverse cool", "stale-world", "clock-skew",
+                "entry_gate", "daily loss", "max open risk", "max open positions",
+            )
             gate_hits = [
                 str(s)
                 for s in skip_reasons
