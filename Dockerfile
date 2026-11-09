@@ -13,6 +13,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY bot.py .
+COPY dash-brand ./dash-brand
 COPY paper-bots ./paper-bots
 # Staff APEX-CITY SPA (built Vite bundle). Rebuild with: cd trading-city && npm ci && npm run build
 COPY trading-city/dist ./trading-city/dist
