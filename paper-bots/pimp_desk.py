@@ -1433,6 +1433,8 @@ def _kalshi_drawdown_halt_line(root: str, state: dict | None) -> str:
         return ""
     bankroll = _num(state.get("bankroll"))
     cfg = _read_json(_under(root, "kalshi-sp500-paper", "config.json")) or {}
+    if bool(cfg.get("staff_clear_drawdown_halt")):
+        return ""  # staff waived soft DD; kill switch densify still via halted / kill path
     dd_halt = _num(cfg.get("drawdown_halt_bankroll"))
     start = _num(cfg.get("starting_bankroll")) or 500.0
     if (

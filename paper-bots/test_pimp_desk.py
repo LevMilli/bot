@@ -1144,6 +1144,7 @@ class PimpDeskTests(unittest.TestCase):
                     "starting_bankroll": 500.0,
                     "drawdown_halt_bankroll": 460.0,
                     "kill_switch_bankroll": 400.0,
+                    "staff_clear_drawdown_halt": False,
                 }, fh)
             with open(os.path.join(sp, "calendar.json"), "w", encoding="utf-8") as fh:
                 json.dump({}, fh)
@@ -1162,6 +1163,16 @@ class PimpDeskTests(unittest.TestCase):
                 tmp, {"bankroll": 500.0, "halted": False}, summary="",
             )
             self.assertNotIn("drawdown halt", ok.lower())
+            # Staff clear waives soft DD densify (buys may resume); kill still stone.
+            with open(os.path.join(sp, "config.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "starting_bankroll": 500.0,
+                    "drawdown_halt_bankroll": 460.0,
+                    "kill_switch_bankroll": 400.0,
+                    "staff_clear_drawdown_halt": True,
+                }, fh)
+            cleared = pimp_desk._kalshi_skip(tmp, state, summary="")
+            self.assertNotIn("drawdown halt", cleared.lower())
 
     def test_finish_bot_prefers_hold_why_over_entry_skip_card(self):
         """Open BTC must not show speed-floor entry skips as the tower why."""

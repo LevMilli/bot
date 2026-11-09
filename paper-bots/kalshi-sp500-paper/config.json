@@ -14,6 +14,8 @@
   "starting_bankroll": 500.0,
   "kill_switch_bankroll": 400.0,
   "drawdown_halt_bankroll": 460.0,
+  "staff_clear_drawdown_halt": true,
+  "staff_clear_drawdown_halt_note": "Staff 2026-11-09: resume paper buys under $460 catch-22; kill $400 + fee/band/max-1/day stay stone. Paper only.",
   "invalidation_log_below": 0.50,
   "model_flip_sell": true,
   "timezone": "America/Chicago",
