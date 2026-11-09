@@ -1397,17 +1397,56 @@ def run():
         # Mid-open exits: hard-stop + time-final densify when pair/bid exist
         # (fair_home optional). Gap-decay / flip / scale-out still need fair.
         # When pair missing but ticker known, fetch Kalshi bid so shadow densifies.
+        # Prefer-1: orphan opens (info is None — off scoreboard / next-day not-yet
+        # final) must still ticker-fetch + HS densify. Gating fetch on `info`
+        # starved shadow n while losers rode to settle. No rem invent; no live sell
+        # on the orphan path (staff-armed live HS still needs live_info below).
         pair_info = info.get("pair") if info and isinstance(info, dict) else None
         m = None
         if isinstance(pair_info, dict):
             m = pair_info.get(p["side"])
         bid = market_yes_bid(m) if m is not None else None
-        if info and bid is None:
+        if bid is None:
             fetched = fetch_kalshi_market(p.get("ticker"))
             bid = market_yes_bid(fetched) if fetched else None
             # Prefer pair market for ask/fair exits; use fetch only when pair absent.
             if m is None and fetched is not None:
                 m = fetched
+        # Orphan densify: bid-only HS shadow when live_info missing (no clock → no t-final).
+        if info is None and bid is not None:
+            try:
+                bid_f = float(bid)
+            except (TypeError, ValueError):
+                bid_f = None
+            if bid_f is not None and 0.0 < bid_f < 1.0:
+                p["last_mark"] = round(bid_f, 4)
+            if not p.get("hard_stop_shadowed"):
+                try:
+                    if DESK_ROOT not in sys.path:
+                        sys.path.insert(0, DESK_ROOT)
+                    import desk_roi_plan
+                    hs = desk_roi_plan.sports_hard_stop_hit(
+                        p.get("entry_price"), bid,
+                    )
+                    if hs.get("hit"):
+                        desk_roi_plan.record_sports_hard_stop_shadow(
+                            DESK_ROOT,
+                            ticker=str(p.get("ticker") or ""),
+                            side=str(p.get("side") or ""),
+                            league=str(p.get("league") or ""),
+                            entry_price=p.get("entry_price"),
+                            bid=bid,
+                            fair=None,
+                            contracts=p.get("contracts"),
+                            cost=p.get("cost"),
+                            note="orphan shadow hard-stop — no live sell",
+                        )
+                        p["hard_stop_shadowed"] = True
+                        summary_out.setdefault("hard_stop_shadow", []).append(
+                            f"ORPHAN STOP {p.get('ticker')} bid {bid}"
+                        )
+                except Exception:
+                    pass
         if info and m is not None:
             fair_home = info.get("fair_home")
             fair = None
