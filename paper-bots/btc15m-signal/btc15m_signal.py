@@ -1487,6 +1487,8 @@ def main():
         if r_block:
             print(f"Settle-only: {r_block}")
             max_buys_eff = 0
+            # Prepend so CARD/why densify settle-only ahead of evaluate ask/band noise.
+            skip_reasons.insert(0, str(r_block))
     except Exception:
         pass
 

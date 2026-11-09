@@ -488,6 +488,27 @@ class CommodityCardSkipDensify(unittest.TestCase):
         self.assertIn("firm queue", card)
         self.assertNotIn("No paper buy", card)
 
+    def test_daily_r_settle_only_prepends_card_skip(self):
+        """Daily-R settle-only must densify CARD ahead of evaluate ask/band noise."""
+        for path, label in ((CMD, "cmd"), (BTC, "btc")):
+            src = path.read_text(encoding="utf-8")
+            idx = src.find("daily_r_blocks(")
+            self.assertGreater(idx, 0, label)
+            chunk = src[idx:idx + 450]
+            self.assertIn("skip_reasons.insert(0, str(r_block))", chunk, label)
+        cmd = _load(CMD, "commodity_daily_r_card_under_test")
+        card = cmd._card_sentence(
+            buys=0,
+            skip_reasons=[
+                "daily R budget hit for commodity-15m: today $35.02 ≥ 1.5R ($30) — settle-only",
+                "ask 0.550 outside band; spread 0.070; depth 0 < 2",
+            ],
+        )
+        self.assertIn("settle-only", card.lower())
+        self.assertTrue(card.lower().startswith("daily r") or "settle-only" in card.lower())
+        # First skip wins CARD — settle-only must beat ask/band false-friend.
+        self.assertNotEqual(card.lower().split(";")[0].strip()[:3], "ask")
+
     def test_btc_eth_commodity_near_miss_passes_ask(self):
         """#402 persist is a no-op unless callers pass ask — densify entry honesty."""
         btc_src = BTC.read_text(encoding="utf-8")
