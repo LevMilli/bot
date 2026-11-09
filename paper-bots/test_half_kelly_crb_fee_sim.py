@@ -278,6 +278,59 @@ class HalfKellyCrbFeeSim(unittest.TestCase):
                 cpi = json.load(handle)
             self.assertIsNone(cpi["strikes"][0]["nowcast_fair"])
 
+    def test_poly_kalshi_ask_harvest_no_invent_leg(self):
+        import json
+        import tempfile
+
+        def opener(url: str):
+            if "kalshi.com" in url and "KXFEDDECISION-26DEC-H0" in url:
+                return json.dumps({
+                    "market": {
+                        "ticker": "KXFEDDECISION-26DEC-H0",
+                        "yes_ask_dollars": "0.20",
+                        "no_ask_dollars": "0.81",
+                    },
+                }).encode()
+            if "polymarket.com" in url and "no-change" in url:
+                return json.dumps([{
+                    "slug": (
+                        "will-there-be-no-change-in-fed-interest-rates-after-the-"
+                        "december-2026-meeting-20260729232808635"
+                    ),
+                    "bestAsk": 0.19,
+                    "bestBid": 0.18,
+                }]).encode()
+            # Missing other seeds → incomplete, never invent.
+            return b"{}"
+
+        matches = [dict(desk_roi_plan.POLY_ARB_MATCH_SEEDS[0])]
+        with tempfile.TemporaryDirectory() as tmp:
+            out = desk_roi_plan.poly_kalshi_ask_harvest(
+                tmp, opener=opener, matches=matches,
+            )
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["complete_n"], 1)
+            self.assertEqual(out["incomplete_n"], 0)
+            with open(os.path.join(tmp, "desk_poly_arb_pairs.json"), encoding="utf-8") as handle:
+                pairs = json.load(handle)["pairs"]
+            self.assertEqual(pairs[0]["kalshi_yes_ask"], 0.2)
+            self.assertEqual(pairs[0]["poly_yes_ask"], 0.19)
+            self.assertAlmostEqual(pairs[0]["poly_no_ask"], 0.82)
+            # Incomplete seed: kalshi only — poly leg stays null.
+            incomplete = desk_roi_plan.poly_kalshi_ask_harvest(
+                tmp,
+                opener=opener,
+                matches=[{
+                    "label": "kalshi_only",
+                    "kalshi_ticker": "KXFEDDECISION-26DEC-H0",
+                    "poly_slug": "",
+                    "kalshi_venue": "kalshi_econ",
+                    "poly_category": "finance",
+                }],
+            )
+            self.assertEqual(incomplete["complete_n"], 0)
+            self.assertEqual(incomplete["incomplete_n"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7247,6 +7247,261 @@ def cross_venue_arb_observe(
     }
 
 
+POLY_GAMMA = "https://gamma-api.polymarket.com"
+POLY_HARVEST_UA = {"User-Agent": "paper-bots-poly-harvest/1.0 (paper-only)"}
+
+# Idea-bank structural match map — same Fed Dec outcomes across venues.
+# Asks are live-fetched; never invent a missing leg or fair.
+POLY_ARB_MATCH_SEEDS = (
+    {
+        "label": "fed_dec_no_change",
+        "kalshi_ticker": "KXFEDDECISION-26DEC-H0",
+        "poly_slug": (
+            "will-there-be-no-change-in-fed-interest-rates-after-the-"
+            "december-2026-meeting-20260729232808635"
+        ),
+        "kalshi_venue": "kalshi_econ",
+        "poly_category": "finance",
+    },
+    {
+        "label": "fed_dec_cut_25",
+        "kalshi_ticker": "KXFEDDECISION-26DEC-C25",
+        "poly_slug": (
+            "will-the-fed-decrease-interest-rates-by-25-bps-after-the-"
+            "december-2026-meeting-20260729232808634"
+        ),
+        "kalshi_venue": "kalshi_econ",
+        "poly_category": "finance",
+    },
+    {
+        "label": "fed_dec_hike_25",
+        "kalshi_ticker": "KXFEDDECISION-26DEC-H25",
+        "poly_slug": (
+            "will-the-fed-increase-interest-rates-by-25-bps-after-the-"
+            "december-2026-meeting-20260729232808636"
+        ),
+        "kalshi_venue": "kalshi_econ",
+        "poly_category": "finance",
+    },
+)
+
+
+def _http_get_json(url: str, *, opener=None, headers: dict | None = None):
+    """GET JSON via opener or urllib. None on miss — never invent."""
+    import urllib.request
+
+    opener = opener or (
+        lambda u: urllib.request.urlopen(
+            urllib.request.Request(u, headers=headers or POLY_HARVEST_UA),
+            timeout=12,
+        ).read()
+    )
+    try:
+        blob = opener(url)
+    except Exception:
+        return None
+    if blob is None or blob == b"" or blob == "":
+        return None
+    try:
+        if isinstance(blob, bytes):
+            return json.loads(blob.decode("utf-8", errors="replace"))
+        if isinstance(blob, str):
+            return json.loads(blob)
+        if isinstance(blob, (dict, list)):
+            return blob
+    except json.JSONDecodeError:
+        return None
+    return None
+
+
+def _kalshi_market_by_ticker(ticker: str, *, opener=None) -> dict | None:
+    ticker = str(ticker or "").strip()
+    if not ticker:
+        return None
+    url = f"{KALSHI_PUBLIC}/markets/{ticker}"
+    data = _http_get_json(url, opener=opener, headers=MACRO_HARVEST_UA)
+    if isinstance(data, dict):
+        mkt = data.get("market") if isinstance(data.get("market"), dict) else data
+        return mkt if isinstance(mkt, dict) else None
+    return None
+
+
+def _poly_market_by_slug(slug: str, *, opener=None) -> dict | None:
+    slug = str(slug or "").strip()
+    if not slug:
+        return None
+    url = f"{POLY_GAMMA}/markets?slug={slug}"
+    data = _http_get_json(url, opener=opener, headers=POLY_HARVEST_UA)
+    if isinstance(data, list):
+        for row in data:
+            if isinstance(row, dict) and str(row.get("slug") or "") == slug:
+                return row
+        return data[0] if data and isinstance(data[0], dict) else None
+    if isinstance(data, dict):
+        return data
+    return None
+
+
+def _poly_yes_no_asks(market: dict) -> tuple[float | None, float | None]:
+    """Binary Poly yes ask + no ask from the same book.
+
+    yes_ask = bestAsk. no_ask = 1 − bestBid (binary complement of the yes bid) —
+    same book, not a second venue invent. Missing bid → no_ask None.
+    """
+    if not isinstance(market, dict):
+        return None, None
+    yes_ask = _finite(market.get("bestAsk"))
+    yes_bid = _finite(market.get("bestBid"))
+    if yes_ask is not None:
+        if yes_ask > 1.0 + 1e-12 and yes_ask <= 100.0:
+            yes_ask = yes_ask / 100.0
+        if not (0.0 < yes_ask < 1.0):
+            yes_ask = None
+    no_ask = None
+    if yes_bid is not None:
+        if yes_bid > 1.0 + 1e-12 and yes_bid <= 100.0:
+            yes_bid = yes_bid / 100.0
+        if 0.0 < yes_bid < 1.0:
+            no_ask = round(1.0 - float(yes_bid), 4)
+            if not (0.0 < no_ask < 1.0):
+                no_ask = None
+    return yes_ask, no_ask
+
+
+def _kalshi_yes_no_asks(market: dict) -> tuple[float | None, float | None]:
+    """Kalshi yes/no asks from dollars fields. Never invent the other side."""
+    if not isinstance(market, dict):
+        return None, None
+    yes_ask = _kalshi_yes_ask(market)
+    no_ask = None
+    for key in ("no_ask_dollars", "no_ask"):
+        n = _finite(market.get(key))
+        if n is None:
+            continue
+        if n > 1.0 + 1e-12 and n <= 100.0:
+            n = n / 100.0
+        if 0.0 < n < 1.0:
+            no_ask = float(n)
+            break
+    return yes_ask, no_ask
+
+
+def poly_kalshi_ask_harvest(
+    root: str | None = None,
+    *,
+    opener=None,
+    matches: list | None = None,
+) -> dict:
+    """Refresh Kalshi↔Polymarket asks for idea-bank match seeds.
+
+    Structural match map only (staff/seed). Live asks from both public books.
+    Incomplete legs stay incomplete — never invent a missing venue ask or fair.
+    Writes desk_poly_arb_pairs.json for cross_venue_arb_observe.
+    """
+    root = root or _root()
+    seeds = matches if matches is not None else list(POLY_ARB_MATCH_SEEDS)
+    # Optional staff override file (tickers/slugs only — no invented prices).
+    if matches is None and root:
+        path = os.path.join(root, "desk_poly_arb_matches.json")
+        if os.path.isfile(path):
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    blob = json.load(handle)
+                rows = blob.get("matches") if isinstance(blob, dict) else blob
+                if isinstance(rows, list) and rows:
+                    seeds = [r for r in rows if isinstance(r, dict)]
+            except (OSError, json.JSONDecodeError):
+                pass
+
+    pairs = []
+    complete_n = 0
+    incomplete_n = 0
+    for seed in seeds:
+        if not isinstance(seed, dict):
+            continue
+        label = str(seed.get("label") or seed.get("kalshi_ticker") or "pair")
+        k_ticker = str(seed.get("kalshi_ticker") or "").strip()
+        p_slug = str(seed.get("poly_slug") or "").strip()
+        venue = str(seed.get("kalshi_venue") or "kalshi_econ")
+        category = str(seed.get("poly_category") or "finance")
+        k_mkt = _kalshi_market_by_ticker(k_ticker, opener=opener) if k_ticker else None
+        p_mkt = _poly_market_by_slug(p_slug, opener=opener) if p_slug else None
+        k_yes, k_no = _kalshi_yes_no_asks(k_mkt or {})
+        p_yes, p_no = _poly_yes_no_asks(p_mkt or {})
+        row = {
+            "label": label,
+            "kalshi_ticker": k_ticker,
+            "poly_slug": p_slug,
+            "kalshi_venue": venue,
+            "poly_category": category,
+            "kalshi_yes_ask": round(k_yes, 4) if k_yes is not None else None,
+            "kalshi_no_ask": round(k_no, 4) if k_no is not None else None,
+            "poly_yes_ask": round(p_yes, 4) if p_yes is not None else None,
+            "poly_no_ask": round(p_no, 4) if p_no is not None else None,
+            "source": "live_public_books",
+            "idea_bank_only": True,
+        }
+        # Complete enough for at least one arb path.
+        path_a = k_yes is not None and p_no is not None
+        path_b = p_yes is not None and k_no is not None
+        if path_a or path_b:
+            complete_n += 1
+        else:
+            incomplete_n += 1
+        pairs.append(row)
+
+    out_path = os.path.join(root, "desk_poly_arb_pairs.json")
+    payload = {
+        "paper_only": True,
+        "idea_bank_only": True,
+        "observe_only": True,
+        "fee_floors_locked": True,
+        "note": (
+            "Live Kalshi↔Polymarket asks for structural match seeds. "
+            "Incomplete legs left null — never invent. Idea-bank only."
+        ),
+        "pairs": pairs,
+    }
+    try:
+        with open(out_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+            handle.write("\n")
+        wrote = True
+    except OSError as exc:
+        return {
+            "ok": False,
+            "paper_only": True,
+            "idea_bank_only": True,
+            "reason": f"write failed: {exc.__class__.__name__}",
+        }
+
+    board = cross_venue_arb_observe(root, pairs=pairs)
+    return {
+        "ok": True,
+        "paper_only": True,
+        "idea_bank_only": True,
+        "observe_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "wrote": wrote,
+        "pairs_path": out_path,
+        "seed_n": len(seeds),
+        "complete_n": complete_n,
+        "incomplete_n": incomplete_n,
+        "clears_n": int(board.get("clears_n") or 0),
+        "board": board,
+        "label": (
+            f"poly_harvest complete={complete_n}/{len(pairs)} "
+            f"clears={board.get('clears_n') or 0} idea_bank"
+        ),
+        "note": (
+            "Public Kalshi+Polymarket asks harvested for Fed Dec match seeds. "
+            "Fee wall still kills thin gaps. Never invent missing legs. Never LIVE."
+        ),
+    }
+
+
 def cpi_nowcast_probe(row: dict | None = None) -> dict:
     """Cleveland-Fed-style nowcast fair vs Kalshi CPI ask after fees.
 
