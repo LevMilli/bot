@@ -94,6 +94,37 @@ class HalfKellyCrbFeeSim(unittest.TestCase):
         self.assertGreaterEqual(board["clears_n"], 1)
         self.assertFalse(board["live_orders_enabled"])
 
+    def test_poly_arb_fee_wall_and_fat_gap(self):
+        thin = desk_roi_plan.cross_venue_arb_probe({
+            "label": "thin",
+            "kalshi_venue": "kalshi_sports",
+            "poly_category": "sports",
+            "kalshi_yes_ask": 0.48,
+            "poly_no_ask": 0.50,
+        })
+        self.assertTrue(thin["ok"])
+        self.assertFalse(thin["clear"])
+        self.assertIn("fee wall", thin["reason"].lower())
+        fat = desk_roi_plan.cross_venue_arb_probe({
+            "label": "fat",
+            "kalshi_venue": "kalshi_econ",
+            "poly_category": "geopolitics",
+            "kalshi_yes_ask": 0.40,
+            "poly_no_ask": 0.48,
+        })
+        self.assertTrue(fat["clear"])
+        self.assertGreaterEqual(fat["edge"], 0.05 - 1e-9)
+        incomplete = desk_roi_plan.cross_venue_arb_probe({
+            "kalshi_yes_ask": 0.45,
+        })
+        self.assertFalse(incomplete["ok"])
+        self.assertIn("no invent", incomplete["reason"].lower())
+        board = desk_roi_plan.cross_venue_arb_observe(".")
+        self.assertTrue(board["idea_bank_only"])
+        self.assertTrue(board["observe_only"])
+        self.assertFalse(board["live_orders_enabled"])
+        self.assertGreaterEqual(board["clears_n"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

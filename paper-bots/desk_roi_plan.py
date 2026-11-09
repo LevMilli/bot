@@ -7050,6 +7050,203 @@ def dutch_book_observe(
     }
 
 
+# Polymarket international taker coefficients (docs.polymarket.com/trading/fees).
+# US small-account 0.095 is worse — observe boards default to international.
+POLYMARKET_TAKER_RATE = {
+    "crypto": 0.07,
+    "sports": 0.05,
+    "economics": 0.05,
+    "econ": 0.05,
+    "weather": 0.05,
+    "culture": 0.05,
+    "other": 0.05,
+    "politics": 0.04,
+    "finance": 0.04,
+    "mentions": 0.04,
+    "tech": 0.04,
+    "geopolitics": 0.0,
+}
+
+
+def estimate_polymarket_fee(price, category: str = "other", contracts: float = 1.0) -> float:
+    """Polymarket international taker: rate × p × (1 − p) × C, ceil to 1¢."""
+    p = _finite(price)
+    n = _finite(contracts) or 1.0
+    if p is None or not (0.0 < p < 1.0) or n <= 0:
+        return 0.0
+    rate = POLYMARKET_TAKER_RATE.get(str(category or "other").strip().lower())
+    if rate is None:
+        rate = POLYMARKET_TAKER_RATE["other"]
+    raw = float(rate) * float(p) * (1.0 - float(p)) * float(n)
+    return math.ceil(round(raw * 100, 6)) / 100.0
+
+
+def cross_venue_arb_probe(
+    row: dict | None = None,
+    *,
+    kalshi_venue: str = "kalshi_sports",
+) -> dict:
+    """Kalshi↔Polymarket same-outcome arb probe after both taker fees.
+
+    Buy YES on the cheap book and NO on the other. Incomplete legs skip —
+    never invent a complementary ask. Idea-bank / observe only. Never LIVE.
+    """
+    import desk_profit
+
+    raw = row if isinstance(row, dict) else {}
+    venue_key = str(raw.get("kalshi_venue") or kalshi_venue or "kalshi_sports")
+    floor = float(desk_profit.DEFAULT_VENUE_MIN_EDGE.get(venue_key) or 0.0)
+    category = str(raw.get("poly_category") or raw.get("category") or "other")
+    k_yes = _finite(raw.get("kalshi_yes_ask") if raw.get("kalshi_yes_ask") is not None else raw.get("kalshi_ask"))
+    p_yes = _finite(raw.get("poly_yes_ask") if raw.get("poly_yes_ask") is not None else raw.get("poly_ask"))
+    k_no = _finite(raw.get("kalshi_no_ask"))
+    p_no = _finite(raw.get("poly_no_ask"))
+    base = {
+        "ok": False,
+        "clear": False,
+        "kalshi_venue": venue_key,
+        "floor": floor,
+        "poly_category": category,
+        "idea_bank_only": True,
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "label": str(raw.get("label") or raw.get("outcome") or ""),
+    }
+    paths = []
+    # Path A: Kalshi YES + Poly NO
+    if (
+        k_yes is not None and p_no is not None
+        and 0.0 < k_yes < 1.0 and 0.0 < p_no < 1.0
+    ):
+        k_fee = estimate_kalshi_fee(k_yes, 1.0)
+        p_fee = estimate_polymarket_fee(p_no, category, 1.0)
+        cost = float(k_yes) + float(k_fee) + float(p_no) + float(p_fee)
+        edge = 1.0 - cost
+        paths.append({
+            "path": "kalshi_yes+poly_no",
+            "cost": round(cost, 4),
+            "edge": round(edge, 4),
+            "kalshi_fee": round(float(k_fee), 4),
+            "poly_fee": round(float(p_fee), 4),
+            "clear": edge + 1e-12 >= floor,
+        })
+    # Path B: Poly YES + Kalshi NO
+    if (
+        p_yes is not None and k_no is not None
+        and 0.0 < p_yes < 1.0 and 0.0 < k_no < 1.0
+    ):
+        p_fee = estimate_polymarket_fee(p_yes, category, 1.0)
+        k_fee = estimate_kalshi_fee(k_no, 1.0)
+        cost = float(p_yes) + float(p_fee) + float(k_no) + float(k_fee)
+        edge = 1.0 - cost
+        paths.append({
+            "path": "poly_yes+kalshi_no",
+            "cost": round(cost, 4),
+            "edge": round(edge, 4),
+            "kalshi_fee": round(float(k_fee), 4),
+            "poly_fee": round(float(p_fee), 4),
+            "clear": edge + 1e-12 >= floor,
+        })
+    if not paths:
+        base["reason"] = "need complete YES+NO asks on both venues — no invent"
+        base["paths"] = []
+        return base
+    best = max(paths, key=lambda r: float(r.get("edge") or -99))
+    clear = bool(best.get("clear"))
+    base.update({
+        "ok": True,
+        "clear": clear,
+        "paths": paths,
+        "best": best,
+        "edge": best.get("edge"),
+        "reason": (
+            "cross-venue arb clears floor" if clear
+            else f"best edge {best.get('edge')} < floor {floor:g} (fee wall)"
+        ),
+    })
+    return base
+
+
+def cross_venue_arb_observe(
+    root: str | None = None,
+    *,
+    pairs: list | None = None,
+) -> dict:
+    """Kalshi↔Polymarket arb observe board. Idea-bank. Fee-true kill of thin gaps."""
+    path = None
+    if root:
+        cand = os.path.join(root, "desk_poly_arb_pairs.json")
+        if os.path.isfile(cand):
+            path = cand
+    loaded = []
+    if path:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                blob = json.load(handle)
+            if isinstance(blob, dict):
+                loaded = blob.get("pairs") or blob.get("rows") or []
+            elif isinstance(blob, list):
+                loaded = blob
+        except (OSError, json.JSONDecodeError):
+            loaded = []
+    default = pairs if pairs is not None else loaded
+    if not default:
+        # Demo fixtures: typical 1¢ mid gap dies after two fees; a fat gap can clear.
+        default = [
+            {
+                "label": "thin_gap_sports",
+                "kalshi_venue": "kalshi_sports",
+                "poly_category": "sports",
+                "kalshi_yes_ask": 0.48,
+                "poly_no_ask": 0.50,
+            },
+            {
+                "label": "fat_gap_geopolitics",
+                "kalshi_venue": "kalshi_econ",
+                "poly_category": "geopolitics",
+                "kalshi_yes_ask": 0.40,
+                "poly_no_ask": 0.48,
+            },
+            {
+                "label": "incomplete_pair",
+                "kalshi_venue": "kalshi_sports",
+                "poly_category": "sports",
+                "kalshi_yes_ask": 0.45,
+            },
+        ]
+    rows = []
+    clears = 0
+    for raw in default:
+        if not isinstance(raw, dict):
+            continue
+        probe = cross_venue_arb_probe(raw)
+        if probe.get("clear"):
+            clears += 1
+        rows.append(probe)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "idea_bank_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "ok": True,
+        "n": len(rows),
+        "clears_n": clears,
+        "pairs": rows,
+        "source": path,
+        "label": f"poly_arb clears={clears}/{len(rows)} floors_locked",
+        "note": (
+            "Kalshi↔Polymarket same-outcome arb after both taker fees. "
+            "Thin gaps fail the fee wall (research reject as a live tower). "
+            "Incomplete legs skipped — no invent. Idea-bank only. Never LIVE."
+        ),
+    }
+
+
 def half_kelly_crb_observe(
     root: str | None = None,
     *,
