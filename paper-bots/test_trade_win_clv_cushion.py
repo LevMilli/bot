@@ -101,6 +101,72 @@ class TradeWinClvCushionTests(unittest.TestCase):
             self.assertEqual(summ["n"], 0)
             self.assertEqual(summ["binary_excluded_n"], 1)
 
+    def test_midopen_wipe_line_clv_excluded_from_boost(self):
+        """Prefer-1 leftover after #446: gap-decay/flip wipe must not count as line."""
+        with tempfile.TemporaryDirectory() as tmp:
+            desk_more.record_sports_clv(
+                tmp,
+                ticker="KX-GAP-WIPE",
+                side="home",
+                fair_entry=0.55,
+                close_fair=1.0,
+                pnl=1.0,
+                league="NHL",
+                exit_reason="gap-decay",
+                clv_kind="line",
+            )
+            desk_more.record_sports_clv(
+                tmp,
+                ticker="KX-FLIP-WIPE",
+                side="home",
+                fair_entry=0.55,
+                close_fair=0.0,
+                pnl=-1.0,
+                league="NHL",
+                exit_reason="model-flip fair Δ≥0.08",
+                clv_kind="line",
+            )
+            desk_more.record_sports_clv(
+                tmp,
+                ticker="KX-GAP-LINE",
+                side="home",
+                fair_entry=0.55,
+                close_fair=0.72,
+                pnl=1.0,
+                league="NHL",
+                exit_reason="gap-decay",
+                clv_kind="line",
+            )
+            summ = desk_more.clv_summary(tmp)
+            self.assertEqual(summ["n"], 1)
+            self.assertEqual(summ["binary_excluded_n"], 2)
+            self.assertAlmostEqual(summ["beat_close_rate"], 0.0, places=4)
+            self.assertFalse(
+                desk_more._clv_counts_for_boost(
+                    {"clv": -0.45, "clv_kind": "line", "fair_close": 1.0, "exit": "gap-decay"}
+                )
+            )
+            self.assertTrue(
+                desk_more._clv_counts_for_boost(
+                    {"clv": -0.17, "clv_kind": "line", "fair_close": 0.72, "exit": "gap-decay"}
+                )
+            )
+
+    def test_gap_bot_midopen_sell_clv_refuses_wipe_fair(self):
+        """Mid-open PAPER SELL CLV densifies last_fair/last_mark; wipe → binary."""
+        gap_path = os.path.join(ROOT, "sports-gap-paper", "gap_bot.py")
+        with open(gap_path, encoding="utf-8") as fh:
+            src = fh.read()
+        sell_idx = src.find(
+            "# Prefer-1: mid-open wipe fair must not invent line CLV"
+        )
+        self.assertGreater(sell_idx, 0)
+        chunk = src[sell_idx:sell_idx + 2200]
+        self.assertIn('clv_kind = "binary"', chunk)
+        self.assertIn('("last_fair", "last_mark")', chunk)
+        self.assertIn("0.0 < ff < 1.0", chunk)
+        self.assertIn("clv_kind=clv_kind", chunk)
+
     def test_gap_bot_settle_clv_prefers_last_fair_not_wipe(self):
         """Hold-to-settle densify: stash last_fair; refuse Kalshi wipe 0/1 as line."""
         gap_path = os.path.join(ROOT, "sports-gap-paper", "gap_bot.py")
