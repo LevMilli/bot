@@ -138,6 +138,31 @@ class CoinbaseSpotRules(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(tmp, "desk_incubation.json")))
             _ = crashed
 
+    def test_card_prefers_feed_down_over_first_z_skip(self):
+        """ETH quiet + SOL TimeoutError must densify CARD as data fail (#457)."""
+        bot = _bot()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "coinbase-spot-paper"))
+            with open(os.path.join(HERE, "coinbase-spot-paper", "config.json"), encoding="utf-8") as handle:
+                cfg = json.load(handle)
+
+            def fetch(product: str):
+                if product == "SOL-USD":
+                    raise TimeoutError("candle fetch timed out")
+                if product == "ETH-USD":
+                    return _quiet()
+                return _quiet()
+
+            import io
+            from contextlib import redirect_stdout
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                bot.run_once(desk_root=tmp, cfg=cfg, fetch=fetch)
+            out = buf.getvalue()
+            self.assertIn("SKIP SOL-USD data TimeoutError", out)
+            self.assertIn("CARD: data TimeoutError", out)
+            self.assertNotRegex(out, r"CARD: z .* < ")
+
     def test_key_in_env_refuses(self):
         bot = _bot()
         with tempfile.TemporaryDirectory() as tmp:
