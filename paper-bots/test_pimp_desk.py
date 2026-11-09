@@ -1152,6 +1152,11 @@ class PimpDeskTests(unittest.TestCase):
             self.assertIn("drawdown halt", out.lower())
             self.assertIn("444.37", out)
             self.assertIn("460", out)
+            # Bland settle CARD must not hide the halt (HUD sibling).
+            bland = pimp_desk._kalshi_skip(
+                tmp, state, summary="CARD: No open paper positions.\n",
+            )
+            self.assertIn("drawdown halt", bland.lower())
             # Above halt → no mystery drawdown line.
             ok = pimp_desk._kalshi_skip(
                 tmp, {"bankroll": 500.0, "halted": False}, summary="",
