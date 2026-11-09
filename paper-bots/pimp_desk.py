@@ -1609,6 +1609,47 @@ def next_inx_scan_line(bot_id: str, now: dt.datetime | None = None) -> str:
     return f"Next {label} tomorrow {s['at_ct']} CT."
 
 
+def inx_in_run_window(bot_id: str, now: dt.datetime | None = None) -> bool:
+    """True when an INX tower's AUTO run/scan window is open (CT)."""
+    now = now or dt.datetime.now(CT)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=CT)
+    else:
+        now = now.astimezone(CT)
+    return any(
+        isinstance(slot, dict)
+        and str(slot.get("id") or "") == bot_id
+        and str(slot.get("action") or "") == "run"
+        and "at_ct" in slot
+        and _window_open(now, slot)
+        for slot in AUTO
+    )
+
+
+def _inx_bland_settle_summary(summary: str) -> bool:
+    """Empty-book settle output — must not wipe a densified in-window scan tip."""
+    text = str(summary or "").strip()
+    if not text:
+        return True
+    low = text.lower()
+    if "no trade" in low or low.startswith("card:"):
+        return False
+    # Sole / leading empty settle lines from bot.py settle with nothing open.
+    first = text.splitlines()[0].strip().lower().rstrip(".")
+    return first in ("no open paper positions", "no open paper position")
+
+
+def _inx_densified_scan_summary(summary: str) -> bool:
+    """Prior scan tip worth keeping over overlapping empty settle."""
+    low = str(summary or "").lower()
+    return (
+        "no trade" in low
+        or "card:" in low
+        or "inx fair" in low
+        or "staff cleared soft drawdown" in low
+        or "drawdown halt" in low
+    )
+
 def _btc_skip_card_body(summary: str) -> str:
     """Prefer densified evaluate CARD (#397) over generic no-buy boilerplate."""
     for line in str(summary or "").splitlines():
@@ -3415,8 +3456,27 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
                 f"Desk entry_gate blocked new paper buys; exits still ran.\n{gate_note}\n{summary}"
             )
         ok = (not timed_out) and proc.returncode == 0
+        # INX settle overlaps the sized/S&P scan window. Empty settle must not
+        # clobber densified NO TRADE / late-σ CARD tip (#497 twin densify).
+        kept_scan_tip = False
+        if (
+            ok
+            and action == "settle"
+            and bot_id in ("kalshi-sp", "kalshi-sized")
+            and _inx_bland_settle_summary(summary)
+            and inx_in_run_window(bot_id)
+        ):
+            prev_row = _load_runs(root).get(bot_id)
+            prev = prev_row if isinstance(prev_row, dict) else {}
+            prev_sum = str(prev.get("summary") or "")
+            if _inx_densified_scan_summary(prev_sum):
+                summary = prev_sum
+                kept_scan_tip = True
         row = {"at": _now(), "ok": ok, "summary": summary, "exit": proc.returncode, "action": action,
                "warning": warning, "entries_blocked": bool(block_entries)}
+        if kept_scan_tip:
+            row["kept_scan_tip"] = True
+            row["action"] = "run"  # tip stays scan-truth while settle found nothing open
         _save_run(root, bot_id, row)
         if not summary:
             summary = "The script finished with no output."
@@ -3429,6 +3489,7 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
         return {
             "ok": ok, "error": error, "summary": summary, "exit": proc.returncode,
             "warning": warning, "entries_blocked": bool(block_entries),
+            "kept_scan_tip": kept_scan_tip,
         }
     finally:
         lock.release()
@@ -5784,8 +5845,17 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
                 # Empty settle must not lead the why outside/inside scan (#497 twin) —
                 # lead with next-scan heartbeat so HUD is not a false empty-book miss.
                 why_low = why.lower()
+                # In an open scan window, empty settle must not lead the tip —
+                # sized/S&P HUD was reading as "In scan window… Settle…" while
+                # the real skip was late-σ / fair-p NO TRADE (#497 twin).
+                in_scan = heartbeat.lower().startswith("in scan window")
                 if "no open paper" in why_low:
-                    view["why"] = f"{heartbeat} Settle smoke: empty book."
+                    if in_scan and str(view.get("skip") or "").strip():
+                        view["why"] = plain_reason(view.get("skip") or "")
+                    elif in_scan:
+                        view["why"] = f"{heartbeat} Waiting on scan tip."
+                    else:
+                        view["why"] = f"{heartbeat} Settle smoke: empty book."
                 elif (
                     "no paper buy" in why_low
                     or "check finished" in why_low
