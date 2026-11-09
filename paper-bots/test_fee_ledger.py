@@ -178,6 +178,69 @@ class FeeLedger(unittest.TestCase):
             self.assertEqual(again["recorded"], 0)
             self.assertEqual(desk_roi_plan.fee_ledger_summary(tmp)["n"], 2)
 
+    def test_catchup_refuses_exit_price_fee_invent(self):
+        """Prefer-1: exit_price-only closed must not invent fee rows (#449 sibling)."""
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            sport = os.path.join(tmp, "sports-gap-paper")
+            os.makedirs(sport)
+            closed = [
+                # Wipe exit only — no stored fee / entry-side price → refuse invent.
+                {
+                    "ticker": "KXEXIT-ONLY",
+                    "side": "YES",
+                    "exit_price": 0.02,
+                    "pnl": -2.5,
+                    "contracts": 5,
+                    "closed": "2026-11-08T15:00:00Z",
+                },
+                # Entry companion bid only — also refuse (not an entry fill price).
+                {
+                    "ticker": "KXBID-ONLY",
+                    "side": "YES",
+                    "bid": 0.55,
+                    "pnl": 0.10,
+                    "contracts": 1,
+                    "closed": "2026-11-08T15:30:00Z",
+                },
+                # Honest: stored ask → estimate allowed.
+                {
+                    "ticker": "KXASK-OK",
+                    "side": "YES",
+                    "ask": 0.55,
+                    "pnl": 0.10,
+                    "contracts": 1,
+                    "closed": "2026-11-08T16:00:00Z",
+                },
+                # Honest: stored fee without ask still densifies (fee truth).
+                {
+                    "ticker": "KXFEE-OK",
+                    "side": "YES",
+                    "exit_price": 0.01,
+                    "fee": 0.02,
+                    "pnl": -1.0,
+                    "contracts": 1,
+                    "closed": "2026-11-08T16:30:00Z",
+                },
+            ]
+            with open(os.path.join(sport, "state.json"), "w", encoding="utf-8") as fh:
+                json.dump({"cash": 1000, "open": [], "closed": closed}, fh)
+
+            out = desk_roi_plan.backfill_fee_ledger_from_closed(tmp)
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["recorded"], 2)
+            summ = desk_roi_plan.fee_ledger_summary(tmp)
+            self.assertEqual(summ["n"], 2)
+            with open(os.path.join(tmp, "desk_fee_ledger.json"), encoding="utf-8") as fh:
+                ticks = {
+                    str(r.get("ticker"))
+                    for r in (json.load(fh).get("rows") or [])
+                }
+            self.assertEqual(ticks, {"KXASK-OK", "KXFEE-OK"})
+            self.assertNotIn("KXEXIT-ONLY", ticks)
+            self.assertNotIn("KXBID-ONLY", ticks)
+
     def test_catchup_surfaces_fee_ledger_backfill(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = desk_roi_plan.run_shadow_catchup(tmp)
