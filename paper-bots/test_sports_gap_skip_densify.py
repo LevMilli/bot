@@ -213,9 +213,12 @@ class SportsGapSkipDensify(unittest.TestCase):
         src = GAP.read_text(encoding="utf-8")
         idx = src.find('daily_r_blocks("sports-gap"')
         self.assertGreater(idx, 0)
-        chunk = src[idx:idx + 350]
+        chunk = src[idx:idx + 900]
         self.assertIn("skips.insert(0, r_block)", chunk)
         self.assertNotIn("skips\"].append(r_block)", chunk)
+        # #482 leftover: brain densify at settle-only + refuse max-buys invent.
+        self.assertIn("sports daily-r densify", chunk)
+        self.assertIn("settle_lock", src)
         gap = _load_gap()
         card = gap._card_line({
             "trades": [],
@@ -228,6 +231,16 @@ class SportsGapSkipDensify(unittest.TestCase):
         })
         self.assertIn("settle-only", card.lower())
         self.assertNotIn("gap < 6", card)
+
+    def test_daily_r_settle_only_classifies_budget_not_other(self):
+        """Settle-only skip taxonomy is BUDGET (fee-clear profit lock), not DATA/other."""
+        import desk_more
+        import desk_roi_plan
+
+        msg = desk_roi_plan.daily_r_blocks("sports-gap", 30.0)
+        self.assertIn("settle-only", msg.lower())
+        self.assertEqual(desk_more.classify_skip(msg), "budget")
+        self.assertEqual(desk_more.stable_skip_code("budget"), "BUDGET")
 
 
 if __name__ == "__main__":

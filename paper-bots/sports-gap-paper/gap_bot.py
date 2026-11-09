@@ -2010,6 +2010,16 @@ def run():
             skips = summary_out.setdefault("skips", [])
             skips.insert(0, r_block)
             max_buys_eff = 0
+            # Sibling brain/skip_board densify (#482 leftover): empty candidates
+            # never hit max-buys; do not wait for capacity invent.
+            if desk_brain is not None:
+                try:
+                    desk_brain.record_decision(
+                        DESK_ROOT, bot="sports-gap", action="skip",
+                        reasons=[r_block], note="sports daily-r densify",
+                    )
+                except Exception:
+                    pass
     except Exception:
         pass
     for c in buy_candidates:
@@ -2017,6 +2027,20 @@ def run():
         row, gtxt = c["row"], c["gtxt"]
         reason = None
         if buys_this_check >= max_buys_eff:
+            # Prefer-1: settle-only zeroed the cap — do not invent capacity skip
+            # into brain/Learning while CARD already names daily-R.
+            settle_lock = max_buys_eff == 0 and any(
+                "settle-only" in str(s).lower()
+                for s in (summary_out.get("skips") or [])
+            )
+            if settle_lock:
+                settle_why = next(
+                    str(s)
+                    for s in (summary_out.get("skips") or [])
+                    if "settle-only" in str(s).lower()
+                )
+                lines.append(row + gtxt + f" | {settle_why} |")
+                continue
             reason = f"max buys this check ({max_buys_eff})"
         elif red_pnl < 0 and str(c.get("lane") or "") == "speed":
             reason = f"speed lane off on red sports book (red ${red_pnl:.2f})"
