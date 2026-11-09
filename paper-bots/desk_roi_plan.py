@@ -198,7 +198,7 @@ DAILY_R_USD = 20.0  # 1R paper unit
 DAILY_R_BUDGET = {
     "sports-gap": 1.5,
     "btc15m": 2.0,
-    "commodity-15m": 1.5,
+    "commodity-15m": 2.0,
     "kalshi-sp": 1.0,
     "kalshi-sized": 1.0,
     "memecoin": 0.5,
