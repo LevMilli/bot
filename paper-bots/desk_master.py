@@ -488,10 +488,13 @@ def master_summary(
                 from datetime import datetime
                 from zoneinfo import ZoneInfo
                 today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-                latest_pl = desk_roi_plan.profit_lock_status(root).get("latest")
-                if not isinstance(latest_pl, dict) or str(latest_pl.get("label") or "") != today:
-                    desk_roi_plan.capture_profit_lock(root, bots=bots, label=today)
-            profit_lock = desk_roi_plan.profit_lock_status(root)
+                # Prefer live bots whenever provided — same-day stale week_pnl must
+                # not lag bleed_week / cold_harvest (#487 twin).
+                profit_lock = desk_roi_plan.capture_profit_lock(
+                    root, bots=bots, label=today,
+                )
+            else:
+                profit_lock = desk_roi_plan.profit_lock_status(root)
         except Exception:
             profit_lock = None
         living = None
