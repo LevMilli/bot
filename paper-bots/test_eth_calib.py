@@ -52,6 +52,30 @@ class EthCalib(unittest.TestCase):
             self.assertIn("eth_calibration", plan)
             self.assertTrue(plan.get("fee_floors_locked"))
 
+    def test_master_eth_calib_prefers_live_bots_over_stale(self):
+        """Same-day stale ETH calib n must not lag live history (#491 twin)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            morning = [{
+                "id": "btc15m",
+                "history": [
+                    {"series": "KXETH15M", "prob": 0.88, "pnl": -1.0},
+                ],
+                "open_risk": 0,
+                "gate_a": {},
+            }]
+            desk_roi_plan.capture_eth_calibration(tmp, bots=morning, label="2026-11-09")
+            stale = desk_roi_plan.latest_eth_calibration(tmp) or {}
+            self.assertEqual(int(stale.get("n") or 0), 1)
+            live = _bots()
+            for b in live:
+                b["open_risk"] = 0
+                b["gate_a"] = {}
+            summary = desk_master.master_summary(
+                tmp, bots=live, cfg={"max_open_risk": 100},
+            )
+            card = (summary.get("roi_plan") or {}).get("eth_calibration") or {}
+            self.assertEqual(int(card.get("n") or 0), 3)
+
     def test_calib_clv_observe_includes_eth(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = desk_roi_plan.calib_clv_observe(tmp, bots=_bots())
