@@ -167,6 +167,29 @@ class DeskMoreTests(unittest.TestCase):
             "CORR",
         )
 
+    def test_volatile_speed_already_open_classify_not_data_invent(self):
+        """Prefer-2: volatile/speed/already-open must not invent DATA (#527 leftover)."""
+        volatile = "volatile — holding for ≤5m parlay window"
+        eth_vol = "ETH volatile — hold for ≤5m parlay"
+        speed = "speed lane off on red sports book (red $-5.00)"
+        speed_meme = "speed lane blocked on red day (today $-3.00)"
+        already = "No commodity paper buy. already open."
+        self.assertEqual(desk_more.classify_skip(volatile), "vol_safe")
+        self.assertEqual(desk_more.classify_skip(eth_vol), "vol_safe")
+        self.assertEqual(
+            desk_more.stable_skip_code(desk_more.classify_skip(volatile)),
+            "BUDGET",
+        )
+        self.assertEqual(desk_more.classify_skip(speed), "budget")
+        self.assertEqual(desk_more.classify_skip(speed_meme), "budget")
+        self.assertEqual(desk_more.classify_skip(already), "already_holding")
+        # portfolio-corr still wins over bare "already open a … series" wording.
+        portfolio = (
+            "No commodity paper buy. portfolio corr: already open a energy series "
+            "(max 1 energy + 1 metal)."
+        )
+        self.assertEqual(desk_more.classify_skip(portfolio), "correlation")
+
 
 if __name__ == "__main__":
     unittest.main()
