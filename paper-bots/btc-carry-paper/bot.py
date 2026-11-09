@@ -75,6 +75,16 @@ BTC_2026_GROSS = (
     0.0046, -0.0007, -0.0009, -0.0015, 0.0025,
     0.0022, 0.0058, 0.0061, 0.0044, 0.0041,
 )
+# Same panel for ETH/SOL. ETH is the same factor as BTC — observe twin only,
+# never a second tower or desk risk share. SOL mean is red → reject.
+ETH_2026_GROSS = (
+    0.0041, -0.0030, -0.0011, -0.0012, 0.0030,
+    0.0007, 0.0035, 0.0047, 0.0042, 0.0028,
+)
+SOL_2026_GROSS = (
+    0.0020, -0.0102, -0.0053, 0.0001, 0.0005,
+    -0.0037, 0.0019, 0.0039, 0.0027, 0.0038,
+)
 
 
 def load_config(path: str | None = None) -> dict:
@@ -138,6 +148,63 @@ def score_months(gross: list[float] | tuple[float, ...]) -> dict:
     }
 
 
+def twin_research_card() -> dict:
+    """ETH observe twin + SOL reject. Same fee schedule. No second tower."""
+    btc = score_months(BTC_2026_GROSS)
+    eth = score_months(ETH_2026_GROSS)
+    sol = score_months(SOL_2026_GROSS)
+    return {
+        "paper_only": True,
+        "observe_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "window": "2026-01..2026-10",
+        "round_trip": ROUND_TRIP,
+        "monthly_haircut": MONTHLY_HAIRCUT,
+        "btc": {
+            "symbol": "BTCUSDT",
+            "role": "live_shadow_sleeve",
+            "held_median": btc["held_median"],
+            "held_mean": btc["held_mean"],
+            "flip_mean": btc["flip_mean"],
+            "pass": btc["pass"],
+            "flip_reject": btc["flip_reject"],
+            "second_tower": False,
+        },
+        "eth": {
+            "symbol": "ETHUSDT",
+            "role": "observe_twin_same_factor",
+            "held_median": eth["held_median"],
+            "held_mean": eth["held_mean"],
+            "flip_mean": eth["flip_mean"],
+            "pass": eth["pass"],
+            "flip_reject": eth["flip_reject"],
+            # Research: same factor as BTC — a line inside the sleeve, not a folder.
+            "second_tower": False,
+            "opens_desk_cash": False,
+            "note": "Observe twin only. Do not open a second carry tower.",
+        },
+        "sol": {
+            "symbol": "SOLUSDT",
+            "role": "reject_mean_red",
+            "held_median": sol["held_median"],
+            "held_mean": sol["held_mean"],
+            "flip_mean": sol["flip_mean"],
+            "pass": False,
+            "flip_reject": True,
+            "second_tower": False,
+            "opens_desk_cash": False,
+            "note": "2026 held mean red after haircut — reject as sleeve or twin.",
+        },
+        "note": (
+            "Funding-carry twins from the published 2026 archive panel. "
+            "Only BTC opens the shadow sleeve. ETH is observe-only. SOL is reject. "
+            "Never invent marks. Never LIVE."
+        ),
+    }
+
+
 def research_card(cfg: dict | None = None) -> dict:
     cfg = locked_cfg(cfg)
     study = score_months(BTC_2026_GROSS)
@@ -164,12 +231,16 @@ def research_card(cfg: dict | None = None) -> dict:
             "flip_mean": study["flip_mean"],
             "note": "Published archive sample. Not this sleeve's own pnl.",
         },
+        "twins": twin_research_card(),
         "auto_promote": False,
     }
 
 
-def archive_urls(now: dt.datetime) -> list[tuple[str, str]]:
+def archive_urls(now: dt.datetime, symbol: str = "BTCUSDT") -> list[tuple[str, str]]:
     """Public vision files only. The fapi host is not used."""
+    sym = str(symbol or "BTCUSDT").upper()
+    if sym not in ("BTCUSDT", "ETHUSDT", "SOLUSDT"):
+        sym = "BTCUSDT"
     months = []
     cursor = now.astimezone(dt.timezone.utc).date().replace(day=1)
     for _ in range(2):
@@ -179,18 +250,18 @@ def archive_urls(now: dt.datetime) -> list[tuple[str, str]]:
     for ym in months:
         urls.append((
             "funding",
-            f"{VISION}/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-{ym}.zip",
+            f"{VISION}/monthly/fundingRate/{sym}/{sym}-fundingRate-{ym}.zip",
         ))
         urls.append((
             "premium",
-            f"{VISION}/monthly/premiumIndexKlines/BTCUSDT/8h/BTCUSDT-8h-{ym}.zip",
+            f"{VISION}/monthly/premiumIndexKlines/{sym}/8h/{sym}-8h-{ym}.zip",
         ))
     day = now.astimezone(dt.timezone.utc).date()
     for delta in (1, 2):
         stamp = (day - dt.timedelta(days=delta)).isoformat()
         urls.append((
             "funding",
-            f"{VISION}/daily/fundingRate/BTCUSDT/BTCUSDT-fundingRate-{stamp}.zip",
+            f"{VISION}/daily/fundingRate/{sym}/{sym}-fundingRate-{stamp}.zip",
         ))
     return urls
 
@@ -239,14 +310,20 @@ def _csv_from_zip(blob: bytes) -> str:
         return archive.read(names[0]).decode("utf-8", errors="replace")
 
 
-def fetch_marks(now: dt.datetime | None = None, opener=None) -> dict:
+def fetch_marks(
+    now: dt.datetime | None = None,
+    opener=None,
+    *,
+    symbol: str = "BTCUSDT",
+) -> dict:
     """Read the public archive. A missing file is skipped. No fapi call."""
     now = now or dt.datetime.now(dt.timezone.utc)
     opener = opener or _urlopen
+    sym = str(symbol or "BTCUSDT").upper()
     funding: list[dict] = []
     premium: list[dict] = []
     errors: list[str] = []
-    for kind, url in archive_urls(now):
+    for kind, url in archive_urls(now, symbol=sym):
         if "fapi.binance.com" in url:
             errors.append("refusing fapi host")
             continue
@@ -265,9 +342,38 @@ def fetch_marks(now: dt.datetime | None = None, opener=None) -> dict:
     funding = _dedupe_rows(funding)
     premium = _dedupe_rows(premium)
     return {
+        "symbol": sym,
         "funding": funding,
         "premium": premium,
+        "observe_only": sym != "BTCUSDT",
+        "opens_desk_cash": sym == "BTCUSDT",
         "error": "" if funding or premium else (errors[0] if errors else "no archive rows"),
+    }
+
+
+def observe_twin_marks(
+    now: dt.datetime | None = None,
+    opener=None,
+) -> dict:
+    """Fetch ETH (+ optional SOL) archive marks for observe only. Never opens cash."""
+    now = now or dt.datetime.now(dt.timezone.utc)
+    eth = fetch_marks(now, opener=opener, symbol="ETHUSDT")
+    sol = fetch_marks(now, opener=opener, symbol="SOLUSDT")
+    return {
+        "paper_only": True,
+        "observe_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "opens_desk_cash": False,
+        "second_tower": False,
+        "eth": eth,
+        "sol": sol,
+        "research": twin_research_card(),
+        "note": (
+            "ETH/SOL archive marks are observe-only twins. "
+            "Only BTCUSDT may open the shadow sleeve."
+        ),
     }
 
 
@@ -655,6 +761,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if "--research" in argv:
         print(json.dumps(research_card(), indent=2))
+        return 0
+    if "--twins" in argv:
+        # Observe-only ETH/SOL twin board. Never opens desk cash.
+        print(json.dumps(twin_research_card(), indent=2, sort_keys=True))
         return 0
     return run_once()
 

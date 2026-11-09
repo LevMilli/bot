@@ -7794,6 +7794,59 @@ def vol_curve_observe(
     }
 
 
+def funding_carry_twins_observe(root: str | None = None) -> dict:
+    """ETH observe twin + SOL reject beside the BTC carry sleeve.
+
+    Research rule: ETH is the same factor — a line inside BTC carry, not a
+    second tower. SOL 2026 mean is red — reject. Never opens desk cash.
+    """
+    del root
+    tower = os.path.join(_root(), "btc-carry-paper", "bot.py")
+    twins = None
+    reason = ""
+    if os.path.isfile(tower):
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("btc_carry_twins", tower)
+            mod = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(mod)
+            twins = mod.twin_research_card()
+        except Exception as exc:
+            reason = f"btc-carry twin import failed: {exc.__class__.__name__}"
+    else:
+        reason = "btc-carry tower missing"
+    if not isinstance(twins, dict):
+        return {
+            "ok": False,
+            "paper_only": True,
+            "observe_only": True,
+            "fee_floors_locked": True,
+            "auto_promote": False,
+            "live_orders_enabled": False,
+            "second_tower": False,
+            "reason": reason or "twin card unavailable",
+        }
+    return {
+        "ok": True,
+        "paper_only": True,
+        "observe_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "second_tower": False,
+        "opens_desk_cash": False,
+        "twins": twins,
+        "label": (
+            "funding_twins btc=hold eth=observe sol=reject "
+            "no_second_tower floors_locked"
+        ),
+        "note": twins.get("note") or (
+            "ETH observe twin / SOL reject. Only BTC opens the shadow sleeve."
+        ),
+    }
+
+
 def half_kelly_crb_observe(
     root: str | None = None,
     *,

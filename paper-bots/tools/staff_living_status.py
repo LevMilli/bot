@@ -1741,7 +1741,7 @@ def main() -> int:
             "baseline-fee", "baseline-capture", "fee-ledger",
             "half-kelly-crb", "fee-sim", "dutch-book", "sharp-lag-harvest",
             "fed-watch-harvest", "poly-arb", "cpi-nowcast", "vol-curve",
-            "vol-curve-harvest",
+            "vol-curve-harvest", "funding-twins",
             "commodity-tstop-status", "commodity-tstop-promote",
             "commodity-tstop-promote-ready",
             "sports-tfinal-status", "sports-tfinal-promote",
@@ -4390,6 +4390,10 @@ def main() -> int:
         return 0
     if args.action == "vol-curve-harvest":
         out = desk_roi_plan.vol_curve_harvest(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "funding-twins":
+        out = desk_roi_plan.funding_carry_twins_observe(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
     if args.action == "fee-ledger":

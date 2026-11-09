@@ -94,6 +94,39 @@ class BtcCarryRules(unittest.TestCase):
         self.assertIn("reject", card["pass_bar"])
         self.assertEqual(card["flat_card"], bot.FLAT_CARD)
 
+    def test_eth_observe_twin_sol_reject_no_second_tower(self):
+        bot = _bot()
+        twins = bot.twin_research_card()
+        self.assertFalse(twins["eth"]["second_tower"])
+        self.assertFalse(twins["eth"]["opens_desk_cash"])
+        self.assertEqual(twins["eth"]["role"], "observe_twin_same_factor")
+        self.assertTrue(twins["eth"]["pass"])
+        self.assertEqual(twins["sol"]["role"], "reject_mean_red")
+        self.assertFalse(twins["sol"]["pass"])
+        self.assertLess(twins["sol"]["held_mean"], 0.0)
+        card = bot.research_card()
+        self.assertIn("twins", card)
+        self.assertFalse(card["twins"]["eth"]["second_tower"])
+        # ETH/SOL archive URLs stay on vision; never fapi; never invent BTC open.
+        eth_urls = bot.archive_urls(
+            bot._parse_time("2026-11-09T00:00:00+00:00"), symbol="ETHUSDT",
+        )
+        self.assertTrue(any("ETHUSDT" in url for _, url in eth_urls))
+        self.assertFalse(any("fapi.binance.com" in url for _, url in eth_urls))
+        marks = bot.fetch_marks(
+            bot._parse_time("2026-11-09T00:00:00+00:00"),
+            opener=lambda url: None,
+            symbol="ETHUSDT",
+        )
+        self.assertTrue(marks["observe_only"])
+        self.assertFalse(marks["opens_desk_cash"])
+        import desk_roi_plan
+        board = desk_roi_plan.funding_carry_twins_observe(".")
+        self.assertTrue(board["ok"])
+        self.assertTrue(board["observe_only"])
+        self.assertFalse(board["second_tower"])
+        self.assertFalse(board["live_orders_enabled"])
+
     def test_flat_card_when_there_is_no_mark(self):
         bot = _bot()
         now = bot._parse_time("2026-03-01T00:00:00+00:00")
