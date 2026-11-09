@@ -21,6 +21,7 @@ pretend ("paper") account in local files.
 | `memecoin-paper/` | Solana meme-coin paper bot: strict rug-pull filter, paper buys at real prices, stop/ladder/trailing exits | DexScreener, RugCheck |
 | `btc15m-signal/` | `btc15m_signal.py`: Bitcoin 15-minute Kalshi **paper** bot. Prints BUY or SKIP, paper-fills into `paper_account.json` when the checklist clears; **real TP + model-flip + settle** | Kalshi, Coinbase, Kraken, Bitstamp, Deribit DVOL, ForexFactory calendar |
 | `coinbase-spot-paper/` | Shadow Coinbase spot tower. Public 15m candles. Longs only when excess return clears the locked 0.05 floor after the US intro taker. Spends no desk cash | Coinbase Exchange public candles (no key) |
+| `btc-carry-paper/` | Shadow BTC spot-long / perpetual-short carry. Unlevered and held. Round trip 0.30%, paid rarely. Spends no desk cash | Binance public archive funding and premium index (no key) |
 | `TEAM_ROLES.md` | How the "desk" of helper bots was organized, and the safety rules | — |
 | `DESK_ROI_SYSTEM.md` | Desk-wide ROI rules every present bot must follow (paper only) | — |
 | `BUY_SELL_FAILSAFE_INVENTORY.md` | Per-bot buy / sell / failsafe thresholds + entry_gate map | — |
@@ -79,6 +80,10 @@ empty paper account: no trade history or saved state is included in this pack.
 ## Coinbase spot tower (shadow)
 
 `coinbase-spot-paper/` is a separate book from the BTC 15-minute Kalshi tower. Coinbase is only a price feed for that tower. This one paper-trades ETH-USD and SOL-USD on public candles, long only, and only when a 15-minute move still clears the US intro taker (0.90% a side) plus slippage plus the locked `coinbase_spot` floor of 0.05. Ordinary bars skip. BTC-USD is logged and never bought. The sleeve is shadow: $500 of its own paper cash, no desk risk share. New towers follow `TOWER_SETUP.md`.
+
+## BTC carry tower (shadow)
+
+`btc-carry-paper/` is a different book again. It is long BTC spot and short the BTC perpetual, unlevered, and held. The mark uses the Binance regular schedule: spot taker 0.10%, perp taker 0.05%, round trip 0.30%, paid when the hold opens and not every month. It does not use the Coinbase 0.90% taker, and it does not change the BTC 15-minute floor of 0.05. A red funding month is marked, not flipped. The sleeve is shadow: $500 of its own paper cash, no desk risk share, no auto-promote. The pass bar is an after-fee monthly median that stays positive. Flipping every month is a reject.
 
 ## Living Trading Upgrade (staff pulse)
 Paper-only living spine — floors locked, never auto-publishes Discord.

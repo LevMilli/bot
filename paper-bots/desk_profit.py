@@ -19,6 +19,8 @@ VENUE_KEYS = (
     "solana_dex",
     # Spot return-after-cost floor. Same 0.05 number as BTC, different unit.
     "coinbase_spot",
+    # Registry lock for the held carry. Not the btc15m 0.05 per-trade floor.
+    "binance_btc_carry",
 )
 
 DEFAULT_VENUE_MIN_EDGE = {
@@ -28,6 +30,7 @@ DEFAULT_VENUE_MIN_EDGE = {
     "kalshi_inx": 0.02,
     "solana_dex": 0.02,
     "coinbase_spot": 0.05,
+    "binance_btc_carry": 0.02,
 }
 
 # Display / board tax: assume +1¢ adverse vs stored ask when grading ROI honesty.
@@ -54,6 +57,7 @@ BOT_VENUE = {
     "kalshi-sized": "kalshi_inx",
     "memecoin": "solana_dex",
     "coinbase-spot": "coinbase_spot",
+    "btc-carry": "binance_btc_carry",
 }
 
 

@@ -6208,6 +6208,22 @@ def default_exit_plan(bot: str) -> dict:
             "fee_floors_locked": True,
             "note": "INX sized exits: model-flip when fair drifts; settle backstop; twin+1¢ edge locked.",
         }
+    if b in ("btc-carry", "btc_carry"):
+        return {
+            "kind": "hold+refuse_monthly_flip",
+            "hold": True,
+            "red_month_exit": False,
+            "monthly_flip": False,
+            "staff_close_backstop": True,
+            "shadow_only": True,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+            "unlevered": True,
+            "note": (
+                "Held unlevered BTC carry. A red funding month is a mark, not a flip. "
+                "Staff close is the backstop. No auto-promote."
+            ),
+        }
     if b in ("coinbase-spot", "coinbase"):
         return {
             "kind": "stop+take_profit+model_flip+time",

@@ -533,6 +533,43 @@
       "sizing_mode": "fixed",
       "shadow": null,
       "risk_factors_open": []
+    },
+    {
+      "id": "btc-carry",
+      "name": "BTC carry",
+      "present": true,
+      "status": "skipped",
+      "cash": 500.0,
+      "realized": 0.0,
+      "today": 0.0,
+      "open_count": 0,
+      "open_risk": 0.0,
+      "paused": false,
+      "shadow_only": true,
+      "feed": null,
+      "why": "flat - BTC spot long / perp short not open; 0.30% round trip unpaid",
+      "skip": "flat",
+      "idle_copy": "Shadow sleeve. No desk cash.",
+      "empty": "",
+      "last_check": "",
+      "positions": [],
+      "trades": [],
+      "history": [],
+      "has_state": true,
+      "blurb": "Shadow BTC spot-long / perp-short carry. Held and unlevered. Spends no desk cash.",
+      "plans": {
+        "buy": ["Open the unlevered pair once when public funding and premium marks exist"],
+        "sell": ["Hold through a red month. A monthly flip is a reject"],
+        "failsafes": ["Shadow only. Round trip 0.30%. No key."],
+        "exit_quality": "partial",
+        "entry_gated": true,
+        "stake": "sleeve-500"
+      },
+      "gates_hit": [],
+      "venue_min_edge": 0.02,
+      "sizing_mode": "fixed",
+      "shadow": null,
+      "risk_factors_open": []
     }
   ],
   "limits": {
@@ -542,7 +579,8 @@
       "kalshi_btc15m": 0.05,
       "kalshi_inx": 0.0,
       "solana_dex": 0.02,
-      "coinbase_spot": 0.05
+      "coinbase_spot": 0.05,
+      "binance_btc_carry": 0.02
     },
     "sizing": "kelly_lite"
   }

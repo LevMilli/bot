@@ -1,0 +1,13 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "venue": "binance_btc_carry",
+  "symbol": "BTCUSDT",
+  "spot_taker": 0.001,
+  "perp_taker": 0.0005,
+  "notional_usd": 500,
+  "leverage": 1,
+  "starter_cash": 500,
+  "fee_note": "Binance regular user. Spot taker 0.10%, USD-M perp taker 0.05%. Round trip 0.30%, paid once when the hold opens and once if a person later closes it. Not the Coinbase 0.90% taker. Not charged every month."
+}
