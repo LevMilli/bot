@@ -995,7 +995,17 @@ def run():
             pair = match_event(g, markets)
             try:
                 summ = espn_summary(path, g["id"])
-                fair_home = nhl_model(summ, g) if src != "espn" else espn_fair_home(summ, g)
+                if src != "espn":
+                    fair_home = nhl_model(summ, g)
+                    # Prefer-3: rem=0 End-of-period (still state=in) wipes exact
+                    # 0/1 — reuse settle plays walkback so open-hold last_fair /
+                    # exit CLV stay line (#445 mid-open sibling).
+                    if _line_clv_fair_home(fair_home) is None:
+                        walked = _nhl_settle_line_fair(summ, g)
+                        if walked is not None:
+                            fair_home = walked
+                else:
+                    fair_home = espn_fair_home(summ, g)
             except Exception as e:
                 fair_home = None
             if not pair:
@@ -1404,12 +1414,15 @@ def run():
             if fair_home is not None:
                 fair = fair_home if p["side"] == "home" else 1 - fair_home
             # Stash rolling model fair for hold-to-settle line CLV densify.
-            # ESPN finals strip fair_home; without this, settle falls back to wipe 0/1.
+            # Refuse exact 0/1 wipe (mirror last_mark) — End-of-period NHL rem=0
+            # must not poison green line CLV / settle fallback.
             if fair is not None:
                 try:
-                    p["last_fair"] = round(float(fair), 4)
+                    fair_f = float(fair)
                 except (TypeError, ValueError):
-                    pass
+                    fair_f = None
+                if fair_f is not None and 0.0 < fair_f < 1.0:
+                    p["last_fair"] = round(fair_f, 4)
             # When model fair is absent, stash mid-open Kalshi mark (non-wipe) so
             # settle CLV can stay line — HS/t-final already densify from bid alone.
             if bid is not None:
