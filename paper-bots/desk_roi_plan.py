@@ -11242,7 +11242,15 @@ def plan_summary(
         "sports_green_boost": sports_green_boost_status(root, bots=bots),
         "green_or_gone": green_or_gone_status(bots),
         "btc_calibration": btc_calibration_report(bots),
-        "firm_queue": firm_queue_status(root),
+        # Prefer live offer book whenever bots are provided (#495 Masters twin).
+        "firm_queue": (
+            (
+                capture_firm_queue(root, bots=bots, cfg=cfg),
+                firm_queue_status(root),
+            )[1]
+            if (root and bots)
+            else firm_queue_status(root)
+        ),
         "empty_card": empty_card_status(root),
         "empty_card_series": empty_card_series_board(root),
         "depth_adjusted_edge": depth_adjusted_edge_board(root),

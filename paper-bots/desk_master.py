@@ -804,13 +804,11 @@ def master_summary(
         except Exception:
             plan["commodity_calibration"] = None
         try:
-            status_fq = desk_roi_plan.firm_queue_status(root)
-            offers_n = int((status_fq or {}).get("offers_n") or 0)
-            latest_fq = (status_fq or {}).get("latest")
-            if root and offers_n > 0 and not isinstance(latest_fq, dict):
+            # Prefer live offer book whenever bots are provided — same-day stale
+            # capture must not keep cleared offers_n (#495 skip-regret twin).
+            if root and bots:
                 desk_roi_plan.capture_firm_queue(root, bots=bots, cfg=cfg)
-                status_fq = desk_roi_plan.firm_queue_status(root)
-            plan["firm_queue"] = status_fq
+            plan["firm_queue"] = desk_roi_plan.firm_queue_status(root)
         except Exception:
             plan["firm_queue"] = None
         try:
