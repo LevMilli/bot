@@ -283,6 +283,78 @@ class CommodityTimeStop(unittest.TestCase):
             ).get("rows") or []
             self.assertEqual(rows[0].get("ticker"), "KXWTI-PAST-BELL")
 
+    def test_catchup_refuses_entry_companion_bid_invent(self):
+        """#448 sibling: settled closed[] keeps open-time bid — never invent t-stop."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cmd_dir = os.path.join(tmp, "commodity-15m-paper")
+            os.makedirs(cmd_dir, exist_ok=True)
+            close_iso = "2026-11-08T12:15:00Z"
+            # Winner settle — entry companion bid underwater would invent poison.
+            winner_bid_only = {
+                "ticker": "KXWTI-WIN-BID",
+                "side": "YES",
+                "series": "KXWTI15M",
+                "close_time": close_iso,
+                "entry": 0.60,
+                "ask": 0.60,
+                "bid": 0.40,  # entry companion — not an exit mark
+                "cost": 6.0,
+                "contracts": 10,
+                "pnl": 4.0,
+                "exit": "settled",
+                "closed": "2026-11-08 12:15:02 UTC",
+            }
+            # Loser settle without exit_price — settle-retro live path densifies;
+            # catchup must not invent from entry companion.
+            loser_bid_only = {
+                "ticker": "KXWTI-LOSE-BID",
+                "side": "YES",
+                "series": "KXWTI15M",
+                "close_time": close_iso,
+                "entry": 0.60,
+                "ask": 0.60,
+                "bid": 0.40,
+                "cost": 6.0,
+                "contracts": 10,
+                "pnl": -6.0,
+                "exit": "settled",
+                "closed": "2026-11-08 12:15:02 UTC",
+            }
+            # Honest near-close flip still densifies via exit_price.
+            flip_exit = {
+                "ticker": "KXWTI-FLIP-EXIT",
+                "side": "YES",
+                "series": "KXWTI15M",
+                "close_time": close_iso,
+                "entry": 0.60,
+                "bid": 0.59,
+                "exit_price": 0.40,
+                "cost": 6.0,
+                "contracts": 10,
+                "pnl": -2.0,
+                "exit": "model-flip fair Δ≥0.08",
+                "closed": "2026-11-08 12:13:00 UTC",
+            }
+            with open(os.path.join(cmd_dir, "paper_account.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "cash": 100.0,
+                    "open": [],
+                    "closed": [winner_bid_only, loser_bid_only, flip_exit],
+                    "paper_only": True,
+                }, fh)
+            out = desk_roi_plan.backfill_commodity_time_stop_from_closed(tmp)
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out["recorded"], 1, out)
+            summ = desk_roi_plan.commodity_time_stop_shadow_summary(tmp)
+            self.assertEqual(summ["n"], 1)
+            rows = desk_roi_plan._load(
+                desk_roi_plan._path(desk_roi_plan.COMMODITY_TIME_STOP_SHADOW, tmp),
+                {"rows": []},
+            ).get("rows") or []
+            self.assertEqual(rows[0].get("ticker"), "KXWTI-FLIP-EXIT")
+            note = str(out.get("note") or "")
+            self.assertIn("never entry companion bid", note)
+
     def test_bot_densify_before_model_flip(self):
         bot_src = os.path.join(HERE, "commodity-15m-paper", "bot.py")
         with open(bot_src, encoding="utf-8") as fh:
@@ -295,6 +367,11 @@ class CommodityTimeStop(unittest.TestCase):
         with open(plan_path, encoding="utf-8") as fh:
             plan_src = fh.read()
         self.assertIn("backfill_commodity_time_stop_from_closed", plan_src)
+        self.assertIn('("exit_price", "exit_bid", "mark_bid")', plan_src)
+        self.assertNotIn(
+            '("exit_price", "exit_bid", "mark_bid", "bid")',
+            plan_src,
+        )
 
 
 if __name__ == "__main__":
