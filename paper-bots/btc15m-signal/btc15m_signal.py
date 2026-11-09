@@ -355,10 +355,63 @@ def paper_sell(state, pos, bid, fee, reason):
     return pnl
 
 
-def manage_model_flips(state, side_now, prob_now, bid, fee, delta, ticker=None):
+def listing_bid_for_side(market, side):
+    """Listing bid for YES/NO from a kalshi market row. None if missing."""
+    if not isinstance(market, dict):
+        return None
+    s = str(side or "").upper()
+    if s == "YES":
+        return fnum(market.get("yes_bid"))
+    if s == "NO":
+        return fnum(market.get("no_bid"))
+    return None
+
+
+def mark_bid_for_held(pos, *, model_side=None, model_bid=None, market=None):
+    """Bid that marks the *held* contract — never the complementary model side.
+
+    On side flips `evaluate_window` quotes the new model side. Selling YES inventory
+    at the NO bid (or vice versa) invents PnL. Prefer same-side model bid, else
+    listing for held, else a live held-side book. Refuse complementary invent.
+
+    When model_side is omitted (legacy callers), model_bid is treated as already
+    held-side — keep prior behavior.
+    """
+    held = str((pos or {}).get("side") or "").upper()
+    ms = str(model_side or "").upper()
+    if model_bid is not None and (not ms or (held and held == ms)):
+        try:
+            b = float(model_bid)
+            if b > 0:
+                return b
+        except (TypeError, ValueError):
+            pass
+    if ms and held and held != ms:
+        listing = listing_bid_for_side(market, held)
+        if listing is not None and float(listing) > 0:
+            return float(listing)
+        ticker = str((pos or {}).get("ticker") or "")
+        if ticker and held in ("YES", "NO"):
+            try:
+                b, _, _ = book_for_side(ticker, held)
+                if b is not None and float(b) > 0:
+                    return float(b)
+            except Exception:
+                pass
+        return None
+    listing = listing_bid_for_side(market, held)
+    if listing is not None and float(listing) > 0:
+        return float(listing)
+    return None
+
+
+def manage_model_flips(
+    state, side_now, prob_now, bid, fee, delta, ticker=None, market=None,
+):
     """Exit open BTC paper when the live model flips against the held side.
 
     When `ticker` is set, only positions on that market are evaluated (multi-window runs).
+    Sell mark is always the held-side bid (see mark_bid_for_held).
     """
     still = []
     sold = []
@@ -382,26 +435,38 @@ def manage_model_flips(state, side_now, prob_now, bid, fee, delta, ticker=None):
                     reason = f"model-flip fair Δ≥{delta:g}"
             except Exception:
                 pass
-        if flip and bid is not None and float(bid) > 0:
-            pnl = paper_sell(state, pos, bid, fee, reason)
-            sold.append(f"{pos.get('ticker')} {reason} pnl {pnl:+.2f}")
-        else:
+        if not flip:
             still.append(pos)
+            continue
+        mark = mark_bid_for_held(
+            pos, model_side=side_now, model_bid=bid, market=market,
+        )
+        if mark is None or float(mark) <= 0:
+            still.append(pos)
+            continue
+        mark_fee = fee_per_contract(mark)
+        pnl = paper_sell(state, pos, mark, mark_fee, reason)
+        sold.append(f"{pos.get('ticker')} {reason} pnl {pnl:+.2f}")
     state["open"] = still
     return sold
 
 
-def manage_take_profits(state, bid, fee, ticker=None):
-    """Execute stored take-profit when bid reaches fill+TAKE_PROFIT_ADD (paper only).
+def manage_take_profits(state, bid, fee, ticker=None, market=None, model_side=None):
+    """Execute stored take-profit when held-side bid reaches take_profit (paper only).
 
     Replaces the old advisory-only TP print. Fee floors unchanged.
+    Never marks held inventory at the complementary model-side bid.
     """
     still = []
     sold = []
-    if bid is None or float(bid) <= 0:
-        return sold
     for pos in list(state.get("open") or []):
         if ticker and pos.get("ticker") != ticker:
+            still.append(pos)
+            continue
+        mark = mark_bid_for_held(
+            pos, model_side=model_side, model_bid=bid, market=market,
+        )
+        if mark is None or float(mark) <= 0:
             still.append(pos)
             continue
         tp = pos.get("take_profit")
@@ -416,9 +481,10 @@ def manage_take_profits(state, bid, fee, ticker=None):
                 tp_f = min(round(ask0 + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP) if ask0 > 0 else None
             except (TypeError, ValueError):
                 tp_f = None
-        if tp_f is not None and float(bid) + 1e-12 >= tp_f:
-            reason = f"take-profit bid {float(bid):.2f} ≥ {tp_f:.2f}"
-            pnl = paper_sell(state, pos, bid, fee, reason)
+        if tp_f is not None and float(mark) + 1e-12 >= tp_f:
+            mark_fee = fee_per_contract(mark)
+            reason = f"take-profit bid {float(mark):.2f} ≥ {tp_f:.2f}"
+            pnl = paper_sell(state, pos, mark, mark_fee, reason)
             sold.append(f"{pos.get('ticker')} {reason} pnl {pnl:+.2f}")
         else:
             still.append(pos)
@@ -1518,6 +1584,7 @@ def main():
             tp_fee = fee_per_contract(ev["bid"]) if ev["bid"] else 0
             tp_sold = manage_take_profits(
                 account, ev["bid"], tp_fee, ticker=ev.get("ticker"),
+                market=m, model_side=ev.get("side"),
             )
             if tp_sold:
                 save_account(account)
@@ -1550,6 +1617,7 @@ def main():
                 fee_per_contract(ev["bid"]) if ev["bid"] else 0,
                 flip_delta,
                 ticker=ev.get("ticker"),
+                market=m,
             )
             if sold:
                 save_account(account)
@@ -1996,6 +2064,7 @@ def main():
             eth_tp_fee = fee_per_contract(eth_bid) if eth_bid else 0
             eth_tp_sold = manage_take_profits(
                 account, eth_bid, eth_tp_fee, ticker=m.get("ticker"),
+                market=m, model_side=ev_early.get("side"),
             )
             if eth_tp_sold:
                 save_account(account)
@@ -2016,6 +2085,7 @@ def main():
                 fee_per_contract(ev_early["bid"]) if ev_early.get("bid") else 0,
                 flip_delta,
                 ticker=m.get("ticker"),
+                market=m,
             )
             if eth_flip_sold:
                 save_account(account)
