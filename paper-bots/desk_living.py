@@ -43,6 +43,7 @@ INSIGHT_HELPER_DIGESTS = (
     "funding_scout_digest.json",
     "metals_heat_digest.json",
     "energy_heat_digest.json",
+    "inx_band_occupancy_digest.json",
     "calib_nag_digest.json",
     "hard_stop_clerk_digest.json",
     "near_miss_clerk_digest.json",
@@ -2352,6 +2353,40 @@ def energy_heat_chip(root: str | None = None) -> dict:
     }
 
 
+def inx_band_occupancy_chip(root: str | None = None) -> dict:
+    """INX 80–92¢ band occupancy chip — observe only."""
+    digest: dict = {}
+    try:
+        from helpers import inx_band_occupancy
+        path = inx_band_occupancy.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("helper") is None:
+            digest = inx_band_occupancy.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "occupancy": digest.get("occupancy"),
+        "pre_noon_occupancy": digest.get("pre_noon_occupancy"),
+        "live_occupancy": digest.get("live_occupancy"),
+        "occupied": digest.get("occupied"),
+        "thin": digest.get("thin"),
+        "label": (
+            f"inx band occ={digest.get('occupancy')} "
+            f"pre_noon={digest.get('pre_noon_occupancy')} "
+            f"live={digest.get('live_occupancy')} "
+            f"occupied={bool(digest.get('occupied'))}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only INX band occupancy — never softens kalshi_inx 0.02."
+        ),
+    }
+
+
 def tip_radar_chip(root: str | None = None) -> dict:
     """T-5 / T-15 / T-180 tip windows chip from tip_radar digest / quote cache."""
     digest = {}
@@ -2875,6 +2910,7 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "funding_scout": funding_scout_chip(root),
         "metals_heat": metals_heat_chip(root),
         "energy_heat": energy_heat_chip(root),
+        "inx_band_occupancy": inx_band_occupancy_chip(root),
         "skip_historian": skip_historian_chip(root),
         "distance_clerk": distance_clerk_chip(root),
         "quant_clerk": quant_clerk_chip(root),
@@ -3238,6 +3274,7 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         "tip_radar", "calib_nag", "injury_wire", "eia_scout",
         "line_shopper", "btc_basis_scout", "nhl_poisson_audit", "dvol_regime",
         "multi_ex_disagree", "funding_scout", "metals_heat", "energy_heat",
+        "inx_band_occupancy",
         "distance_clerk",
         "quant_clerk", "bookkeeper", "empty_card_bee", "near_miss", "near_miss_clerk",
         "hard_stop", "hard_stop_clerk", "skip_twin_clerk", "timer_digest",
