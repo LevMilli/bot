@@ -1993,33 +1993,38 @@ def run():
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_roi_plan
+        def _densify_gate_skip(reason: str, *, note: str) -> None:
+            """CARD prepend + brain densify for buy-loop gate locks (#519 sibling)."""
+            skips = summary_out.setdefault("skips", [])
+            skips.insert(0, reason)
+            if desk_brain is not None:
+                try:
+                    desk_brain.record_decision(
+                        DESK_ROOT, bot="sports-gap", action="skip",
+                        reasons=[reason], note=note,
+                    )
+                except Exception:
+                    pass
+
         cool = desk_roi_plan.adverse_cool_blocks(DESK_ROOT, "sports-gap")
         if cool:
             lines.append(f"| {ts} | | | | | | | | {cool} |")
-            summary_out.setdefault("skips", []).append(cool)
+            # Prepend so CARD densifies cool ahead of evaluate noise (#519 leftover).
+            _densify_gate_skip(cool, note="sports adverse-cool densify")
             max_buys_eff = 0
         stale = desk_roi_plan.stale_world_blocks(DESK_ROOT, "sports-gap")
         if stale:
             lines.append(f"| {ts} | | | | | | | | {stale} |")
-            summary_out.setdefault("skips", []).append(stale)
+            # Prepend so CARD densifies stale ahead of evaluate noise (#519 leftover).
+            _densify_gate_skip(stale, note="sports stale-world densify")
             max_buys_eff = 0
         r_block = desk_roi_plan.daily_r_blocks("sports-gap", red_pnl)
         if r_block:
             lines.append(f"| {ts} | | | | | | | | {r_block} |")
             # Prepend so CARD/why densify settle-only ahead of evaluate/cool noise (#482 twin).
-            skips = summary_out.setdefault("skips", [])
-            skips.insert(0, r_block)
+            # Settle-only insert last so it stays skips[0] over cool/stale.
+            _densify_gate_skip(r_block, note="sports daily-r densify")
             max_buys_eff = 0
-            # Sibling brain/skip_board densify (#482 leftover): empty candidates
-            # never hit max-buys; do not wait for capacity invent.
-            if desk_brain is not None:
-                try:
-                    desk_brain.record_decision(
-                        DESK_ROOT, bot="sports-gap", action="skip",
-                        reasons=[r_block], note="sports daily-r densify",
-                    )
-                except Exception:
-                    pass
     except Exception:
         pass
     for c in buy_candidates:
@@ -2027,19 +2032,21 @@ def run():
         row, gtxt = c["row"], c["gtxt"]
         reason = None
         if buys_this_check >= max_buys_eff:
-            # Prefer-1: settle-only zeroed the cap — do not invent capacity skip
-            # into brain/Learning while CARD already names daily-R.
-            settle_lock = max_buys_eff == 0 and any(
-                "settle-only" in str(s).lower()
+            # Prefer-1: gate (settle-only / cool / stale) zeroed the cap — do not
+            # invent capacity skip into brain/Learning while CARD names the gate.
+            gate_keys = ("settle-only", "adverse cool", "stale-world", "clock-skew")
+            gate_hits = [
+                str(s)
                 for s in (summary_out.get("skips") or [])
-            )
-            if settle_lock:
-                settle_why = next(
-                    str(s)
-                    for s in (summary_out.get("skips") or [])
-                    if "settle-only" in str(s).lower()
+                if any(k in str(s).lower() for k in gate_keys)
+            ]
+            gate_lock = max_buys_eff == 0 and bool(gate_hits)
+            if gate_lock:
+                gate_why = next(
+                    (s for s in gate_hits if "settle-only" in s.lower()),
+                    gate_hits[0],
                 )
-                lines.append(row + gtxt + f" | {settle_why} |")
+                lines.append(row + gtxt + f" | {gate_why} |")
                 continue
             reason = f"max buys this check ({max_buys_eff})"
         elif red_pnl < 0 and str(c.get("lane") or "") == "speed":
