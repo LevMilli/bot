@@ -125,6 +125,33 @@ class HalfKellyCrbFeeSim(unittest.TestCase):
         self.assertFalse(board["live_orders_enabled"])
         self.assertGreaterEqual(board["clears_n"], 1)
 
+    def test_cpi_nowcast_clear_thin_and_incomplete(self):
+        thin = desk_roi_plan.cpi_nowcast_probe({
+            "label": "thin",
+            "nowcast_fair": 0.55,
+            "ask": 0.52,
+        })
+        self.assertTrue(thin["ok"])
+        self.assertFalse(thin["clear"])
+        self.assertIn("cpi edge", thin["reason"])
+        fat = desk_roi_plan.cpi_nowcast_probe({
+            "label": "fat",
+            "nowcast_fair": 0.62,
+            "ask": 0.50,
+        })
+        self.assertTrue(fat["clear"])
+        self.assertEqual(fat["action"], "buy")
+        self.assertGreaterEqual(fat["edge"], 0.05 - 1e-9)
+        incomplete = desk_roi_plan.cpi_nowcast_probe({"ask": 0.48})
+        self.assertFalse(incomplete["ok"])
+        self.assertIn("no invent", incomplete["reason"].lower())
+        board = desk_roi_plan.cpi_nowcast_observe(".")
+        self.assertTrue(board["idea_bank_only"])
+        self.assertTrue(board["observe_only"])
+        self.assertFalse(board["live_orders_enabled"])
+        self.assertGreaterEqual(board["clears_n"], 1)
+        self.assertEqual(desk_profit.DEFAULT_VENUE_MIN_EDGE["kalshi_econ"], 0.05)
+
 
 if __name__ == "__main__":
     unittest.main()

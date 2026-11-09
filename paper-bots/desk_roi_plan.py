@@ -7247,6 +7247,144 @@ def cross_venue_arb_observe(
     }
 
 
+def cpi_nowcast_probe(row: dict | None = None) -> dict:
+    """Cleveland-Fed-style nowcast fair vs Kalshi CPI ask after fees.
+
+    Buy only when nowcast_fair − ask − Kalshi fee ≥ kalshi_econ 0.05.
+    Incomplete fair/ask skips — never invent. Idea-bank only (KXCPI).
+    """
+    import desk_profit
+
+    raw = row if isinstance(row, dict) else {}
+    floor = float(desk_profit.DEFAULT_VENUE_MIN_EDGE.get("kalshi_econ") or 0.05)
+    fair = _finite(
+        raw.get("nowcast_fair") if raw.get("nowcast_fair") is not None else raw.get("fair")
+    )
+    ask = _finite(raw.get("ask") if raw.get("ask") is not None else raw.get("kalshi_ask"))
+    label = str(raw.get("label") or raw.get("strike") or raw.get("ticker") or "cpi")
+    base = {
+        "ok": False,
+        "clear": False,
+        "action": "skip",
+        "label": label,
+        "nowcast_fair": fair,
+        "ask": ask,
+        "fee": None,
+        "edge": None,
+        "floor": floor,
+        "venue": "kalshi_econ",
+        "idea_bank_only": True,
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+    }
+    if fair is None or ask is None:
+        base["reason"] = "need nowcast_fair + ask — no invent"
+        return base
+    if not (0.0 < ask < 1.0) or not (0.0 < fair < 1.0):
+        base["reason"] = "fair/ask out of range"
+        base["ok"] = True
+        return base
+    fee = estimate_kalshi_fee(ask, 1.0)
+    edge = float(fair) - float(ask) - float(fee)
+    base.update({
+        "ok": True,
+        "fee": round(float(fee), 4),
+        "edge": round(edge, 4),
+        "nowcast_fair": round(float(fair), 4),
+        "ask": round(float(ask), 4),
+    })
+    if edge + 1e-12 < floor:
+        base["reason"] = (
+            f"cpi edge {edge:.4f} < floor {floor:g} "
+            f"(fair {fair:.3f} ask {ask:.3f} fee {fee:.4f})"
+        )
+        return base
+    base["clear"] = True
+    base["action"] = "buy"
+    base["reason"] = (
+        f"cpi nowcast clears floor: fair {fair:.3f} ask {ask:.3f} "
+        f"fee {fee:.4f} edge {edge:.4f}"
+    )
+    return base
+
+
+def cpi_nowcast_observe(
+    root: str | None = None,
+    *,
+    strikes: list | None = None,
+) -> dict:
+    """CPI nowcast vs Kalshi observe board. Idea-bank. Floors locked."""
+    path = None
+    if root:
+        cand = os.path.join(root, "desk_cpi_nowcast.json")
+        if os.path.isfile(cand):
+            path = cand
+    loaded = []
+    if path:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                blob = json.load(handle)
+            if isinstance(blob, dict):
+                loaded = blob.get("strikes") or blob.get("quotes") or blob.get("rows") or []
+            elif isinstance(blob, list):
+                loaded = blob
+        except (OSError, json.JSONDecodeError):
+            loaded = []
+    default = strikes if strikes is not None else loaded
+    if not default:
+        # Demo: thin nowcast fails econ floor; fat clears; incomplete skipped.
+        default = [
+            {
+                "label": "thin_near_50",
+                "strike": "KXCPI-NEAR50",
+                "nowcast_fair": 0.55,
+                "ask": 0.52,
+            },
+            {
+                "label": "fat_nowcast",
+                "strike": "KXCPI-FAT",
+                "nowcast_fair": 0.62,
+                "ask": 0.50,
+            },
+            {
+                "label": "incomplete",
+                "strike": "KXCPI-MISS",
+                "ask": 0.48,
+            },
+        ]
+    rows = []
+    clears = 0
+    for raw in default:
+        if not isinstance(raw, dict):
+            continue
+        probe = cpi_nowcast_probe(raw)
+        if probe.get("clear"):
+            clears += 1
+        rows.append(probe)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "idea_bank_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "ok": True,
+        "n": len(rows),
+        "clears_n": clears,
+        "strikes": rows,
+        "source": path,
+        "label": f"cpi_nowcast clears={clears}/{len(rows)} floors_locked",
+        "note": (
+            "Cleveland-Fed-style CPI nowcast vs Kalshi ask after fees. "
+            "KXCPI stays idea-bank for main AUTO. Incomplete fair/ask skipped — "
+            "no invent. Floors locked. Never LIVE."
+        ),
+    }
+
+
 def half_kelly_crb_observe(
     root: str | None = None,
     *,
