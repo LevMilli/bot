@@ -793,17 +793,16 @@ def master_summary(
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_cc = desk_roi_plan.latest_commodity_calibration(root)
-            if root and bots and (
-                not isinstance(latest_cc, dict)
-                or str(latest_cc.get("label") or "") != today
-            ):
+            # Prefer live bots whenever provided — same-day stale calib card must
+            # not lag live commodity history (#489 hillclimb twin).
+            if root and bots:
                 plan["commodity_calibration"] = desk_roi_plan.capture_commodity_calibration(
                     root, bots=bots, label=today,
                 )
             else:
                 plan["commodity_calibration"] = (
-                    latest_cc or desk_roi_plan.commodity_calibration_report(bots)
+                    desk_roi_plan.latest_commodity_calibration(root)
+                    or desk_roi_plan.commodity_calibration_report(bots)
                 )
         except Exception:
             plan["commodity_calibration"] = None

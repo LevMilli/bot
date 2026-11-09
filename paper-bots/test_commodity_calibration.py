@@ -51,6 +51,33 @@ class CommodityCalibration(unittest.TestCase):
             self.assertTrue(ai["fee_floors_locked"])
             self.assertIn("commodity", ai["calib_boards"])
 
+    def test_master_commodity_calib_prefers_live_bots_over_stale(self):
+        """Same-day stale calib n must not lag live commodity history (#489 twin)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            morning = [{
+                "id": "commodity-15m",
+                "history": _hist(3, 0.82, True),
+                "open_risk": 0,
+                "gate_a": {},
+            }]
+            desk_roi_plan.capture_commodity_calibration(
+                tmp, bots=morning, label="2026-11-09",
+            )
+            stale = desk_roi_plan.latest_commodity_calibration(tmp) or {}
+            self.assertEqual(int(stale.get("n") or 0), 3)
+            live = [{
+                "id": "commodity-15m",
+                "history": _hist(12, 0.82, True) + _hist(8, 0.82, False),
+                "open_risk": 0,
+                "gate_a": {},
+            }]
+            summary = desk_master.master_summary(
+                tmp, bots=live, cfg={"max_open_risk": 100},
+            )
+            card = (summary.get("roi_plan") or {}).get("commodity_calibration") or {}
+            self.assertEqual(int(card.get("n") or 0), 20)
+            self.assertTrue(card.get("miscalibrated"))
+
     def test_fee_floors_untouched(self):
         import desk_profit
         self.assertEqual(desk_profit.DEFAULT_VENUE_MIN_EDGE["kalshi_commodity15m"], 0.05)
