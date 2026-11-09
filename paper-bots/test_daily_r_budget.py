@@ -54,8 +54,17 @@ class DailyRBudget(unittest.TestCase):
             self.assertIn("daily_r", plan)
             self.assertIn("sports-gap", (plan.get("daily_r") or {}).get("settle_only") or [])
 
+    def test_commodity_2r_threshold(self):
+        # 2.0R × $20 = $40
+        self.assertEqual(desk_roi_plan.daily_r_budget_for("commodity-15m"), 2.0)
+        status = desk_roi_plan.daily_r_status("commodity-15m", 39.99)
+        self.assertFalse(status["settle_only"])
+        status = desk_roi_plan.daily_r_status("commodity-15m", 40.0)
+        self.assertTrue(status["settle_only"])
+        self.assertEqual(status["target_usd"], 40.0)
+
     def test_firm_health_prefers_live_bots_over_stale_daily_r(self):
-        """Stale same-day settle_only=[] must not hide commodity 1.5R settle-only."""
+        """Stale same-day settle_only=[] must not hide commodity 2.0R settle-only."""
         with tempfile.TemporaryDirectory() as tmp:
             desk_roi_plan.capture_daily_r_board(
                 tmp,
@@ -65,7 +74,7 @@ class DailyRBudget(unittest.TestCase):
             stale = desk_roi_plan.latest_daily_r_board(tmp) or {}
             self.assertEqual(stale.get("settle_only") or [], [])
             bots = [
-                {"id": "commodity-15m", "today": 35.02, "open_risk": 0},
+                {"id": "commodity-15m", "today": 40.02, "open_risk": 0},
                 {"id": "sports-gap", "today": 0.0, "open_risk": 0},
             ]
             out = desk_roi_plan.firm_health_observe(tmp, bots=bots, cfg={"max_open_risk": 100})
@@ -85,7 +94,7 @@ class DailyRBudget(unittest.TestCase):
                 label="2026-11-09",
             )
             bots = [
-                {"id": "commodity-15m", "today": 35.02, "open_risk": 0, "history": [], "gate_a": {}},
+                {"id": "commodity-15m", "today": 40.02, "open_risk": 0, "history": [], "gate_a": {}},
                 {"id": "sports-gap", "today": 0.0, "open_risk": 0, "history": [], "gate_a": {}},
             ]
             plan = desk_roi_plan.plan_summary(tmp, bots=bots, cfg={"max_open_risk": 100})

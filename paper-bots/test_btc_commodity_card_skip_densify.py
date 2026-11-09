@@ -500,7 +500,7 @@ class CommodityCardSkipDensify(unittest.TestCase):
         card = cmd._card_sentence(
             buys=0,
             skip_reasons=[
-                "daily R budget hit for commodity-15m: today $35.02 ≥ 1.5R ($30) — settle-only",
+                "daily R budget hit for commodity-15m: today $40.02 ≥ 2.0R ($40) — settle-only",
                 "ask 0.550 outside band; spread 0.070; depth 0 < 2",
             ],
         )
