@@ -11193,7 +11193,15 @@ def plan_summary(
         "sports_time_final": sports_time_final_shadow_summary(root),
         "weekly_scorecard": latest_weekly_scorecard(root),
         "graduation": graduation_board(root, bots=bots),
-        "hillclimb_kill": hillclimb_kill_status(root),
+        # Prefer live bots whenever provided (#488 profit_lock twin).
+        "hillclimb_kill": (
+            hillclimb_kill_status(root)
+            if not (root and bots)
+            else (
+                capture_hillclimb_week(root, bots=bots),
+                hillclimb_kill_status(root),
+            )[1]
+        ),
         # Prefer live bots whenever provided (#487 cold_harvest twin).
         "profit_lock": (
             capture_profit_lock(root, bots=bots)

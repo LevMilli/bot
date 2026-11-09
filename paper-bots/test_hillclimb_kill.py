@@ -73,6 +73,21 @@ class MasterWire(unittest.TestCase):
             self.assertIn("hillclimb_kill", plan)
             self.assertFalse(summary["hillclimb_kill"].get("auto_revert", True))
 
+    def test_master_hillclimb_prefers_live_bots_over_stale(self):
+        """Same-day stale hillclimb card must not lag live M1 (#488 twin)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            morning = [{"id": "btc15m", "open_risk": 0, "history": [{"pnl": 1.0}] * 5, "gate_a": {}}]
+            desk_roi_plan.capture_hillclimb_week(tmp, bots=morning, label="2026-11-09")
+            stale = (desk_roi_plan.hillclimb_kill_status(tmp).get("latest") or {})
+            self.assertAlmostEqual(float(stale.get("m1") or 0), 0.99, places=2)
+            live = [{"id": "btc15m", "open_risk": 0, "history": [{"pnl": 2.0}] * 8, "gate_a": {}}]
+            summary = desk_master.master_summary(
+                tmp, bots=live, cfg={"max_open_risk": 100},
+            )
+            hc = summary.get("hillclimb_kill") or {}
+            row = hc.get("latest") if isinstance(hc.get("latest"), dict) else hc
+            self.assertAlmostEqual(float(row.get("m1") or 0), 1.99, places=2)
+
 
 if __name__ == "__main__":
     unittest.main()
