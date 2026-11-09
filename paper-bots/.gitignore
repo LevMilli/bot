@@ -80,6 +80,8 @@ desk_btc_vol_binary.json
 desk_commodity_curve.json
 desk_cpi_nowcast.json
 desk_poly_arb_pairs.json
+fed-watch-paper/fedwatch_bins.json
+fed-watch-paper/fedwatch_quotes.json
 helpers/ff_calendar_cache.json
 helpers/calendar_digest.json
 helpers/calendar_scanner_at.txt

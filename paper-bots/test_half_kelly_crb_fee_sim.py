@@ -224,6 +224,60 @@ class HalfKellyCrbFeeSim(unittest.TestCase):
             self.assertEqual(cmd["rows"][0]["eia_regime"], "eia_blackout")
             self.assertIsNone(cmd["rows"][0]["roll_yield"])
 
+    def test_macro_kalshi_harvest_asks_no_invent_fair(self):
+        import json
+        import tempfile
+
+        def opener(url: str):
+            if "KXFEDDECISION" in url:
+                return json.dumps({
+                    "markets": [
+                        {
+                            "ticker": "KXFEDDECISION-A-H0",
+                            "event_ticker": "KXFEDDECISION-A",
+                            "title": "Hold",
+                            "yes_ask_dollars": "0.44",
+                        },
+                        {
+                            "ticker": "KXFEDDECISION-A-C25",
+                            "event_ticker": "KXFEDDECISION-A",
+                            "title": "Cut 25",
+                            "yes_ask_dollars": "0.44",
+                        },
+                    ],
+                }).encode()
+            if "KXFED" in url and "DECISION" not in url:
+                return json.dumps({"markets": []}).encode()
+            if "KXCPI" in url:
+                return json.dumps({
+                    "markets": [{
+                        "ticker": "KXCPI-26NOV-T0.2",
+                        "title": "CPI >0.2",
+                        "yes_ask_dollars": "0.50",
+                    }],
+                }).encode()
+            return b"{}"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "fed-watch-paper"))
+            # harvest still writes bins/cpi even if quotes refresh is skipped.
+            out = desk_roi_plan.macro_kalshi_harvest(tmp, opener=opener)
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["fed_ask_n"], 2)
+            self.assertEqual(out["cpi_ask_n"], 1)
+            self.assertTrue(out["waiting_on_fedwatch_fair"])
+            self.assertTrue(out["waiting_on_cpi_nowcast_fair"])
+            self.assertGreaterEqual(out["dutch_clears_n"], 1)
+            with open(
+                os.path.join(tmp, "fed-watch-paper", "fedwatch_bins.json"),
+                encoding="utf-8",
+            ) as handle:
+                bins = json.load(handle)
+            self.assertIsNone(bins["bins"][0]["fedwatch_fair"])
+            with open(os.path.join(tmp, "desk_cpi_nowcast.json"), encoding="utf-8") as handle:
+                cpi = json.load(handle)
+            self.assertIsNone(cpi["strikes"][0]["nowcast_fair"])
+
 
 if __name__ == "__main__":
     unittest.main()
