@@ -412,8 +412,60 @@ def paper_sell(state: dict, pos: dict, bid: float, fee: float, reason: str) -> f
     return pnl
 
 
-def manage_model_flips(state: dict, side_now, prob_now, bid, fee, delta, ticker=None) -> list[str]:
-    """Exit open commodity paper when the live model flips against the held side."""
+def listing_bid_for_side(market, side):
+    """Held-contract listing bid from a window/market dict (yes_bid / no_bid)."""
+    if not isinstance(market, dict):
+        return None
+    s = str(side or "").upper()
+    if s == "YES":
+        raw = market.get("yes_bid")
+    elif s == "NO":
+        raw = market.get("no_bid")
+    else:
+        return None
+    if raw in (None, ""):
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def mark_bid_for_held(pos, *, model_side=None, model_bid=None, market=None):
+    """Bid that marks the *held* contract — never the complementary model side.
+
+    On side flips `evaluate` quotes the new model side. Selling YES inventory at
+    the NO bid (or vice versa) invents PnL / drops honest time-stop densify.
+    Prefer same-side model bid, else listing for held. Refuse complementary invent.
+    When model_side is omitted (legacy callers), model_bid is treated as held-side.
+    """
+    held = str((pos or {}).get("side") or "").upper()
+    ms = str(model_side or "").upper()
+    if model_bid is not None and (not ms or (held and held == ms)):
+        try:
+            b = float(model_bid)
+            if b > 0:
+                return b
+        except (TypeError, ValueError):
+            pass
+    if ms and held and held != ms:
+        listing = listing_bid_for_side(market, held)
+        if listing is not None and float(listing) > 0:
+            return float(listing)
+        return None
+    listing = listing_bid_for_side(market, held)
+    if listing is not None and float(listing) > 0:
+        return float(listing)
+    return None
+
+
+def manage_model_flips(
+    state: dict, side_now, prob_now, bid, fee, delta, ticker=None, market=None,
+) -> list[str]:
+    """Exit open commodity paper when the live model flips against the held side.
+
+    Sell mark is always the held-side bid (see mark_bid_for_held) — BTC #456 sibling.
+    """
     still = []
     sold = []
     for pos in list(state.get("open") or []):
@@ -437,11 +489,19 @@ def manage_model_flips(state: dict, side_now, prob_now, bid, fee, delta, ticker=
                     reason = f"model-flip fair Δ≥{delta:g}"
             except Exception:
                 pass
-        if flip and bid is not None and float(bid) > 0:
-            pnl = paper_sell(state, pos, bid, fee, reason)
-            sold.append(f"{pos.get('ticker')} {reason} pnl {pnl:+.2f}")
-        else:
+        if not flip:
             still.append(pos)
+            continue
+        mark = mark_bid_for_held(
+            pos, model_side=side_now, model_bid=bid, market=market,
+        )
+        if mark is None or float(mark) <= 0:
+            still.append(pos)
+            continue
+        # Fee from held mark — never model-side complementary fee invent.
+        mark_fee = kalshi_fee(float(mark))
+        pnl = paper_sell(state, pos, mark, mark_fee, reason)
+        sold.append(f"{pos.get('ticker')} {reason} pnl {pnl:+.2f}")
     state["open"] = still
     return sold
 
@@ -1155,7 +1215,12 @@ def main() -> int:
                     continue
                 if pos.get("time_stop_shadowed"):
                     continue
-                bid_ts = ev.get("bid")
+                # Held-side listing bid — never complementary model-side ev["bid"]
+                # (BTC #456 sibling). Flip path clears open[] before all-opens densify.
+                held = str(pos.get("side") or "").upper()
+                bid_ts = listing_bid_for_side(m, held)
+                if bid_ts is None and held == str(ev.get("side") or "").upper():
+                    bid_ts = ev.get("bid")
                 if bid_ts is None:
                     continue
                 hit = desk_roi_plan.commodity_time_stop_hit(
@@ -1223,6 +1288,7 @@ def main() -> int:
                 kalshi_fee(float(ev["bid"])) if ev.get("bid") else 0.0,
                 flip_delta,
                 ticker=ev.get("ticker"),
+                market=m,
             )
             if sold:
                 save_account(account)
