@@ -1232,10 +1232,22 @@ def run():
             if hs == as_:
                 still.append(p); continue   # tie/unclear -> wait for Kalshi settlement
             winner = "home" if hs > as_ else "away"
-            payout = p["contracts"] * 1.0 if winner == p["side"] else 0.0
+            won = winner == p["side"]
+            payout = p["contracts"] * 1.0 if won else 0.0
             pnl = round(payout - p["cost"], 2)
             s["cash"] = round(s["cash"] + payout, 2)
-            p.update({"closed": ts, "exit": "settled", "payout": payout, "pnl": pnl, "final_score": f"{as_}-{hs}"})
+            # Honest binary settle mark — HS/tf catchup reads exit_price|exit_bid|mark_bid
+            # only (never entry companion). Losers with exit_price=0 densify when
+            # settle-retro market bid is missing; winners with 1.0 stay non-invent
+            # (wipe guard / organic-exit rules). Commodity #462 sibling.
+            p.update({
+                "closed": ts,
+                "exit": "settled",
+                "exit_price": 1.0 if won else 0.0,
+                "payout": payout,
+                "pnl": pnl,
+                "final_score": f"{as_}-{hs}",
+            })
             s["closed"].append(p)
             if desk is not None:
                 desk.record_learning(DESK_ROOT, {
