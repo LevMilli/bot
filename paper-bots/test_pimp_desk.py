@@ -1172,7 +1172,7 @@ class PimpDeskTests(unittest.TestCase):
                 tmp, {"bankroll": 500.0, "halted": False}, summary="",
             )
             self.assertNotIn("drawdown halt", ok.lower())
-            # Staff clear waives soft DD densify (buys may resume); kill still stone.
+            # Staff clear densifies resume truth (not bland empty settle); kill still stone.
             with open(os.path.join(sp, "config.json"), "w", encoding="utf-8") as fh:
                 json.dump({
                     "starting_bankroll": 500.0,
@@ -1181,7 +1181,13 @@ class PimpDeskTests(unittest.TestCase):
                     "staff_clear_drawdown_halt": True,
                 }, fh)
             cleared = pimp_desk._kalshi_skip(tmp, state, summary="")
-            self.assertNotIn("drawdown halt", cleared.lower())
+            self.assertIn("staff cleared soft drawdown", cleared.lower())
+            self.assertIn("444.37", cleared)
+            self.assertNotIn("new buys off", cleared.lower())
+            bland_clear = pimp_desk._kalshi_skip(
+                tmp, state, summary="CARD: No open paper positions.\n",
+            )
+            self.assertIn("staff cleared soft drawdown", bland_clear.lower())
 
     def test_finish_bot_prefers_hold_why_over_entry_skip_card(self):
         """Open BTC must not show speed-floor entry skips as the tower why."""

@@ -1487,20 +1487,26 @@ def _kalshi_drawdown_halt_line(root: str, state: dict | None) -> str:
         return ""
     bankroll = _num(state.get("bankroll"))
     cfg = _read_json(_under(root, "kalshi-sp500-paper", "config.json")) or {}
-    if bool(cfg.get("staff_clear_drawdown_halt")):
-        return ""  # staff waived soft DD; kill switch densify still via halted / kill path
     dd_halt = _num(cfg.get("drawdown_halt_bankroll"))
     start = _num(cfg.get("starting_bankroll")) or 500.0
-    if (
+    under_dd = (
         bankroll is not None
         and dd_halt is not None
         and float(bankroll) <= float(dd_halt) + 1e-9
-    ):
+    )
+    if not under_dd:
+        return ""
+    # Staff waived soft DD for buys — still densify so $444 idle ≠ healthy empty settle.
+    if bool(cfg.get("staff_clear_drawdown_halt")):
         return (
-            f"Tower drawdown halt: bankroll ${float(bankroll):.2f} ≤ "
-            f"${float(dd_halt):.2f} (start ${float(start):.0f}). New buys off; exits still run."
+            f"Staff cleared soft drawdown halt: bankroll ${float(bankroll):.2f} ≤ "
+            f"${float(dd_halt):.2f} (start ${float(start):.0f}). "
+            "Paper buys may resume; kill $400 + fee/band/max-1/day stay stone."
         )
-    return ""
+    return (
+        f"Tower drawdown halt: bankroll ${float(bankroll):.2f} ≤ "
+        f"${float(dd_halt):.2f} (start ${float(start):.0f}). New buys off; exits still run."
+    )
 
 
 def _kalshi_skip(root: str, state: dict | None, summary: str = "") -> str:
@@ -2011,13 +2017,15 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
     # Sports: why already densifies CARD; skip stayed "" forever (#400 sibling).
     if spec["kind"] == "sports" and not view.get("skip"):
         view["skip"] = _sports_skip(summary)
-    # Kalshi: prefer drawdown/kill densify over settle boilerplate why.
+    # Kalshi: prefer drawdown/kill/staff-clear densify over settle boilerplate why.
     if spec["kind"] == "kalshi":
         skip = str(view.get("skip") or "")
         why_low = str(view.get("why") or "").lower()
+        skip_low = skip.lower()
         if skip and (
-            "drawdown halt" in skip.lower()
-            or "kill switch" in skip.lower()
+            "drawdown halt" in skip_low
+            or "staff cleared soft drawdown" in skip_low
+            or "kill switch" in skip_low
             or not why_low.strip()
             or "no open paper" in why_low
             or "no paper buy" in why_low
@@ -5668,8 +5676,15 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
                 view["idle_copy"] = f"{view['idle_copy']} {heartbeat}"
             why = str(view.get("why") or "")
             if why and "Next scan" not in why and "In scan window" not in why and "Next " not in why:
-                # Keep CARD why; append schedule only when it looks like a no-buy finish.
-                if "no paper buy" in why.lower() or "check finished" in why.lower() or not why.strip():
+                # Keep CARD why; append schedule on no-buy / empty-settle / staff-clear DD.
+                why_low = why.lower()
+                if (
+                    "no paper buy" in why_low
+                    or "check finished" in why_low
+                    or "no open paper" in why_low
+                    or "staff cleared soft drawdown" in why_low
+                    or not why.strip()
+                ):
                     view["why"] = f"{why} {heartbeat}".strip()
             elif not why:
                 view["why"] = heartbeat
