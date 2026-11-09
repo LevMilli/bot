@@ -174,13 +174,55 @@ class HalfKellyCrbFeeSim(unittest.TestCase):
         self.assertEqual(fat_cmd["venue"], "kalshi_commodity15m")
         incomplete = desk_roi_plan.btc_vol_binary_probe({"ask": 0.51})
         self.assertIn("no invent", incomplete["reason"].lower())
-        board = desk_roi_plan.vol_curve_observe(".")
+        # Explicit fixtures — cwd may have a harvested file that is all thin.
+        board = desk_roi_plan.vol_curve_observe(
+            ".",
+            btc_rows=[
+                {"vol_fair": 0.54, "ask": 0.52},
+                {"vol_fair": 0.62, "ask": 0.50},
+            ],
+            commodity_rows=[
+                {"curve_fair": 0.54, "ask": 0.52},
+                {"curve_fair": 0.61, "ask": 0.50},
+            ],
+        )
         self.assertTrue(board["observe_only"])
         self.assertFalse(board["live_orders_enabled"])
         self.assertGreaterEqual(board["btc"]["clears_n"], 1)
         self.assertGreaterEqual(board["commodity"]["clears_n"], 1)
         self.assertEqual(desk_profit.DEFAULT_VENUE_MIN_EDGE["kalshi_btc15m"], 0.05)
         self.assertEqual(desk_profit.DEFAULT_VENUE_MIN_EDGE["kalshi_commodity15m"], 0.05)
+
+    def test_vol_curve_harvest_from_feature_store(self):
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            store = os.path.join(tmp, "desk_feature_store.jsonl")
+            with open(store, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({
+                    "bot": "btc15m", "ticker": "KXBTC15M-A",
+                    "model_p": 0.62, "ask": 0.50, "dvol": 52.0,
+                }) + "\n")
+                handle.write(json.dumps({
+                    "bot": "commodity-15m", "ticker": "KXWTI15M-B",
+                    "model_p": 0.61, "ask": 0.50,
+                    "skip_codes": ["EIA/inventory blackout"],
+                }) + "\n")
+                handle.write(json.dumps({
+                    "bot": "commodity-15m", "ticker": "MISS",
+                    "ask": 0.50,
+                }) + "\n")
+            out = desk_roi_plan.vol_curve_harvest(tmp, limit=10)
+            self.assertTrue(out["ok"])
+            self.assertEqual(out["btc_n"], 1)
+            self.assertEqual(out["commodity_n"], 1)
+            board = desk_roi_plan.vol_curve_observe(tmp)
+            self.assertGreaterEqual(board["btc"]["clears_n"], 1)
+            self.assertGreaterEqual(board["commodity"]["clears_n"], 1)
+            with open(os.path.join(tmp, "desk_commodity_curve.json"), encoding="utf-8") as handle:
+                cmd = json.load(handle)
+            self.assertEqual(cmd["rows"][0]["eia_regime"], "eia_blackout")
+            self.assertIsNone(cmd["rows"][0]["roll_yield"])
 
 
 if __name__ == "__main__":

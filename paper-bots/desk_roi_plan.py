@@ -7486,6 +7486,199 @@ def commodity_curve_probe(row: dict | None = None) -> dict:
     )
 
 
+FEATURE_STORE_NAME = "desk_feature_store.jsonl"
+BTC_VOL_BINARY_NAME = "desk_btc_vol_binary.json"
+COMMODITY_CURVE_NAME = "desk_commodity_curve.json"
+VOL_CURVE_HARVEST_LIMIT = 50
+
+
+def _feature_store_rows(root: str | None, *, bots: set[str], limit: int = 200) -> list[dict]:
+    """Newest feature-store rows for bots that already logged model_p + ask."""
+    path = os.path.join(root or _root(), FEATURE_STORE_NAME)
+    if not os.path.isfile(path):
+        return []
+    want = {str(b) for b in bots}
+    matched: list[dict] = []
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return []
+    for ln in reversed(lines):
+        try:
+            row = json.loads(ln)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("bot") or "") not in want:
+            continue
+        if _finite(row.get("model_p")) is None or _finite(row.get("ask")) is None:
+            continue
+        matched.append(row)
+        if len(matched) >= int(limit):
+            break
+    matched.reverse()
+    return matched
+
+
+def _eia_regime_from_row(row: dict) -> str:
+    codes = row.get("skip_codes") or []
+    blob = " ".join(str(c) for c in codes) + " " + str(row.get("note") or "")
+    low = blob.lower()
+    if "eia" in low or "inventory" in low or "blackout" in low:
+        return "eia_blackout"
+    return str(row.get("eia_regime") or row.get("regime") or "")
+
+
+def vol_curve_harvest(
+    root: str | None = None,
+    *,
+    limit: int = VOL_CURVE_HARVEST_LIMIT,
+) -> dict:
+    """Write BTC/commodity observe fixtures from feature-store (+ closed) rows.
+
+    Only keeps rows that already have model fair + ask. Never invents DVOL,
+    roll yield, or missing prices. Floors stay locked. Observe only.
+    """
+    root = root or _root()
+    limit = max(1, int(limit or VOL_CURVE_HARVEST_LIMIT))
+    btc_src = _feature_store_rows(root, bots={"btc15m"}, limit=limit * 2)
+    cmd_src = _feature_store_rows(root, bots={"commodity-15m"}, limit=limit * 2)
+    btc_rows: list[dict] = []
+    for row in btc_src:
+        fair = _finite(row.get("model_p"))
+        ask = _finite(row.get("ask"))
+        if fair is None or ask is None:
+            continue
+        if not (0.0 < fair < 1.0) or not (0.0 < ask < 1.0):
+            continue
+        btc_rows.append({
+            "label": str(row.get("ticker") or row.get("series") or "btc15m"),
+            "ticker": str(row.get("ticker") or ""),
+            "vol_fair": round(float(fair), 4),
+            "ask": round(float(ask), 4),
+            "dvol": _finite(row.get("dvol") if row.get("dvol") is not None else row.get("sig_dvol")),
+            "z": _finite(row.get("z")),
+            "source": "feature_store",
+            "at": str(row.get("at") or ""),
+        })
+        if len(btc_rows) >= limit:
+            break
+    cmd_rows: list[dict] = []
+    for row in cmd_src:
+        fair = _finite(row.get("model_p"))
+        ask = _finite(row.get("ask"))
+        if fair is None or ask is None:
+            continue
+        if not (0.0 < fair < 1.0) or not (0.0 < ask < 1.0):
+            continue
+        cmd_rows.append({
+            "label": str(row.get("ticker") or row.get("series") or "commodity"),
+            "ticker": str(row.get("ticker") or ""),
+            "curve_fair": round(float(fair), 4),
+            "ask": round(float(ask), 4),
+            # Roll yield is not in the feature store — leave null (no invent).
+            "roll_yield": _finite(row.get("roll_yield")),
+            "eia_regime": _eia_regime_from_row(row),
+            "z": _finite(row.get("z")),
+            "source": "feature_store",
+            "at": str(row.get("at") or ""),
+        })
+        if len(cmd_rows) >= limit:
+            break
+    # Supplement commodity from closed fair_at_entry when store is thin.
+    if len(cmd_rows) < limit:
+        closed_path = os.path.join(root, "commodity-15m-paper", "paper_account.json")
+        try:
+            with open(closed_path, encoding="utf-8") as handle:
+                acc = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            acc = {}
+        for row in reversed(list(acc.get("closed") or [])):
+            if not isinstance(row, dict):
+                continue
+            fair = _finite(
+                row.get("fair_at_entry") if row.get("fair_at_entry") is not None else row.get("fair")
+            )
+            ask = _finite(row.get("ask"))
+            if fair is None or ask is None:
+                continue
+            if not (0.0 < fair < 1.0) or not (0.0 < ask < 1.0):
+                continue
+            tick = str(row.get("ticker") or "")
+            if any(r.get("ticker") == tick for r in cmd_rows):
+                continue
+            cmd_rows.append({
+                "label": tick or "commodity",
+                "ticker": tick,
+                "curve_fair": round(float(fair), 4),
+                "ask": round(float(ask), 4),
+                "roll_yield": None,
+                "eia_regime": str(row.get("vol_regime") or ""),
+                "z": None,
+                "source": "closed_fair_at_entry",
+                "at": str(row.get("closed") or row.get("opened") or ""),
+            })
+            if len(cmd_rows) >= limit:
+                break
+    btc_path = os.path.join(root, BTC_VOL_BINARY_NAME)
+    cmd_path = os.path.join(root, COMMODITY_CURVE_NAME)
+    btc_payload = {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "venue": "kalshi_btc15m",
+        "floor": 0.05,
+        "note": "Harvested model_p+ask from feature store — never invent DVOL",
+        "rows": btc_rows,
+    }
+    cmd_payload = {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "venue": "kalshi_commodity15m",
+        "floor": 0.05,
+        "note": "Harvested model_p/fair_at_entry+ask — never invent roll yield",
+        "rows": cmd_rows,
+    }
+    try:
+        with open(btc_path, "w", encoding="utf-8") as handle:
+            json.dump(btc_payload, handle, indent=2)
+            handle.write("\n")
+        with open(cmd_path, "w", encoding="utf-8") as handle:
+            json.dump(cmd_payload, handle, indent=2)
+            handle.write("\n")
+        wrote = True
+    except OSError as exc:
+        return {
+            "ok": False,
+            "paper_only": True,
+            "observe_only": True,
+            "fee_floors_locked": True,
+            "reason": f"write failed: {exc.__class__.__name__}",
+            "btc_n": len(btc_rows),
+            "commodity_n": len(cmd_rows),
+        }
+    return {
+        "ok": True,
+        "paper_only": True,
+        "observe_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "btc_n": len(btc_rows),
+        "commodity_n": len(cmd_rows),
+        "btc_path": btc_path,
+        "commodity_path": cmd_path,
+        "wrote": wrote,
+        "note": (
+            "Vol/curve harvest from feature-store (+ commodity closed fair_at_entry). "
+            "Incomplete fair/ask skipped — no invent. Floors locked. Never LIVE."
+        ),
+    }
+
+
 def vol_curve_observe(
     root: str | None = None,
     *,
@@ -7495,8 +7688,8 @@ def vol_curve_observe(
     """BTC vol-binary + commodity curve densify observe board."""
     btc_path = commodity_path = None
     if root:
-        bp = os.path.join(root, "desk_btc_vol_binary.json")
-        cp = os.path.join(root, "desk_commodity_curve.json")
+        bp = os.path.join(root, BTC_VOL_BINARY_NAME)
+        cp = os.path.join(root, COMMODITY_CURVE_NAME)
         if os.path.isfile(bp):
             btc_path = bp
         if os.path.isfile(cp):
