@@ -208,6 +208,27 @@ class SportsGapSkipDensify(unittest.TestCase):
         self.assertIn("tip_within_minutes", idle_fn)
         self.assertIn('state == "pre"', idle_fn)
 
+    def test_daily_r_settle_only_prepends_card_skip(self):
+        """#482 twin: sports daily-R must prepend so CARD beats earlier evaluate/cool skips."""
+        src = GAP.read_text(encoding="utf-8")
+        idx = src.find('daily_r_blocks("sports-gap"')
+        self.assertGreater(idx, 0)
+        chunk = src[idx:idx + 350]
+        self.assertIn("skips.insert(0, r_block)", chunk)
+        self.assertNotIn("skips\"].append(r_block)", chunk)
+        gap = _load_gap()
+        card = gap._card_line({
+            "trades": [],
+            "skips": [
+                "daily R budget hit for sports-gap: today $30.00 ≥ 1.5R ($30) — settle-only",
+                "gap < 6 (accurate) - no trade",
+            ],
+            "live_games": 4,
+            "matched": 4,
+        })
+        self.assertIn("settle-only", card.lower())
+        self.assertNotIn("gap < 6", card)
+
 
 if __name__ == "__main__":
     unittest.main()
