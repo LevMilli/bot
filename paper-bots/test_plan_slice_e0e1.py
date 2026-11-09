@@ -49,7 +49,8 @@ class PlanSliceE0E1Tests(unittest.TestCase):
 
     def test_inx_forced_slots(self):
         slots = [s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "run"]
-        self.assertEqual([s["at_ct"] for s in slots], ["12:05", "13:05", "14:20"])
+        self.assertEqual([s["at_ct"] for s in slots], ["12:05", "13:05", "13:40"])
+        self.assertEqual(slots[2]["until_ct"], "14:00")
         morning = datetime(2026, 11, 2, 9, 0, tzinfo=CT)
         self.assertIn("12:05", pimp_desk.next_inx_scan_line("kalshi-sp", morning))
 
