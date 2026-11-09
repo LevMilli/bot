@@ -1127,6 +1127,13 @@ class PimpDeskTests(unittest.TestCase):
             "no Kalshi match",
             pimp_desk._sports_skip("CARD: no Kalshi match - skip\n"),
         )
+        # Idle no-live CARD is the skip reason — not "did not include a skip line".
+        idle = (
+            "Kalshi tape: +0 new prints\n"
+            "CARD: No live or tip-soon games, so this check bought nothing.\n"
+        )
+        self.assertIn("no live or tip-soon", pimp_desk._sports_skip(idle).lower())
+        self.assertNotIn("did not include a skip line", pimp_desk._sports_skip(idle).lower())
 
     def test_kalshi_skip_prefers_densified_card_over_calendar(self):
         summary = (

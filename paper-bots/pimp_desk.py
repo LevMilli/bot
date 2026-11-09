@@ -1641,8 +1641,8 @@ def _sports_skip(summary: str) -> str:
             continue
         if low.startswith("no paper buy") or low.startswith("paper buy"):
             continue
-        if "no live or tip-soon" in low:
-            continue
+        # "No live or tip-soon games…" IS the skip reason — never lie as
+        # "did not include a skip line" (#498 INX tip twin).
         return body[:400]
     return "The last run did not include a skip line."
 
