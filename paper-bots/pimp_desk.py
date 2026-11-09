@@ -1427,10 +1427,39 @@ def _kalshi_skip_run_body(summary: str) -> str:
     return ""
 
 
+def _kalshi_drawdown_halt_line(root: str, state: dict | None) -> str:
+    """Entry-block truth when bankroll ≤ drawdown_halt (halted flag stays kill-only)."""
+    if not state or state.get("halted"):
+        return ""
+    bankroll = _num(state.get("bankroll"))
+    cfg = _read_json(_under(root, "kalshi-sp500-paper", "config.json")) or {}
+    dd_halt = _num(cfg.get("drawdown_halt_bankroll"))
+    start = _num(cfg.get("starting_bankroll")) or 500.0
+    if (
+        bankroll is not None
+        and dd_halt is not None
+        and float(bankroll) <= float(dd_halt) + 1e-9
+    ):
+        return (
+            f"Tower drawdown halt: bankroll ${float(bankroll):.2f} ≤ "
+            f"${float(dd_halt):.2f} (start ${float(start):.0f}). New buys off; exits still run."
+        )
+    return ""
+
+
 def _kalshi_skip(root: str, state: dict | None, summary: str = "") -> str:
+    # Drawdown / kill beat bland settle CARD ("No open paper positions") so $444
+    # idle is not read as a healthy empty book.
+    dd = _kalshi_drawdown_halt_line(root, state)
+    if dd:
+        return dd
     run_skip = _kalshi_skip_run_body(summary)
     if run_skip:
-        return run_skip
+        low = run_skip.lower()
+        if "no open paper" in low or low in ("no paper buy.", "paper buy."):
+            pass  # fall through to calendar / kill densify
+        else:
+            return run_skip
     day = _today()
     reasons = []
     if day.weekday() >= 5:
@@ -1450,23 +1479,6 @@ def _kalshi_skip(root: str, state: dict | None, summary: str = "") -> str:
     if state and state.get("halted"):
         halt = "The paper account is halted by its own kill switch."
         line = f"{line} {halt}".strip() if line else halt
-    # Drawdown halt blocks entries via check_can_trade without flipping halted=True
-    # (kill switch still owns that flag). Surface it so $444 idle is not a mystery.
-    if state and not state.get("halted"):
-        bankroll = _num(state.get("bankroll"))
-        cfg = _read_json(_under(root, "kalshi-sp500-paper", "config.json")) or {}
-        dd_halt = _num(cfg.get("drawdown_halt_bankroll"))
-        start = _num(cfg.get("starting_bankroll")) or 500.0
-        if (
-            bankroll is not None
-            and dd_halt is not None
-            and float(bankroll) <= float(dd_halt) + 1e-9
-        ):
-            dd = (
-                f"Tower drawdown halt: bankroll ${float(bankroll):.2f} ≤ "
-                f"${float(dd_halt):.2f} (start ${float(start):.0f}). New buys off; exits still run."
-            )
-            line = f"{line} {dd}".strip() if line else dd
     return line
 
 
@@ -1943,6 +1955,18 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
     # Sports: why already densifies CARD; skip stayed "" forever (#400 sibling).
     if spec["kind"] == "sports" and not view.get("skip"):
         view["skip"] = _sports_skip(summary)
+    # Kalshi: prefer drawdown/kill densify over settle boilerplate why.
+    if spec["kind"] == "kalshi":
+        skip = str(view.get("skip") or "")
+        why_low = str(view.get("why") or "").lower()
+        if skip and (
+            "drawdown halt" in skip.lower()
+            or "kill switch" in skip.lower()
+            or not why_low.strip()
+            or "no open paper" in why_low
+            or "no paper buy" in why_low
+        ):
+            view["why"] = plain_reason(skip)
     view["outside"] = _outside(root, spec["id"], stamp)
     _save_good_bot(root, spec["id"], view)
     return _finish_bot(view, spec, root)
