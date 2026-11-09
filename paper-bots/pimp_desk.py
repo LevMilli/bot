@@ -3766,12 +3766,13 @@ def run_shadow_tick(
     *,
     run_bots: bool = True,
 ) -> dict:
-    """One-shot paper shadow smoke — densify edge08 + sports + commodity + INX + heartbeat.
+    """One-shot paper shadow smoke — densify edge08 + sports + commodity + carry + INX + heartbeat.
 
     Forces a DESK_SHADOW edge08 pass (bypasses 5m cadence), smokes sports-gap,
-    commodity-15m, and INX paper settles (hard-stop / t-final / t-stop / near-miss densify),
-    touches heartbeat, best-effort history settle. Never sets LIVE_ORDERS.
-    Floors stay locked. Writes tick+catchup markers so doctor isn't false-stale.
+    commodity-15m, btc-carry, and INX paper settles (hard-stop / t-final / t-stop /
+    near-miss densify), touches heartbeat, best-effort history settle. Never sets
+    LIVE_ORDERS. Floors stay locked. Writes tick+catchup markers so doctor isn't
+    false-stale.
     """
     root = _root(root)
     if now is None:
@@ -3852,6 +3853,23 @@ def run_shadow_tick(
             "paper_only": True,
             "live_orders_enabled": False,
         })
+        # BTC carry shadow sleeve — densify hold/flat CARD without waiting for 300s slot.
+        # Shadow-only; spends no desk cash; never LIVE.
+        try:
+            carry = run_bot("btc-carry", "run", root)
+        except Exception as exc:  # noqa: BLE001
+            carry = {"ok": False, "error": type(exc).__name__, "blocked": False, "summary": ""}
+        shadow_rows.append({
+            "bot": "btc-carry",
+            "action": "shadow-smoke",
+            "shadow_id": None,
+            "ok": bool(carry.get("ok")),
+            "blocked": bool(carry.get("blocked")),
+            "error": carry.get("error") or "",
+            "summary": carry.get("summary") or "",
+            "paper_only": True,
+            "live_orders_enabled": False,
+        })
         # INX paper settle smoke — densify fee ledger + band history without noon scan.
         # settle only (not mid-day scan invent); never LIVE.
         for inx_bot in ("kalshi-sp", "kalshi-sized"):
@@ -3910,6 +3928,7 @@ def run_shadow_tick(
         "shadow_rows": shadow_rows,
         "sports_smoked": any(r.get("bot") == "sports-gap" for r in shadow_rows),
         "commodity_smoked": any(r.get("bot") == "commodity-15m" for r in shadow_rows),
+        "btc_carry_smoked": any(r.get("bot") == "btc-carry" for r in shadow_rows),
         "inx_sp_smoked": any(r.get("bot") == "kalshi-sp" for r in shadow_rows),
         "inx_sized_smoked": any(r.get("bot") == "kalshi-sized" for r in shadow_rows),
         "catchup": catchup,
@@ -3919,7 +3938,7 @@ def run_shadow_tick(
         "repaired": catchup.get("repaired"),
         "note": (
             "Shadow tick — paper DESK_SHADOW edge08 + sports-gap + commodity-15m "
-            "+ INX settle smoke + catch-up densify. Never LIVE_ORDERS; never tip invent; "
+            "+ btc-carry + INX settle smoke + catch-up densify. Never LIVE_ORDERS; never tip invent; "
             "Discord never auto-posts."
         ),
     }

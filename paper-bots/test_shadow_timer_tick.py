@@ -192,6 +192,7 @@ class ShadowTimerTick(unittest.TestCase):
             self.assertTrue(out["fee_floors_locked"])
             self.assertTrue(out.get("sports_smoked"))
             self.assertTrue(out.get("commodity_smoked"))
+            self.assertTrue(out.get("btc_carry_smoked"))
             sports_rows = [r for r in (out.get("shadow_rows") or []) if r.get("bot") == "sports-gap"]
             self.assertEqual(len(sports_rows), 1)
             self.assertEqual(sports_rows[0].get("action"), "shadow-smoke")
@@ -202,8 +203,12 @@ class ShadowTimerTick(unittest.TestCase):
             self.assertEqual(commodity_rows[0].get("action"), "shadow-smoke")
             self.assertTrue(commodity_rows[0].get("paper_only"))
             self.assertFalse(commodity_rows[0].get("live_orders_enabled"))
+            carry_rows = [r for r in (out.get("shadow_rows") or []) if r.get("bot") == "btc-carry"]
+            self.assertEqual(len(carry_rows), 1)
+            self.assertEqual(carry_rows[0].get("action"), "shadow-smoke")
             self.assertTrue(any(s["bot"] == "sports-gap" for s in seen))
             self.assertTrue(any(s["bot"] == "commodity-15m" for s in seen))
+            self.assertTrue(any(s["bot"] == "btc-carry" for s in seen))
             self.assertTrue(any(s["bot"] == "btc15m" for s in seen))
             # Commodity smoke has no DESK_SHADOW env / shadow_profile.
             commodity_calls = [s for s in seen if s["bot"] == "commodity-15m"]
@@ -247,7 +252,9 @@ class ShadowTimerTick(unittest.TestCase):
         self.assertIn('live_orders_enabled": False', tick_src)
         self.assertIn("sports-gap", tick_src)
         self.assertIn("commodity-15m", tick_src)
+        self.assertIn("btc-carry", tick_src)
         self.assertIn("commodity_smoked", tick_src)
+        self.assertIn("btc_carry_smoked", tick_src)
         self.assertNotIn("tip_invent", tick_src.lower())
         self.assertNotIn("LIVE_ORDERS = True", tick_src)
 
