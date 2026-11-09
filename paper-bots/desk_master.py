@@ -594,17 +594,17 @@ def master_summary(
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_os = desk_roi_plan.latest_capital_os(root)
-            if root and bots and (
-                not isinstance(latest_os, dict)
-                or str(latest_os.get("label") or "") != today
-            ):
+            # Prefer live bots whenever provided — same-day stale ok=True must
+            # not hide live barbell fail (#485 daily_r twin).
+            if root and bots:
                 plan["capital_os"] = desk_roi_plan.capture_capital_os(
                     root, bots=bots, cfg=cfg, desk_util=desk_util, label=today,
                 )
             else:
-                plan["capital_os"] = latest_os or desk_roi_plan.capital_os_status(
-                    root, bots=bots, cfg=cfg, desk_util=desk_util,
+                plan["capital_os"] = desk_roi_plan.latest_capital_os(root) or (
+                    desk_roi_plan.capital_os_status(
+                        root, bots=bots, cfg=cfg, desk_util=desk_util,
+                    )
                 )
         except Exception:
             plan["capital_os"] = None
@@ -620,16 +620,15 @@ def master_summary(
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_bw = desk_roi_plan.latest_bleed_week(root)
-            if root and bots and (
-                not isinstance(latest_bw, dict)
-                or str(latest_bw.get("label") or "") != today
-            ):
+            # Prefer live bots.today (#485 twin) — same-day stale green_usd lag.
+            if root and bots:
                 plan["bleed_week"] = desk_roi_plan.capture_bleed_week(
                     root, bots=bots, label=today,
                 )
             else:
-                plan["bleed_week"] = latest_bw or desk_roi_plan.firm_bleed_ratio(bots)
+                plan["bleed_week"] = desk_roi_plan.latest_bleed_week(root) or (
+                    desk_roi_plan.firm_bleed_ratio(bots)
+                )
         except Exception:
             plan["bleed_week"] = None
         try:
