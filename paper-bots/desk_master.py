@@ -743,16 +743,17 @@ def master_summary(
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_bc = desk_roi_plan.latest_btc_calibration(root)
-            if root and bots and (
-                not isinstance(latest_bc, dict)
-                or str(latest_bc.get("label") or "") != today
-            ):
+            # Prefer live bots whenever provided — same-day stale calib card must
+            # not lag live BTC history (#490 commodity twin).
+            if root and bots:
                 plan["btc_calibration"] = desk_roi_plan.capture_btc_calibration(
                     root, bots=bots, label=today,
                 )
             else:
-                plan["btc_calibration"] = latest_bc or desk_roi_plan.btc_calibration_report(bots)
+                plan["btc_calibration"] = (
+                    desk_roi_plan.latest_btc_calibration(root)
+                    or desk_roi_plan.btc_calibration_report(bots)
+                )
         except Exception:
             plan["btc_calibration"] = None
         try:
