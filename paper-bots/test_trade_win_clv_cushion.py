@@ -297,9 +297,72 @@ class TradeWinClvCushionTests(unittest.TestCase):
             }],
         }
         self.assertIsNone(gap._nhl_settle_line_fair(wipe_only, game))
-        # Mid-open nhl_model path unchanged (buy fair still rem=0 wipe on finals
-        # scoreboard blob — settle densify is the only walkback consumer).
+        # Raw nhl_model still wipes on rem=0 scoreboard (buy path unchanged).
         self.assertEqual(gap.nhl_model(summary, game), raw_wipe)
+
+    def test_nhl_midopen_end_of_period_walks_plays_past_wipe(self):
+        """End of 3rd state=in rem=0 mid-open fair densifies via plays walkback."""
+        gap_path = os.path.join(ROOT, "sports-gap-paper", "gap_bot.py")
+        with open(gap_path, encoding="utf-8") as fh:
+            src = fh.read()
+        # Mid-open NHL path must walk wipe → settle plays densify.
+        fair_idx = src.find('fair_home = nhl_model(summ, g)')
+        self.assertGreater(fair_idx, 0)
+        fair_chunk = src[fair_idx:fair_idx + 500]
+        self.assertIn("_nhl_settle_line_fair", fair_chunk)
+        self.assertIn("_line_clv_fair_home(fair_home) is None", fair_chunk)
+        # last_fair stash refuses wipe (mirror last_mark).
+        stash_idx = src.find('p["last_fair"]')
+        self.assertGreater(stash_idx, 0)
+        stash_chunk = src[max(0, stash_idx - 250):stash_idx + 80]
+        self.assertIn("0.0 < fair_f < 1.0", stash_chunk)
+        spec = importlib.util.spec_from_file_location("gap_bot_nhl_midopen", gap_path)
+        gap = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gap)
+        # End of 3rd still state=in (TB@WPG shape) — raw wipe, walkback line.
+        game = {
+            "id": "401892677",
+            "state": "in",
+            "home": {"score": 3, "team": {"abbreviation": "WPG"}},
+            "away": {"score": 1, "team": {"abbreviation": "TB"}},
+            "status": {"period": 3, "clock": 0.0, "displayClock": "0:00"},
+            "detail": "End of 3rd",
+        }
+        summary = {
+            "pickcenter": [{
+                "overUnder": 6.0,
+                "homeTeamOdds": {"moneyLine": -140},
+                "awayTeamOdds": {"moneyLine": 120},
+            }],
+            "plays": [
+                {
+                    "period": {"number": 3},
+                    "clock": {"displayValue": "19:30"},
+                    "homeScore": 3,
+                    "awayScore": 1,
+                    "text": "late shot",
+                },
+                {
+                    "period": {"number": 3},
+                    "clock": {"displayValue": "20:00"},
+                    "homeScore": 3,
+                    "awayScore": 1,
+                    "text": "End of Period",
+                },
+            ],
+        }
+        raw = gap.nhl_model(summary, game)
+        self.assertTrue(raw == 0.0 or raw == 1.0)
+        walk = gap._nhl_settle_line_fair(summary, game)
+        self.assertIsNotNone(walk)
+        self.assertTrue(0.0 < float(walk) < 1.0)
+        # Simulate mid-open densify: wipe → walkback.
+        fair_home = raw
+        if gap._line_clv_fair_home(fair_home) is None:
+            walked = gap._nhl_settle_line_fair(summary, game)
+            if walked is not None:
+                fair_home = walked
+        self.assertAlmostEqual(fair_home, walk, places=6)
 
     def test_repair_does_not_invent_binary_close(self):
         with tempfile.TemporaryDirectory() as tmp:
