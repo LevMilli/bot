@@ -408,12 +408,32 @@ def run_once(
     elif bought:
         lines.append(f"CARD: paper buy {bought}")
     else:
-        first = next(iter(decisions.values()), {})
-        lines.append("CARD: " + (first.get("reason") or "no fee-clear long"))
+        lines.append("CARD: " + _card_skip_reason(decisions))
     if not bought:
         lines.append("no trade")
     print("\n".join(lines))
     return 0
+
+
+def _card_skip_reason(decisions: dict) -> str:
+    """CARD must densify feed-down, not false-friend as the first z/edge skip.
+
+    Prefer any ``data *`` reason (candle TimeoutError / fetch fail) over ordinary
+    model skips when products_trade puts a quiet bar first (#457 Prefer-1).
+    """
+    data_reasons = []
+    for decision in (decisions or {}).values():
+        if not isinstance(decision, dict):
+            continue
+        reason = str(decision.get("reason") or "").strip()
+        if reason.lower().startswith("data "):
+            data_reasons.append(reason)
+    if data_reasons:
+        return data_reasons[0]
+    first = next(iter((decisions or {}).values()), {}) if decisions else {}
+    if isinstance(first, dict):
+        return str(first.get("reason") or "no fee-clear long")
+    return "no fee-clear long"
 
 
 def _record_incubation(desk_root: str, product: str, pnl) -> None:
