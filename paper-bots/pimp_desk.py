@@ -100,6 +100,8 @@ DEFAULTS = {
         "kalshi_commodity15m": 0.05,
         "kalshi_inx": 0.02,
         "solana_dex": 0.02,
+        # Excess return after Coinbase round-trip. Locked. Shadow tower only.
+        "coinbase_spot": 0.05,
     },
     "fill_adverse_tax": 0.01,
     "gate_a_min_n": 20,
@@ -143,6 +145,7 @@ ACCOUNT_FILES = {
     "commodity-15m": "paper_account.json",
     "memecoin": "positions.json",
     "kalshi-sized": "paper_state.json",
+    "coinbase-spot": "paper_account.json",
 }
 
 # Closed paper settlements and the logs that record them. These are the files a
@@ -181,6 +184,7 @@ SETTLEMENT_FILES = (
     "desk_helper_fills.json",
     "desk_fee_ledger.json",
     "btc15m-signal/shadow_edge08_account.json",
+    "coinbase-spot-paper/paper_account.json",
     "pimp-learning.json",
     "pimp-good.json",
 )
@@ -213,6 +217,10 @@ ACTIONS = {
     "memecoin": {
         "run": {"argv": ("bot.py",), "entry": True, "timeout": 120, "label": "Run one check"},
     },
+    "coinbase-spot": {
+        # Shadow sleeve. Public candles only. Entry gate still blocks new buys.
+        "run": {"argv": ("bot.py",), "entry": True, "timeout": 45, "label": "Run one check"},
+    },
 }
 
 # One automatic pass. Intervals are seconds. Clock times are America/Chicago.
@@ -232,6 +240,8 @@ AUTO = (
     {"id": "commodity-15m", "action": "run", "every_sec": 90},
     # Faster manage ticks so −18% / model-flip stops fire before a full bleed.
     {"id": "memecoin", "action": "run", "every_sec": 180},
+    # Shadow research cadence. Does not spend desk cash. Fee floor stays 0.05.
+    {"id": "coinbase-spot", "action": "run", "every_sec": 300},
     {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "11:59"},
     # Forced INX scan slots (plan E1 #123) — up to 3 fee-aware scans / Chicago day.
     {"id": "kalshi-sp", "action": "run", "at_ct": "12:05", "until_ct": "12:25"},
@@ -312,6 +322,22 @@ BOTS = (
         "kind": "kalshi",
         "log": "Trade_Ledger.md",
         "empty": "No paper_state.json yet. A scan inside the bot's window writes one.",
+    },
+    {
+        "id": "coinbase-spot",
+        "name": "Coinbase spot",
+        "folder": "coinbase-spot-paper",
+        "script": "bot.py",
+        "blurb": (
+            "Shadow Coinbase spot paper tower. Public candles only. "
+            "Longs only when excess return clears the locked 0.05 floor after taker fees. "
+            "Spends no desk cash."
+        ),
+        "state": "paper_account.json",
+        "kind": "spot",
+        "log": "",
+        "empty": "No paper account yet. A check writes paper_account.json.",
+        "shadow_only": True,
     },
 )
 
@@ -468,6 +494,33 @@ BOT_PLANS = {
         "entry_gated": True,
         "stake": "kelly-lite",
     },
+    "coinbase-spot": {
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "ETH-USD and SOL-USD longs; BTC-USD is research-only (btc15m owns that factor)",
+            "Public Coinbase 15m candles; no API key",
+            "Edge = 25% of the last 15m move minus round-trip US intro taker 0.90% + 0.10% slip each side",
+            "Buy only if z ≥ 2 and edge ≥ locked coinbase_spot 0.05",
+            "Skip when btc15m holds YES; spot cash book does not short",
+            "Fixed $25 ticket from the shadow $500 sleeve; max 1 open",
+        ],
+        "sell": [
+            "Stop at −1.5% from entry",
+            "Take-profit when price move covers round-trip plus the 0.05 floor",
+            "Model-flip when z ≤ −2 against the long",
+            "Time stop at 24h",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys",
+            "Floor cannot be lowered; haircut cannot be raised above 0.25; taker cannot be cut below 0.90%",
+            "Learning skip after 8 settles under 40% hits",
+            "Incubation: 50 fee-aware settles before any staff graduate; no auto-promote",
+            "Pause file; a Coinbase key in the environment refuses the check",
+        ],
+        "exit_quality": "partial",
+        "entry_gated": True,
+        "stake": "fixed-25",
+    },
 }
 
 
@@ -558,7 +611,7 @@ ROI_POLICY = {
         {"id": "R11", "text": "City/staff read snapshot only — never re-parse bot files."},
         {"id": "R12", "text": "Tower 5 is Sized Kalshi (Kelly-lite KXINXU) when present — no fake substitute."},
         {"id": "R13", "text": "Correlation veto — paired directional factors cannot stack when the open book is as good or better."},
-        {"id": "R14", "text": "Fee-aware venue_min_edge per book (sports/BTC/INX/DEX)."},
+        {"id": "R14", "text": "Fee-aware venue_min_edge per book (sports/BTC/INX/DEX/Coinbase spot)."},
         {"id": "R15", "text": "Model-flip exits fire before hard stops / settle-only waits."},
         {"id": "R16", "text": "Expectancy starve throttles losers after enough settles."},
         {"id": "R17", "text": "Shadow bots spend no desk cash; promote only after expectancy gates."},
@@ -594,6 +647,7 @@ ROI_POLICY = {
         "kalshi-sp": ["fixed_ticket_25"],
         "btc15m": [],
         "memecoin": ["fixed_ticket_25"],
+        "coinbase-spot": ["fixed_ticket_25", "shadow_only"],
     },
     "target_exit_quality": {
         "sports-gap": "partial",
@@ -601,6 +655,7 @@ ROI_POLICY = {
         "btc15m": "partial",
         "memecoin": "strong",
         "kalshi-sized": "partial",
+        "coinbase-spot": "partial",
     },
 }
 
@@ -1777,10 +1832,11 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
         view["why"] = "That script is not on this checkout, so this check bought nothing."
         return _finish_bot(view, spec, root)
     run = view["last_run"] or {}
-    if spec["kind"] == "btc":
+    if spec["kind"] in ("btc", "spot"):
         summary = str(run.get("summary") or "")
         view["skip"] = _btc_skip(summary)
-        view["warning"] = _btc_calendar_warning(summary)
+        if spec["kind"] == "btc":
+            view["warning"] = _btc_calendar_warning(summary)
         if run.get("at"):
             view["last_check"] = str(run.get("at"))
         state_path = _under(root, spec["folder"], spec["state"]) if spec.get("state") else ""
@@ -3112,7 +3168,14 @@ def _paper_ok(root: str, bot_id: str) -> str:
         return "Sized Kalshi config is not paper_mode. This desk will not start it."
     if bot_id == "memecoin" and not _meme_paper(root):
         return "Memecoin PAPER is not True. This desk will not start it."
+    if bot_id == "coinbase-spot" and not _coinbase_paper(root):
+        return "Coinbase spot config is not paper-only. This desk will not start it."
     return ""
+
+
+def _coinbase_paper(root: str) -> bool:
+    cfg = _read_json(_under(root, "coinbase-spot-paper", "config.json")) or {}
+    return cfg.get("paper_only") is True and cfg.get("live_orders") is not True
 
 
 def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: bool = False,
@@ -3233,6 +3296,7 @@ def timer_text() -> str:
         "Kalshi morning brief once at 8:00 AM, dry run. "
         "Kalshi paper scans forced at 12:05, 13:05, and 14:20 CT (up to 3/day). "
         "Kalshi paper settle once at 4:00 PM. "
+        "Coinbase spot shadow about every 5 minutes (public candles, no desk cash). "
         "Memecoin about every 3 minutes (manage exits, then scan; dual lanes; stop-bleed); "
         "about every 2 minutes when open paper needs manage. "
         "Commodity about every 90 seconds; about every 60 seconds when ≥2 series are open. "
@@ -3994,6 +4058,7 @@ TOWER_STARTER_CASH = {
     "memecoin": 100.0,
     "kalshi-sp": 500.0,
     "kalshi-sized": 500.0,
+    "coinbase-spot": 500.0,
 }
 TOWER_MIN_AMMO = {
     "sports-gap": 10.0,
@@ -4002,6 +4067,7 @@ TOWER_MIN_AMMO = {
     "memecoin": 10.0,
     "kalshi-sp": 20.0,
     "kalshi-sized": 20.0,
+    "coinbase-spot": 25.0,
 }
 
 
@@ -4278,6 +4344,15 @@ def _account_body(bot_id: str) -> dict:
         }
     if bot_id in ("btc15m", "commodity-15m"):
         return {"cash": 100.0, "open": [], "closed": [], "paper_only": True}
+    if bot_id == "coinbase-spot":
+        return {
+            "cash": 500.0,
+            "open": [],
+            "closed": [],
+            "paper_only": True,
+            "shadow_only": True,
+            "live_orders": False,
+        }
     if bot_id == "memecoin":
         return {
             "cash_usd": 100.0,
@@ -5422,7 +5497,10 @@ def _quote_flags(row: dict, now: dt.datetime) -> dict:
 
 def _finish_bot(view: dict, spec: dict, root: str) -> dict:
     now = dt.datetime.now(dt.timezone.utc)
-    view["book_id"] = {"sports": "sports", "kalshi": "kalshi", "btc": "bitcoin", "meme": "meme"}.get(spec.get("kind"), "kalshi")
+    view["book_id"] = {
+        "sports": "sports", "kalshi": "kalshi", "btc": "bitcoin", "meme": "meme", "spot": "coinbase",
+    }.get(spec.get("kind"), "kalshi")
+    view["shadow_only"] = bool(spec.get("shadow_only"))
     view["paused"] = bot_paused(root, spec["id"])
     view["next_run"] = _next_for(spec["id"], root, now)
     view["central_check"] = _central_from_text(view.get("last_check") or "")

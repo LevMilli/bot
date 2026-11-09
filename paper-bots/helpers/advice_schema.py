@@ -20,6 +20,7 @@ LOCKED_VENUE_FLOORS = {
     "kalshi_commodity15m": 0.05,
     "kalshi_inx": 0.02,
     "solana_dex": 0.02,
+    "coinbase_spot": 0.05,
 }
 
 # Aliases helpers may use for venue keys.
@@ -36,6 +37,8 @@ _VENUE_ALIASES = {
     "kalshi_inx": "kalshi_inx",
     "dex": "solana_dex",
     "solana_dex": "solana_dex",
+    "coinbase": "coinbase_spot",
+    "coinbase_spot": "coinbase_spot",
 }
 
 

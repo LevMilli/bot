@@ -17,6 +17,8 @@ VENUE_KEYS = (
     "kalshi_commodity15m",
     "kalshi_inx",
     "solana_dex",
+    # Spot return-after-cost floor. Same 0.05 number as BTC, different unit.
+    "coinbase_spot",
 )
 
 DEFAULT_VENUE_MIN_EDGE = {
@@ -25,6 +27,7 @@ DEFAULT_VENUE_MIN_EDGE = {
     "kalshi_commodity15m": 0.05,
     "kalshi_inx": 0.02,
     "solana_dex": 0.02,
+    "coinbase_spot": 0.05,
 }
 
 # Display / board tax: assume +1¢ adverse vs stored ask when grading ROI honesty.
@@ -50,6 +53,7 @@ BOT_VENUE = {
     "kalshi-sp": "kalshi_inx",
     "kalshi-sized": "kalshi_inx",
     "memecoin": "solana_dex",
+    "coinbase-spot": "coinbase_spot",
 }
 
 
@@ -650,6 +654,9 @@ def capital_weights(bot_rows: list) -> dict:
     for bot in bot_rows or []:
         bot_id = str(bot.get("id") or "")
         if not bot_id or bot.get("present") is False:
+            continue
+        # Shadow sleeves do not take a share of desk capital.
+        if bot.get("shadow_only"):
             continue
         if bot.get("starved"):
             scores[bot_id] = 0.0
