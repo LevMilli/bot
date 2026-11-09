@@ -95,7 +95,7 @@ Bot-local stops that are **tighter** than desk (Kalshi −$50, meme −$50, max 
 ### Coinbase spot → **partial**, shadow only
 - Public daily candles. ETH-USD and SOL-USD longs. BTC-USD research-only.
 - Rule: cross above the 50-day average. Cost is the US intro taker round trip (0.90% + 0.10% slip each side).
-- Buy only when that rule's own closed trades have n ≥ 20, hit ≥ 40%, median net > 0, and mean net ≥ 0.05. A fat-tail average with a losing typical trade stays flat.
+- Buy only when that rule's own closed trades, and the latest 20 of them, have n ≥ 20, hit ≥ 40%, median net > 0, and mean net ≥ 0.05. A fat-tail average with a losing typical trade stays flat. The unfinished daily candle is ignored. After 8 paper settles the book itself must still clear that bar.
 - Exits match the sample: −15% stop at the close, model-flip back under the average, 120-day time stop.
 - Own $500 sleeve, fixed $25, max 1 open. No desk cash and no tower risk share until a person graduates incubation (n ≥ 50).
 - Waiver: `fixed_ticket_25`, `shadow_only`.

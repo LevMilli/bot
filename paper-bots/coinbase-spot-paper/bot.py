@@ -115,7 +115,8 @@ def research_card(cfg: dict | None = None) -> dict:
             f"{cfg['trend_look']}-day average only when closed trades of that same rule "
             f"have n>={cfg['min_sample']}, hit>={cfg['hit_floor']:.0%}, median net > 0, "
             f"and mean net >= the locked {cfg['venue_min_edge']:.0%} floor after the "
-            f"{trip:.0%} taker round trip. A winning average with a losing typical trade stays flat."
+            f"{trip:.0%} taker round trip. The latest {cfg['min_sample']} trades must clear "
+            "that same bar. A winning average with a losing typical trade stays flat."
         ),
     }
 
@@ -235,6 +236,31 @@ def profit_gate_open(stats: dict, cfg: dict) -> bool:
     )
 
 
+def audit_sample(trades: list[float], cfg: dict) -> dict:
+    """Lifetime sample and the latest window both have to clear the floor.
+
+    Old winners can keep a lifetime median positive after the rule has stopped
+    paying. The latest `min_sample` trades have to clear the same bar.
+    """
+    full = _sample_stats(trades)
+    need = int(cfg["min_sample"])
+    recent = _sample_stats(trades[-need:] if trades else [])
+    if not profit_gate_open(full, cfg):
+        return {"open": False, "reason": gate_reason(full, cfg), "full": full, "recent": recent}
+    if not profit_gate_open(recent, cfg):
+        return {
+            "open": False,
+            "reason": (
+                f"flat: recent trades lose after fees "
+                f"(last {int(recent['n'])} hit {float(recent['hit']):.0%} "
+                f"median {float(recent['median']):.1%})"
+            ),
+            "full": full,
+            "recent": recent,
+        }
+    return {"open": True, "reason": "", "full": full, "recent": recent}
+
+
 def gate_reason(stats: dict, cfg: dict) -> str:
     """One city-card sentence. Avoid the words that the desk rewrites into boilerplate."""
     need = int(cfg["min_sample"])
@@ -257,7 +283,8 @@ def evaluate_closes(closes: list[float], cfg: dict, *, product: str = "") -> dic
     cfg = locked_cfg(cfg)
     trip = round_trip(cfg)
     trades = completed_rule_trades(closes, cfg)
-    stats = _sample_stats(trades)
+    audit = audit_sample(trades, cfg)
+    stats = audit["full"]
     ret = None
     if len(closes) >= 2 and closes[-2] > 0:
         ret = closes[-1] / closes[-2] - 1.0
@@ -272,11 +299,12 @@ def evaluate_closes(closes: list[float], cfg: dict, *, product: str = "") -> dic
         "median": stats["median"],
         "hit": stats["hit"],
         "sample_n": stats["n"],
+        "recent_n": audit["recent"]["n"],
         "round_trip": trip,
         "floor": cfg["venue_min_edge"],
     }
-    if not profit_gate_open(stats, cfg):
-        row["reason"] = gate_reason(stats, cfg)
+    if not audit["open"]:
+        row["reason"] = audit["reason"]
         return row
     look = int(cfg["trend_look"])
     if crossed_up(closes, len(closes) - 1, look):
@@ -300,6 +328,15 @@ def learning_block(state: dict, product: str, cfg: dict) -> str:
     rate = hits / len(closed)
     if rate + 1e-12 < float(cfg["learn_hit_rate"]):
         return f"learning skip {product} {hits}/{len(closed)} under {cfg['learn_hit_rate']:.0%}"
+    pnls = [float(row["pnl"]) for row in closed]
+    med = float(statistics.median(pnls))
+    avg = sum(pnls) / len(pnls)
+    need_dollars = float(cfg["stake_usd"]) * float(cfg["venue_min_edge"])
+    if med <= 0 or avg + 1e-9 < need_dollars:
+        return (
+            f"paper book loses after fees "
+            f"(n={len(pnls)} median ${med:.2f} mean ${avg:.2f})"
+        )
     return ""
 
 
@@ -382,18 +419,42 @@ def empty_state(cfg: dict) -> dict:
     }
 
 
-def fetch_closes(product: str, granularity: int = 86400, history_days: int = 2000) -> list[float]:
+def drop_open_candle(
+    stamps: list[int],
+    closes: list[float],
+    now: dt.datetime,
+    granularity: int,
+) -> list[float]:
+    """Keep buckets that have already ended. The current day is not a close."""
+    gran = max(60, int(granularity))
+    now_ts = int(now.timestamp())
+    kept = []
+    for ts, px in zip(stamps, closes):
+        if int(ts) + gran <= now_ts and px > 0:
+            kept.append(px)
+    return kept
+
+
+def fetch_closes(
+    product: str,
+    granularity: int = 86400,
+    history_days: int = 2000,
+    now: dt.datetime | None = None,
+) -> list[float]:
     """Public daily candles, paged. Coinbase returns at most 300 rows per call."""
     gran = max(60, int(granularity))
-    now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
-    cursor = now - dt.timedelta(days=max(30, int(history_days)))
+    clock = now or dt.datetime.now(dt.timezone.utc)
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=dt.timezone.utc)
+    clock = clock.astimezone(dt.timezone.utc).replace(microsecond=0)
+    cursor = clock - dt.timedelta(days=max(30, int(history_days)))
     step = dt.timedelta(seconds=gran * 280)
     closes: list[float] = []
     seen: list[int] = []
     for _ in range(12):
-        if cursor >= now:
+        if cursor >= clock:
             break
-        nxt = min(cursor + step, now)
+        nxt = min(cursor + step, clock)
         url = CANDLE_URL.format(
             product=product,
             granularity=gran,
@@ -415,7 +476,7 @@ def fetch_closes(product: str, granularity: int = 86400, history_days: int = 200
             seen.append(ts)
             closes.append(px)
         cursor = nxt
-    return closes
+    return drop_open_candle(seen, closes, clock, gran)
 
 
 def run_once(

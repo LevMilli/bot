@@ -24,7 +24,11 @@ trade. The book now uses a daily cross above the 50-day average, and it buys
 only when the closed trades of that same rule clear every row in the table.
 From 2020 through November 2026 the average of that rule was positive because a
 few large legs were large, and the typical trade still lost. The gate stays
-shut until the typical trade is a profit. The floor is not lowered to force a fill.
+shut until the typical trade is a profit. The latest 20 closed trades have to
+clear that same bar, so old winners cannot hide a rule that has stopped paying.
+The current day's candle is ignored until it has closed. After 8 paper settles,
+the book itself has to show a positive median and a mean of at least 5% of the
+ticket. The floor is not lowered to force a fill.
 
 ## What it will and will not trade
 

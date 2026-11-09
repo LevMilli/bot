@@ -1,6 +1,7 @@
 """Coinbase spot tower: fee floor, skip base, exits, scaffold check. No network."""
 from __future__ import annotations
 
+import datetime as dt
 import importlib.util
 import json
 import os
@@ -89,6 +90,30 @@ class CoinbaseSpotRules(unittest.TestCase):
         self.assertGreaterEqual(won["edge"], 0.05)
         self.assertGreater(won["median"], 0)
         self.assertGreaterEqual(won["sample_n"], 20)
+
+    def test_recent_window_and_paper_book_can_veto(self):
+        bot = _bot()
+        cfg = _fast_cfg(bot)
+        winners = [0.12] * 40
+        losers = [-0.04] * 20
+        audit = bot.audit_sample(winners + losers, cfg)
+        self.assertFalse(audit["open"])
+        self.assertIn("recent trades lose", audit["reason"])
+        still = bot.audit_sample(winners, cfg)
+        self.assertTrue(still["open"])
+        now = dt.datetime(2026, 11, 9, 4, 0, tzinfo=dt.timezone.utc)
+        day = 86400
+        start = int(dt.datetime(2026, 11, 7, tzinfo=dt.timezone.utc).timestamp())
+        stamps = [start, start + day, start + 2 * day]
+        kept = bot.drop_open_candle(stamps, [1.0, 2.0, 3.0], now, day)
+        self.assertEqual(kept, [1.0, 2.0])
+        state = {
+            "closed": [
+                {"ticker": "ETH-USD", "pnl": 0.40},
+            ] * 8,
+        }
+        block = bot.learning_block(state, "ETH-USD", cfg)
+        self.assertIn("paper book loses", block)
 
     def test_research_card_states_the_hurdle(self):
         bot = _bot()
