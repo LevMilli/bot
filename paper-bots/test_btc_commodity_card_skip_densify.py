@@ -583,6 +583,22 @@ class CommodityCardSkipDensify(unittest.TestCase):
         self.assertEqual(desk_more.classify_skip(cool), "learning")
         self.assertEqual(desk_more.classify_skip(stale), "data")
         self.assertEqual(desk_more.classify_skip(btc_cool), "learning")
+        revenge = "anti-revenge: btc15m blocked on KXBTC ~12m after hard-stop"
+        self.assertEqual(desk_more.classify_skip(revenge), "learning")
+        self.assertEqual(
+            desk_more.stable_skip_code(desk_more.classify_skip(revenge)),
+            "LEARN",
+        )
+        self.assertEqual(
+            desk_more.classify_skip(
+                "sticky-open SLA: 2 open(s) past settle window — exits first"
+            ),
+            "open_risk",
+        )
+        self.assertEqual(
+            desk_more.classify_skip("firm-queue deferred rank=3: lower score"),
+            "budget",
+        )
         self.assertEqual(desk_more.classify_skip("max buys this check (0)"), "other")
 
     def test_daily_r_settle_only_densifies_brain_not_max_buys_invent(self):

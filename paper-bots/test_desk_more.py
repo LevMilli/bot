@@ -117,6 +117,29 @@ class DeskMoreTests(unittest.TestCase):
             summary = desk_brain.brain_summary(tmp)
             self.assertIn("skip_leaderboard", summary)
 
+    def test_anti_revenge_sticky_firm_classify_not_data_invent(self):
+        """Prefer-2: gate locks must not invent DATA via other→DATA (#524 leftover)."""
+        revenge = "anti-revenge: sports-gap blocked on KXNBA ~8m after hard-stop"
+        sticky = (
+            "sticky-open SLA: 1 open(s) past settle window "
+            "(oldest 2.5h) — exits first before new speculative buys"
+        )
+        firm = "firm-queue deferred rank=2: sports-gap scores higher"
+        self.assertEqual(desk_more.classify_skip(revenge), "learning")
+        self.assertEqual(desk_more.stable_skip_code("learning"), "LEARN")
+        self.assertEqual(desk_more.classify_skip(sticky), "open_risk")
+        self.assertEqual(
+            desk_more.stable_skip_code(desk_more.classify_skip(sticky)),
+            "BUDGET",
+        )
+        self.assertEqual(desk_more.classify_skip(firm), "budget")
+        self.assertEqual(
+            desk_more.stable_skip_code(desk_more.classify_skip(firm)),
+            "BUDGET",
+        )
+        # Capacity invent stays OTHER→DATA so real gates stay distinct.
+        self.assertEqual(desk_more.classify_skip("max buys this check (0)"), "other")
+
 
 if __name__ == "__main__":
     unittest.main()
