@@ -411,12 +411,105 @@ def _espn_settle_line_wp(summary):
     return None
 
 
+_NHL_PERIOD_SEC = 20 * 60
+
+
+def _nhl_play_period(play):
+    """ESPN NHL play period may be int or ``{'number': N}``."""
+    if not isinstance(play, dict):
+        return None
+    period = play.get("period")
+    if isinstance(period, dict):
+        period = period.get("number")
+    try:
+        return int(period)
+    except (TypeError, ValueError):
+        return None
+
+
+def _nhl_play_elapsed_sec(play):
+    """ESPN NHL play clocks count UP (elapsed in period), not remaining."""
+    if not isinstance(play, dict):
+        return None
+    clock = play.get("clock")
+    if isinstance(clock, (int, float)):
+        return float(clock)
+    if not isinstance(clock, dict):
+        return None
+    display = clock.get("displayValue")
+    if isinstance(display, str) and ":" in display:
+        try:
+            mm, ss = display.split(":", 1)
+            return int(mm) * 60 + int(float(ss))
+        except (TypeError, ValueError):
+            return None
+    for key in ("value", "seconds"):
+        if clock.get(key) is not None:
+            try:
+                return float(clock[key])
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _nhl_settle_line_fair(summary, game):
+    """Last non-wipe nhl_model fair from plays (ESPN WP walkback sibling).
+
+    Scoreboard finals ship ``period=3 clock=0`` → ``nhl_model`` exact 0/1 →
+    ``_line_clv_fair_home`` refuses → hold-to-settle still Kalshi binary.
+    NHL has no winprobability series; walk plays past rem=0 / OT wipe and
+    re-run the model at the last regulation state with rem>0.
+    Play clocks are elapsed — convert to remaining for ``nhl_model``.
+    """
+    plays = summary.get("plays") or []
+    base_home = dict((game or {}).get("home") or {})
+    base_away = dict((game or {}).get("away") or {})
+    for play in reversed(plays):
+        if not isinstance(play, dict):
+            continue
+        period = _nhl_play_period(play)
+        if period is None or period > 3:
+            continue
+        elapsed = _nhl_play_elapsed_sec(play)
+        if elapsed is None:
+            continue
+        rem_sec = max(0.0, float(_NHL_PERIOD_SEC) - float(elapsed))
+        if rem_sec <= 0:
+            continue
+        hs = play.get("homeScore")
+        as_ = play.get("awayScore")
+        if hs is None or as_ is None:
+            continue
+        snap = {
+            "id": (game or {}).get("id"),
+            "home": dict(base_home),
+            "away": dict(base_away),
+            "state": "in",
+            "status": {"period": period, "clock": rem_sec},
+        }
+        snap["home"]["score"] = hs
+        snap["away"]["score"] = as_
+        try:
+            fair = nhl_model(summary, snap)
+        except Exception:
+            continue
+        line = _line_clv_fair_home(fair)
+        if line is not None:
+            return line
+    return None
+
+
 def _post_settle_fair_home(path, game, src, summary=None):
     """Densify ESPN/model fair_home for a finalized open hold (green CLV)."""
     try:
         summ = summary if summary is not None else espn_summary(path, game["id"])
         if src != "espn":
-            fair = nhl_model(summ, game)
+            # Prefer-3: scoreboard rem=0 finals wipe nhl_model to exact 0/1.
+            # Walk plays past rem=0 (no WP series); fall through to live model
+            # only when plays yield no line (tip summary invent / mid-data).
+            fair = _nhl_settle_line_fair(summ, game)
+            if fair is None:
+                fair = nhl_model(summ, game)
         else:
             # Prefer-3: walk back past trailing wipe 0/1; do not use mid-open
             # espn_home_wp (would no-op via _line_clv_fair_home on true finals).

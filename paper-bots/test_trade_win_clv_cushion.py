@@ -230,6 +230,77 @@ class TradeWinClvCushionTests(unittest.TestCase):
             }),
             1.0,
         )
+
+    def test_nhl_settle_walks_plays_past_rem0_wipe(self):
+        """NHL scoreboard rem=0 finals wipe nhl_model — densify from plays."""
+        gap_path = os.path.join(ROOT, "sports-gap-paper", "gap_bot.py")
+        with open(gap_path, encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertIn("def _nhl_settle_line_fair", src)
+        self.assertIn("def _nhl_play_elapsed_sec", src)
+        spec = importlib.util.spec_from_file_location("gap_bot_nhl_settle", gap_path)
+        gap = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gap)
+        # Scoreboard-final shape: period=3 clock=0 → raw wipe → line None.
+        game = {
+            "id": "401892674",
+            "state": "post",
+            "home": {"score": 4, "team": {"abbreviation": "BOS"}},
+            "away": {"score": 1, "team": {"abbreviation": "FLA"}},
+            "status": {"period": 3, "clock": 0.0, "displayClock": "0:00"},
+        }
+        # Minimal summary: pickcenter + plays (elapsed clocks count up).
+        summary = {
+            "pickcenter": [{
+                "overUnder": 5.5,
+                "homeTeamOdds": {"moneyLine": -155},
+                "awayTeamOdds": {"moneyLine": 130},
+            }],
+            "plays": [
+                {
+                    "period": {"number": 3},
+                    "clock": {"displayValue": "19:23"},
+                    "homeScore": 4,
+                    "awayScore": 1,
+                    "text": "late hit",
+                },
+                {
+                    "period": {"number": 3},
+                    "clock": {"displayValue": "20:00"},
+                    "homeScore": 4,
+                    "awayScore": 1,
+                    "text": "Game End",
+                },
+            ],
+        }
+        raw_wipe = gap.nhl_model(summary, game)
+        self.assertTrue(raw_wipe == 0.0 or raw_wipe == 1.0)
+        self.assertIsNone(gap._line_clv_fair_home(raw_wipe))
+        # Plays walkback: elapsed 19:23 → rem=37s → non-wipe line.
+        walk = gap._nhl_settle_line_fair(summary, game)
+        self.assertIsNotNone(walk)
+        self.assertTrue(0.0 < float(walk) < 1.0)
+        with mock.patch.object(gap, "espn_summary", return_value=summary):
+            fair = gap._post_settle_fair_home(
+                "hockey/nhl", game, "nhl_model", summary=summary,
+            )
+        self.assertAlmostEqual(fair, walk, places=6)
+        # Wipe-only (no rem>0 plays) still refuses binary — no invent.
+        wipe_only = {
+            "pickcenter": summary["pickcenter"],
+            "plays": [{
+                "period": {"number": 3},
+                "clock": {"displayValue": "20:00"},
+                "homeScore": 4,
+                "awayScore": 1,
+                "text": "Game End",
+            }],
+        }
+        self.assertIsNone(gap._nhl_settle_line_fair(wipe_only, game))
+        # Mid-open nhl_model path unchanged (buy fair still rem=0 wipe on finals
+        # scoreboard blob — settle densify is the only walkback consumer).
+        self.assertEqual(gap.nhl_model(summary, game), raw_wipe)
+
     def test_repair_does_not_invent_binary_close(self):
         with tempfile.TemporaryDirectory() as tmp:
             desk_more.record_sports_clv(
