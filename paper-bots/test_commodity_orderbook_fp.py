@@ -34,8 +34,8 @@ class CommodityOrderbookFp(unittest.TestCase):
         }
         spread, depth = cbot.depth_from_book(raw, "YES", 0.81)
         self.assertIsNotNone(spread)
-        # Levels >= ask-0.02 (=0.79) → 25 + 40
-        self.assertGreaterEqual(depth, 65)
+        # Levels >= ask−MAX_SPREAD (=0.76) → 10 + 25 + 40
+        self.assertGreaterEqual(depth, 75)
         self.assertLess(spread, 0.05)
 
     def test_orderbook_fp_string_qty_does_not_silent_zero(self):
@@ -82,6 +82,27 @@ class CommodityOrderbookFp(unittest.TestCase):
         }
         _spread, depth = cbot.depth_from_book(raw, "YES", 0.85)
         self.assertGreaterEqual(depth, 100)
+
+    def test_spread_gap_thick_book_not_invent_depth_zero(self):
+        """0.02 < spread ≤ MAX_SPREAD must not densify invent depth 0."""
+        cbot = _load_commodity()
+        raw = {
+            "orderbook_fp": {
+                "yes_dollars": [
+                    ["0.8000", "100.00"],
+                    ["0.8500", "40.00"],
+                    ["0.8800", "50.00"],  # best; 3¢ under ask
+                ],
+                "no_dollars": [],
+            }
+        }
+        ask = 0.91
+        spread, depth = cbot.depth_from_book(raw, "YES", ask)
+        self.assertIsNotNone(spread)
+        self.assertAlmostEqual(float(spread), 0.03, places=4)
+        self.assertLessEqual(float(spread), cbot.MAX_SPREAD + 1e-12)
+        # Old ask−0.02 window excluded 0.88 → invent 0; MAX_SPREAD includes it.
+        self.assertGreaterEqual(depth, 50)
 
 
 if __name__ == "__main__":

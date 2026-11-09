@@ -262,7 +262,10 @@ def depth_from_book(data, side: str, ask: float) -> tuple[float | None, int]:
             px = px / 100.0
         if best_bid is None or px > best_bid:
             best_bid = px
-        if ask is not None and px + 1e-9 >= float(ask) - 0.02:
+        # Depth window must match MAX_SPREAD (0.05). Hardcoding ask−0.02
+        # invent-tags depth 0 on thick books with 0.02 < spread ≤ 0.05
+        # (#453 leftover / Prefer-1 invent densify).
+        if ask is not None and px + 1e-9 >= float(ask) - float(MAX_SPREAD):
             depth += int(qty)
     spread = None
     if best_bid is not None and ask is not None:
