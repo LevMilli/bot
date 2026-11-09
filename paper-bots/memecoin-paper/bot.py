@@ -502,7 +502,7 @@ def scan(st, stats):
                     reasons=[skip_reason],
                     z=None,
                     p=conf,
-                    edge=max(0.0, float(conf) - 0.5),
+                    edge=conf_minus_half_residual(conf),
                     min_edge=0.05,
                 )
                 if nm.get("near_miss"):
@@ -563,24 +563,17 @@ def scan(st, stats):
             if ticket < C.MIN_TICKET_USD:
                 gate_reason = f"paper cash ${st['cash_usd']:.2f} < min ticket ${C.MIN_TICKET_USD}"
             else:
+                # conf−0.5 residual is not fee-aware EV (rt swap ~2%). Refuse like INX
+                # residual-as-edge — stay starved. Fail closed if desk settings missing.
                 try:
                     desk = _desk()
                     venue = float(desk.venue_min_edge("solana_dex", desk.load_settings(os.path.dirname(BASE))))
-                    # Speed lane: require a bit more residual confidence vs coin-flip.
                     need_venue = venue + (0.02 if lane == "speed" else 0.0)
-                    residual = max(0.0, float(conf) - 0.5)
-                    if residual + 1e-12 < need_venue:
-                        gate_reason = f"venue solana_dex edge {residual:.3f} < {need_venue:.3f} ({lane})"
-                    else:
-                        gate_reason = desk.learning_skip(
-                            desk.load_learning(os.path.dirname(BASE)),
-                            mint or row.get("symbol") or "",
-                            desk.prob_bucket(conf),
-                            side=str(lane or "long"),
-                            hour_ct=datetime.now(CT).hour,
-                        ) or None
                 except Exception:
-                    gate_reason = None
+                    need_venue = 0.02 + (0.02 if lane == "speed" else 0.0)
+                gate_reason = refuse_conf_residual_as_edge(
+                    conf, lane=str(lane or ""), venue_need=need_venue,
+                )
         row["risk_gates_ok"] = "PASS" if not gate_reason else "FAIL"
         if gate_reason:
             record("SKIP", gate_reason)
@@ -589,7 +582,7 @@ def scan(st, stats):
                 if desk_root not in sys.path:
                     sys.path.insert(0, desk_root)
                 import desk_more as _nm_meme
-                residual = max(0.0, float(conf) - 0.5)
+                residual = conf_minus_half_residual(conf)
                 nm = _nm_meme.is_near_miss(
                     reasons=[gate_reason],
                     z=None,
@@ -614,7 +607,7 @@ def scan(st, stats):
                 if desk_root not in sys.path:
                     sys.path.insert(0, desk_root)
                 import desk_living
-                residual = max(0.0, float(conf) - 0.5)
+                residual = conf_minus_half_residual(conf)
                 desk_living.record_eval_features(
                     desk_root,
                     bot="memecoin",
@@ -685,7 +678,7 @@ def scan(st, stats):
             if desk_root not in sys.path:
                 sys.path.insert(0, desk_root)
             import desk_living
-            residual = max(0.0, float(conf) - 0.5)
+            residual = conf_minus_half_residual(conf)
             desk_living.record_eval_features(
                 desk_root,
                 bot="memecoin",
@@ -715,6 +708,37 @@ def _desk():
     return pimp_desk
 
 
+def round_trip_swap_fee_frac() -> float:
+    """Buy + sell paper swap fee as a fraction of notional (never invents a fill)."""
+    one = float((C.PAPER_FILL or {}).get("swap_fee_pct") or 0.0) / 100.0
+    return max(0.0, 2.0 * one)
+
+
+def conf_minus_half_residual(conf) -> float:
+    """Scorer residual above coin-flip — NOT fee-aware EV."""
+    try:
+        return max(0.0, float(conf) - 0.5)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def refuse_conf_residual_as_edge(conf, *, lane: str = "", venue_need: float = 0.0) -> str:
+    """Stop-bleed honesty: conf−0.5 is not fee-aware edge (1% buy + 1% sell).
+
+    Tower-local sibling of INX residual refuse. Keeps expand_volume false and
+    does not soften red lock / −12% stop.
+    """
+    raw = conf_minus_half_residual(conf)
+    rt = round_trip_swap_fee_frac()
+    after = max(0.0, raw - rt)
+    lane_s = f"; {lane}" if lane else ""
+    need_s = f"; need={float(venue_need):.3f}" if venue_need else ""
+    return (
+        f"refuse conf−0.5 residual {raw:.3f} as fee-aware edge "
+        f"(rt_fee={rt:.3f}; after_fee={after:.3f}{need_s}{lane_s}) — starve honesty"
+    )
+
+
 def ticket_for(st, conf) -> float:
     """Fee-aware ticket: desk Kelly-lite when available, never above cash or TICKET_USD."""
     cash = float(st.get("cash_usd") or 0)
@@ -724,24 +748,16 @@ def ticket_for(st, conf) -> float:
     try:
         desk = _desk()
         cfg = desk.load_settings(os.path.dirname(BASE))
-        edge = max(0.0, float(conf) - 0.5)  # residual confidence above coin-flip
+        # conf−0.5 is not EV; size with fee-haircut residual only (entry still refused below).
+        edge = max(0.0, conf_minus_half_residual(conf) - round_trip_swap_fee_frac())
         open_risk = sum(float(p.get("cost_usd") or 0) for p in (st.get("open") or []))
-        # Adapt: high 5m % move ⇒ safer size; proven ≥80% hit ⇒ bigger.
-        m5 = None
-        try:
-            raw = (pair.get("priceChange") or {}).get("m5")
-            if raw is None:
-                raw = pair.get("priceChange", {}).get("h1") if isinstance(pair.get("priceChange"), dict) else None
-            m5 = abs(float(raw)) / 100.0 if raw is not None else None  # percent → fraction
-        except (TypeError, ValueError, AttributeError):
-            m5 = None
         dollars = float(desk.stake_dollars_for(
             "memecoin", conf, edge=edge, cfg=cfg, open_risk_used=open_risk,
             ask=None, root=os.path.dirname(BASE),
             vol_kwargs={
-                "ticker": str((pair.get("baseToken") or {}).get("symbol") or "meme"),
-                "recent_range": m5,
-                "spot": 1.0 if m5 is not None else None,
+                "ticker": "meme",
+                "recent_range": None,
+                "spot": None,
                 "minutes_left": 30,
             },
         ))
