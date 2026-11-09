@@ -32,4 +32,4 @@ Coinbase spot (`coinbase-spot-paper/`) is the worked example.
 
 ## Coinbase spot base (first use of this process)
 
-US Advanced intro taker is 0.90% (16 Sep 2026 schedule). Round trip with 0.10% slippage each side is 2.00%. The tower only keeps 25% of the last 15-minute move as expected capture, then still requires 0.05 of excess return. A bar has to be about 28% with z ≥ 2. Normal ETH and SOL bars skip. BTC-USD is research-only because `btc15m` already owns that factor. Details: `coinbase-spot-paper/README.md`.
+US Advanced intro taker is 0.90% (16 Sep 2026 schedule). Round trip with 0.10% slippage each side is 2.00%. The tower buys a cross above the 50-day average only after that same rule's closed trades clear n ≥ 20, a 40% hit rate, a positive median, and the locked 0.05 floor on the mean. A 15-minute bar cannot pay this fee, and a fat-tail average does not buy while the typical trade loses. BTC-USD is research-only because `btc15m` already owns that factor. Details: `coinbase-spot-paper/README.md`.

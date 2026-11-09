@@ -93,10 +93,10 @@ Bot-local stops that are **tighter** than desk (Kalshi −$50, meme −$50, max 
 - Flat $25 is an approved fixed-ticket waiver (`fixed_ticket_25`).
 
 ### Coinbase spot → **partial**, shadow only
-- Public 15m candles. ETH-USD and SOL-USD longs. BTC-USD research-only.
-- Edge = 25% of the last move minus the US intro taker round trip (0.90% + 0.10% slip each side). Buy only if that edge ≥ 0.05 and z ≥ 2.
-- Ordinary bars skip. That skip is the base.
-- Exits: −1.5% stop, take-profit at round-trip + floor, model-flip, 24h time stop.
+- Public daily candles. ETH-USD and SOL-USD longs. BTC-USD research-only.
+- Rule: cross above the 50-day average. Cost is the US intro taker round trip (0.90% + 0.10% slip each side).
+- Buy only when that rule's own closed trades have n ≥ 20, hit ≥ 40%, median net > 0, and mean net ≥ 0.05. A fat-tail average with a losing typical trade stays flat.
+- Exits match the sample: −15% stop at the close, model-flip back under the average, 120-day time stop.
 - Own $500 sleeve, fixed $25, max 1 open. No desk cash and no tower risk share until a person graduates incubation (n ≥ 50).
 - Waiver: `fixed_ticket_25`, `shadow_only`.
 

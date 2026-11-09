@@ -6210,17 +6210,17 @@ def default_exit_plan(bot: str) -> dict:
         }
     if b in ("coinbase-spot", "coinbase"):
         return {
-            "kind": "stop+take_profit+model_flip+time",
-            "stop_pct": -0.015,
-            "take_profit": True,
+            "kind": "stop+model_flip+time",
+            "stop_pct": -0.15,
+            "take_profit": False,
             "model_flip": True,
-            "time_stop_hours": 24,
+            "time_stop_hours": 2880,
             "shadow_only": True,
             "auto_promote": False,
             "fee_floors_locked": True,
             "note": (
-                "Coinbase spot exits: −1.5% stop, take-profit at round-trip plus 0.05 floor, "
-                "model-flip when z flips, 24h time stop. Shadow sleeve. No auto-promote."
+                "Coinbase spot exits: −15% stop at the close, model-flip under the 50-day average, "
+                "120-day time stop. Same exits the profit gate measured. Shadow sleeve. No auto-promote."
             ),
         }
     if b in ("memecoin", "meme"):
