@@ -102,6 +102,32 @@ class CapitalOS(unittest.TestCase):
             self.assertIn("capital_os", plan)
             self.assertTrue(plan.get("fee_floors_locked"))
 
+    def test_master_capital_os_prefers_live_bots_over_stale(self):
+        """Same-day stale ok=True must not hide live barbell fail (#485 twin)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            desk_roi_plan.capture_capital_os(
+                tmp,
+                bots=[{"id": "btc15m", "open_risk": 0}],
+                cfg={"max_open_risk": 100},
+                label="2026-11-09",
+            )
+            stale = desk_roi_plan.latest_capital_os(tmp) or {}
+            self.assertTrue(stale.get("ok"))
+            bots = [
+                {"id": "btc-carry", "open_risk": 500.0, "history": [], "gate_a": {}},
+                {"id": "btc15m", "open_risk": 0.0, "history": [], "gate_a": {}},
+            ]
+            summary = desk_master.master_summary(
+                tmp, bots=bots, cfg={"max_open_risk": 100},
+            )
+            cos = ((summary.get("roi_plan") or {}).get("capital_os") or {})
+            self.assertFalse(cos.get("ok"))
+            self.assertIn("barbell", cos.get("alerts") or [])
+            fh = desk_roi_plan.firm_health_observe(
+                tmp, bots=bots, cfg={"max_open_risk": 100},
+            )
+            self.assertFalse((fh.get("capital_os") or {}).get("ok"))
+
     def test_fee_floors_untouched(self):
         import desk_profit
         floors = desk_profit.venue_floors_locked()
