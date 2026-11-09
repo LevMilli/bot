@@ -203,6 +203,9 @@ class CommodityModelFlip(unittest.TestCase):
 
     def test_model_flip_adverse_helper_still_locked(self):
         self.assertTrue(desk_profit.model_flip_adverse("YES", 0.85, 0.70, 0.08))
+        # Held-side fair for NO/away — drop flips; rise does not.
+        self.assertTrue(desk_profit.model_flip_adverse("NO", 0.85, 0.70, 0.08))
+        self.assertFalse(desk_profit.model_flip_adverse("away", 0.82, 0.91, 0.06))
 
 
 class FeeFloorsUntouched(unittest.TestCase):
