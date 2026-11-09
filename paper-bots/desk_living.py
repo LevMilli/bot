@@ -44,6 +44,26 @@ INSIGHT_HELPER_DIGESTS = (
     "metals_heat_digest.json",
     "energy_heat_digest.json",
     "inx_band_occupancy_digest.json",
+    # E8 remaining pack (#829–880 leftovers) — observe-only wrappers.
+    "inx_dual_ev_lab_digest.json",
+    "meme_rug_auditor_digest.json",
+    "meme_liq_cliff_digest.json",
+    "opp_cost_clock_digest.json",
+    "fee_ledger_nag_digest.json",
+    "masters_canary_digest.json",
+    "hillclimb_watchdog_digest.json",
+    "stale_skew_watchdog_digest.json",
+    "misplaced_publisher_digest.json",
+    "selective_eligibility_digest.json",
+    "green_boost_readiness_digest.json",
+    "daily_r_clerk_digest.json",
+    "profit_lock_clerk_digest.json",
+    "barbell_clerk_digest.json",
+    "corr_clerk_digest.json",
+    "incubation_registrar_digest.json",
+    "shadow_edge08_clerk_digest.json",
+    "skip_regret_clerk_digest.json",
+    "ruin_drill_proctor_digest.json",
     "calib_nag_digest.json",
     "hard_stop_clerk_digest.json",
     "near_miss_clerk_digest.json",
@@ -2401,6 +2421,45 @@ def inx_band_occupancy_chip(root: str | None = None) -> dict:
     }
 
 
+def e8_pack_helper_names() -> tuple[str, ...]:
+    try:
+        from helpers import e8_digest_pack
+        return tuple(e8_digest_pack.HELPER_NAMES)
+    except Exception:
+        return ()
+
+
+def e8_pack_chip(helper: str, root: str | None = None, *, bots: list | None = None) -> dict:
+    """Generic chip for E8 remaining pack digests."""
+    digest: dict = {}
+    try:
+        from helpers import e8_digest_pack
+        import importlib
+        mod = importlib.import_module(f"helpers.{helper}")
+        path = mod.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("helper") is None:
+            digest = mod.write_digest_from_desk(root, bots=bots)
+        return e8_digest_pack.chip_from_digest(helper, digest)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "may_place_alone": False,
+            "helper": helper,
+            "error": type(exc).__name__,
+            "label": f"{helper} error={type(exc).__name__}",
+            "note": f"Observe-only {helper} — never LIVE.",
+        }
+
+
+def e8_pack_chips(root: str | None = None, *, bots: list | None = None) -> dict:
+    """All E8 remaining pack chips keyed by helper name."""
+    return {name: e8_pack_chip(name, root, bots=bots) for name in e8_pack_helper_names()}
+
+
 def tip_radar_chip(root: str | None = None) -> dict:
     """T-5 / T-15 / T-180 tip windows chip from tip_radar digest / quote cache."""
     digest = {}
@@ -2925,6 +2984,7 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "metals_heat": metals_heat_chip(root),
         "energy_heat": energy_heat_chip(root),
         "inx_band_occupancy": inx_band_occupancy_chip(root),
+        **e8_pack_chips(root, bots=bots),
         "skip_historian": skip_historian_chip(root),
         "distance_clerk": distance_clerk_chip(root),
         "quant_clerk": quant_clerk_chip(root),
@@ -3289,6 +3349,7 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         "line_shopper", "btc_basis_scout", "nhl_poisson_audit", "dvol_regime",
         "multi_ex_disagree", "funding_scout", "metals_heat", "energy_heat",
         "inx_band_occupancy",
+        *e8_pack_helper_names(),
         "distance_clerk",
         "quant_clerk", "bookkeeper", "empty_card_bee", "near_miss", "near_miss_clerk",
         "hard_stop", "hard_stop_clerk", "skip_twin_clerk", "timer_digest",
