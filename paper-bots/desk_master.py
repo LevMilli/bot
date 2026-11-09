@@ -476,9 +476,9 @@ def master_summary(
                 from datetime import datetime
                 from zoneinfo import ZoneInfo
                 today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-                latest_hc = desk_roi_plan.hillclimb_kill_status(root).get("latest")
-                if not isinstance(latest_hc, dict) or str(latest_hc.get("label") or "") != today:
-                    desk_roi_plan.capture_hillclimb_week(root, bots=bots, label=today)
+                # Prefer live bots whenever provided — same-day stale hillclimb
+                # card must not lag Masters M1 (#488 profit_lock twin).
+                desk_roi_plan.capture_hillclimb_week(root, bots=bots, label=today)
             hillclimb = desk_roi_plan.hillclimb_kill_status(root)
         except Exception:
             hillclimb = None
