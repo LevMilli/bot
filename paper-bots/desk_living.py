@@ -37,6 +37,8 @@ INSIGHT_HELPER_DIGESTS = (
     "eia_scout_digest.json",
     "line_shopper_digest.json",
     "btc_basis_scout_digest.json",
+    "nhl_poisson_audit_digest.json",
+    "dvol_regime_digest.json",
     "calib_nag_digest.json",
     "hard_stop_clerk_digest.json",
     "near_miss_clerk_digest.json",
@@ -2164,6 +2166,67 @@ def btc_basis_scout_chip(root: str | None = None) -> dict:
     }
 
 
+def nhl_poisson_audit_chip(root: str | None = None) -> dict:
+    """NHL pickcenter vs Poisson model audit chip (observe-only)."""
+    digest: dict = {}
+    try:
+        from helpers import nhl_poisson_audit
+        path = nhl_poisson_audit.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = nhl_poisson_audit.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "n": digest.get("n"),
+        "wipe_01_n": digest.get("wipe_01_n"),
+        "avg_abs_gap": digest.get("avg_abs_gap"),
+        "label": (
+            f"nhl poisson n={digest.get('n')} wipe={digest.get('wipe_01_n')} "
+            f"avg_abs_gap={digest.get('avg_abs_gap')}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only NHL Poisson audit — never softens sports 0.06."
+        ),
+    }
+
+
+def dvol_regime_chip(root: str | None = None) -> dict:
+    """BTC DVOL regime chip (low/mid/high observe bands)."""
+    digest: dict = {}
+    try:
+        from helpers import dvol_regime
+        path = dvol_regime.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("helper") is None:
+            digest = dvol_regime.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "dvol": digest.get("dvol"),
+        "regime": digest.get("regime"),
+        "waiting": digest.get("waiting"),
+        "source": digest.get("source"),
+        "label": (
+            f"dvol regime={digest.get('regime')} dvol={digest.get('dvol')} "
+            f"src={digest.get('source') or ('wait' if digest.get('waiting') else '')}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only DVOL regime — never invent missing IV."
+        ),
+    }
+
+
 def tip_radar_chip(root: str | None = None) -> dict:
     """T-5 / T-15 / T-180 tip windows chip from tip_radar digest / quote cache."""
     digest = {}
@@ -2681,6 +2744,8 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "eia_scout": eia_scout_chip(root),
         "line_shopper": line_shopper_chip(root),
         "btc_basis_scout": btc_basis_scout_chip(root),
+        "nhl_poisson_audit": nhl_poisson_audit_chip(root),
+        "dvol_regime": dvol_regime_chip(root),
         "skip_historian": skip_historian_chip(root),
         "distance_clerk": distance_clerk_chip(root),
         "quant_clerk": quant_clerk_chip(root),
@@ -3042,7 +3107,8 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         # clerks / helpers / gates (surface export; already on board — no new chips)
         "living_ai", "skip_taxonomy", "empty_card", "helper_gate_a", "skip_regret",
         "tip_radar", "calib_nag", "injury_wire", "eia_scout",
-        "line_shopper", "btc_basis_scout", "distance_clerk",
+        "line_shopper", "btc_basis_scout", "nhl_poisson_audit", "dvol_regime",
+        "distance_clerk",
         "quant_clerk", "bookkeeper", "empty_card_bee", "near_miss", "near_miss_clerk",
         "hard_stop", "hard_stop_clerk", "skip_twin_clerk", "timer_digest",
         "calendar_scanner", "eia_blackout", "clerk_pulse", "dual_control_chip",

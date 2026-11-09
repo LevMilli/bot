@@ -1743,6 +1743,7 @@ def main() -> int:
             "fed-watch-harvest", "poly-arb", "cpi-nowcast", "vol-curve",
             "vol-curve-harvest", "funding-twins", "macro-harvest",
             "poly-arb-harvest", "line-shopper", "btc-basis-scout",
+            "nhl-poisson-audit", "dvol-regime",
             "commodity-tstop-status", "commodity-tstop-promote",
             "commodity-tstop-promote-ready",
             "sports-tfinal-status", "sports-tfinal-promote",
@@ -4413,6 +4414,16 @@ def main() -> int:
     if args.action == "btc-basis-scout":
         from helpers import btc_basis_scout
         out = btc_basis_scout.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "nhl-poisson-audit":
+        from helpers import nhl_poisson_audit
+        out = nhl_poisson_audit.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "dvol-regime":
+        from helpers import dvol_regime
+        out = dvol_regime.write_digest_from_desk(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
     if args.action == "fee-ledger":
