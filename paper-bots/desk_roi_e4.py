@@ -37,6 +37,7 @@ LOCKED_VENUE_FLOORS = {
     "solana_dex": 0.02,
     "coinbase_spot": 0.05,
     "binance_btc_carry": 0.02,
+    "kalshi_econ": 0.05,
 }
 
 INCUBATION_IDEA_BANK_ONLY = frozenset({

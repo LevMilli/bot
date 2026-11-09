@@ -104,6 +104,8 @@ DEFAULTS = {
         "coinbase_spot": 0.05,
         # Registry lock for the held BTC carry. Does not change kalshi_btc15m.
         "binance_btc_carry": 0.02,
+        # Fed / econ binaries (FedWatch shadow). Locked. Idea-bank for main AUTO.
+        "kalshi_econ": 0.05,
     },
     "fill_adverse_tax": 0.01,
     "gate_a_min_n": 20,
@@ -150,6 +152,7 @@ ACCOUNT_FILES = {
     "coinbase-spot": "paper_account.json",
     "btc-carry": "paper_account.json",
     "sports-sharp-lag": "paper_account.json",
+    "fed-watch": "paper_account.json",
 }
 
 # Closed paper settlements and the logs that record them. These are the files a
@@ -191,6 +194,7 @@ SETTLEMENT_FILES = (
     "coinbase-spot-paper/paper_account.json",
     "btc-carry-paper/paper_account.json",
     "sports-sharp-lag-paper/paper_account.json",
+    "fed-watch-paper/paper_account.json",
     "pimp-learning.json",
     "pimp-good.json",
 )
@@ -235,6 +239,10 @@ ACTIONS = {
         # Shadow sleeve. Sharp fair vs Kalshi ask. Sports floor 0.06 locked.
         "run": {"argv": ("bot.py",), "entry": True, "timeout": 45, "label": "Run one check"},
     },
+    "fed-watch": {
+        # Shadow sleeve. CME FedWatch fair vs Kalshi ask. Econ floor 0.05. Idea-bank.
+        "run": {"argv": ("bot.py",), "entry": True, "timeout": 45, "label": "Run one check"},
+    },
 }
 
 # One automatic pass. Intervals are seconds. Clock times are America/Chicago.
@@ -260,6 +268,8 @@ AUTO = (
     {"id": "btc-carry", "action": "run", "every_sec": 300},
     # Sharp→Kalshi lag research. Shadow only. Floor stays sports 0.06.
     {"id": "sports-sharp-lag", "action": "run", "every_sec": 300},
+    # FedWatch→Kalshi relative value. Shadow + idea-bank. Floor stays econ 0.05.
+    {"id": "fed-watch", "action": "run", "every_sec": 300},
     {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "11:59"},
     # Forced INX scan slots (plan E1 #123) — up to 3 fee-aware scans / Chicago day.
     # Third window ends ≤14:00 CT so late-σ 60m floor can still clear (15:00 settle).
@@ -386,6 +396,22 @@ BOTS = (
         ),
         "state": "paper_account.json",
         "kind": "sports",
+        "log": "",
+        "empty": "No paper account yet. A check writes paper_account.json.",
+        "shadow_only": True,
+    },
+    {
+        "id": "fed-watch",
+        "name": "Fed Watch",
+        "folder": "fed-watch-paper",
+        "script": "bot.py",
+        "blurb": (
+            "Shadow CME FedWatch fair vs Kalshi Fed ask. "
+            "Buys only when edge after fee clears econ floor 0.05. "
+            "Idea-bank for main AUTO. Spends no desk cash."
+        ),
+        "state": "paper_account.json",
+        "kind": "macro",
         "log": "",
         "empty": "No paper account yet. A check writes paper_account.json.",
         "shadow_only": True,
@@ -594,6 +620,29 @@ BOT_PLANS = {
         "entry_gated": True,
         "stake": "fixed-25",
     },
+    "fed-watch": {
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "CME FedWatch fair vs Kalshi ask (fedwatch_quotes.json fixture or injected bins)",
+            "Edge = fedwatch_fair − ask − Kalshi fee; buy only if edge ≥ locked econ 0.05",
+            "Fixed $25 from the shadow $500 sleeve; max 1 open",
+            "Empty quotes wait on FedWatch — never invent fills",
+            "Idea-bank: KXFED/rates refuse main AUTO graduation",
+        ],
+        "sell": [
+            "Model-flip when FedWatch fair collapses through the ask",
+            "Settle / staff close is the backstop",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys",
+            "Econ floor 0.05 cannot be lowered",
+            "Incubation idea-bank only — staff graduate to main AUTO refused",
+            "No tower_risk_budgets share while shadow_only",
+        ],
+        "exit_quality": "partial",
+        "entry_gated": True,
+        "stake": "fixed-25",
+    },
     "btc-carry": {
         "buy": [
             "Shadow sleeve only — spends no desk cash and takes no tower risk share",
@@ -749,6 +798,7 @@ ROI_POLICY = {
         "coinbase-spot": ["fixed_ticket_25", "shadow_only"],
         "btc-carry": ["shadow_only"],
         "sports-sharp-lag": ["fixed_ticket_25", "shadow_only"],
+        "fed-watch": ["fixed_ticket_25", "shadow_only"],
     },
     "target_exit_quality": {
         "sports-gap": "partial",
@@ -759,6 +809,7 @@ ROI_POLICY = {
         "coinbase-spot": "partial",
         "btc-carry": "partial",
         "sports-sharp-lag": "partial",
+        "fed-watch": "partial",
     },
 }
 
@@ -4420,6 +4471,7 @@ TOWER_STARTER_CASH = {
     "coinbase-spot": 500.0,
     "btc-carry": 500.0,
     "sports-sharp-lag": 500.0,
+    "fed-watch": 500.0,
 }
 TOWER_MIN_AMMO = {
     "sports-gap": 10.0,
@@ -4431,6 +4483,7 @@ TOWER_MIN_AMMO = {
     "coinbase-spot": 25.0,
     "btc-carry": 500.0,
     "sports-sharp-lag": 25.0,
+    "fed-watch": 25.0,
 }
 
 

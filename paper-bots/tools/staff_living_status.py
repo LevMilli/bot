@@ -1740,6 +1740,7 @@ def main() -> int:
             "raise-phi-log", "sports-calib", "commodity-calib",
             "baseline-fee", "baseline-capture", "fee-ledger",
             "half-kelly-crb", "fee-sim", "dutch-book", "sharp-lag-harvest",
+            "fed-watch-harvest",
             "commodity-tstop-status", "commodity-tstop-promote",
             "commodity-tstop-promote-ready",
             "sports-tfinal-status", "sports-tfinal-promote",
@@ -4348,6 +4349,26 @@ def main() -> int:
             return 2
         import importlib.util
         spec = importlib.util.spec_from_file_location("sports_sharp_lag_bot", bot_path)
+        mod = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(mod)
+        out = mod.harvest_live(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "fed-watch-harvest":
+        # Opt-in: local fedwatch_bins.json → fedwatch_quotes.json. No invent.
+        tower = os.path.join(root, "fed-watch-paper")
+        bot_path = os.path.join(tower, "bot.py")
+        if not os.path.isfile(bot_path):
+            print(json.dumps({
+                "ok": False,
+                "paper_only": True,
+                "idea_bank_only": True,
+                "reason": "fed-watch tower missing",
+            }, indent=2))
+            return 2
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("fed_watch_bot", bot_path)
         mod = importlib.util.module_from_spec(spec)
         assert spec.loader is not None
         spec.loader.exec_module(mod)
