@@ -3887,16 +3887,26 @@ def run_shadow_tick(
             "paper_only": True,
             "live_orders_enabled": False,
         })
-        # INX paper settle smoke — densify fee ledger + band history without noon scan.
-        # settle only (not mid-day scan invent); never LIVE.
+        # INX paper smoke — settle outside scan windows; during AUTO run windows
+        # smoke the real paper scan so tip why is not settle "No open paper"
+        # while the tower is in-window (#496 firm-queue twin). Never LIVE.
+        now_ct = dt.datetime.now(CT)
         for inx_bot in ("kalshi-sp", "kalshi-sized"):
+            in_run = any(
+                isinstance(slot, dict)
+                and str(slot.get("id") or "") == inx_bot
+                and str(slot.get("action") or "") == "run"
+                and _window_open(now_ct, slot)
+                for slot in AUTO
+            )
+            action = "run" if in_run else "settle"
             try:
-                inx = run_bot(inx_bot, "settle", root)
+                inx = run_bot(inx_bot, action, root)
             except Exception as exc:  # noqa: BLE001
                 inx = {"ok": False, "error": type(exc).__name__, "blocked": False, "summary": ""}
             shadow_rows.append({
                 "bot": inx_bot,
-                "action": "settle-smoke",
+                "action": "scan-smoke" if in_run else "settle-smoke",
                 "shadow_id": None,
                 "ok": bool(inx.get("ok")),
                 "blocked": bool(inx.get("blocked")),
@@ -3956,7 +3966,7 @@ def run_shadow_tick(
         "repaired": catchup.get("repaired"),
         "note": (
             "Shadow tick — paper DESK_SHADOW edge08 + sports-gap + commodity-15m "
-            "+ btc-carry + coinbase-spot + INX settle smoke + catch-up densify. "
+            "+ btc-carry + coinbase-spot + INX scan-or-settle smoke + catch-up densify. "
             "Never LIVE_ORDERS; never tip invent; Discord never auto-posts."
         ),
     }
