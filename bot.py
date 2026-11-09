@@ -26036,7 +26036,7 @@ DASH_LOGO_SVG = (
     '<g fill="#EADFFB"><rect x="227.5" y="329" width="5" height="16" rx="2.5"/><rect x="253.5" y="329" width="5" '
     'height="16" rx="2.5"/><rect x="279.5" y="329" width="5" height="16" rx="2.5"/></g>'
     '<circle cx="168" cy="337" r="8" fill="url(#pbG)"/><circle cx="344" cy="337" r="8" fill="url(#pbG)"/></svg>')
-APP_MARK_V = "3"
+APP_MARK_V = "4"
 DASH_FAVICON = "/icon-192.png?v=" + APP_MARK_V
 DASH_LOGO_HTML = (
     '<img src="/icon-192.png?v=' + APP_MARK_V + '" alt="" width="60" height="60">'
@@ -35091,11 +35091,44 @@ def _dash_brand_path(name: str) -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "dash-brand", name)
 
 
+def _app_icon_badge(src):
+    """Drop the dark margin around the gold ring so the crown fills a header slot."""
+    from PIL import Image
+    px = src.load()
+    w, h = src.size
+    pts = []
+    for y in range(0, h, 2):
+        for x in range(0, w, 2):
+            r, g, b, a = px[x, y]
+            if a > 200 and r > 170 and 110 < g < 210 and b < 130 and r > b + 40:
+                pts.append((x, y))
+    if len(pts) < 20:
+        return src
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    left, top, right, bottom = min(xs), min(ys), max(xs), max(ys)
+    pad = int(max(right - left, bottom - top) * 0.06)
+    left, top = left - pad, top - pad
+    right, bottom = right + pad, bottom + pad
+    side = max(right - left, bottom - top)
+    cx, cy = (left + right) / 2, (top + bottom) / 2
+    half = side / 2
+    box = (
+        max(0, int(cx - half)),
+        max(0, int(cy - half)),
+        min(w, int(cx + half)),
+        min(h, int(cy + half)),
+    )
+    if box[2] - box[0] < 32 or box[3] - box[1] < 32:
+        return src
+    return src.crop(box)
+
+
 def app_icon_png(size: int) -> bytes:
-    """Home-screen / tab mark from dash-brand/app-icon.png, squared and resized."""
+    """Home-screen / tab mark from dash-brand/app-icon.png, cropped to the badge and resized."""
     from PIL import Image
     size = max(16, min(1024, int(size)))
-    src = Image.open(_dash_brand_path("app-icon.png")).convert("RGBA")
+    src = _app_icon_badge(Image.open(_dash_brand_path("app-icon.png")).convert("RGBA"))
     side = max(src.size)
     plate = Image.new("RGBA", (side, side), (0, 0, 0, 0))
     plate.paste(src, ((side - src.width) // 2, (side - src.height) // 2), src)
@@ -35149,7 +35182,7 @@ async def dash_manifest(request):
 
 
 SW_JS = (
-    "const CACHE='pb-shell-153';"
+    "const CACHE='pb-shell-154';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
@@ -36875,7 +36908,7 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#14003a url('/img/app-splash.jpg?v=2') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#14003a url('/img/app-splash.jpg?v=4') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
  background:radial-gradient(ellipse 70% 58% at 50% 46%, rgba(12,6,28,.22), rgba(8,4,18,.42))}
@@ -37272,7 +37305,7 @@ body.v4 .nlist{margin:0;padding:0 0 0 18px}body.v4 .nlist li{margin:7px 0;line-h
 @media (max-width:720px){body.v4 .kpis{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 12px 12px}
  body.v4 header{background:#0b0714f2;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);overflow-anchor:none}
  body.v4 .top{padding:8px 12px 8px;gap:10px 8px;align-items:center}
- body.v4 .logo{width:44px;height:44px}
+ body.v4 .logo{width:56px;height:56px}
  body.v4 .spacer{display:none}body.v4 .brand{flex:1 1 auto;min-width:0}
  body.v4 .brand h1{font-size:17px;letter-spacing:.08em;white-space:nowrap}
  body.v4 .brand h1 a{display:inline-flex;align-items:center;min-height:44px}
@@ -37283,7 +37316,7 @@ body.v4 .nlist{margin:0;padding:0 0 0 18px}body.v4 .nlist li{margin:7px 0;line-h
  body.v4 .findwrap{order:3;max-width:none;width:100%;flex:none;padding:0 12px 10px}
  body.v4.findaway .findwrap,body.v4.findaway .brand .meta{display:none}
  body.v4.findaway header{background:#0b0714}
- body.v4.findaway .logo{width:36px;height:36px}
+ body.v4.findaway .logo{width:44px;height:44px}
  body.v4.findaway .top{padding-top:2px;padding-bottom:0}
  body.v4 nav.tabs button.on{color:var(--gold);background:color-mix(in srgb,var(--gold) 18%,transparent)}
  body.v4 nav.tabs button.on:after{display:block;height:3px;background:var(--gold)}
@@ -38130,7 +38163,7 @@ body{margin:0;background:radial-gradient(1200px 700px at 8% -12%,#7B3FE466,trans
 a{color:#c4a6ff;text-decoration:none}a:hover{color:#fff}
 .wrap{max-width:1080px;margin:0 auto;padding:0 22px}
 header{display:flex;align-items:center;gap:14px;padding:18px 0 8px;border-bottom:1px solid #F5C54222}
-.logo{width:52px;height:52px;flex:none;filter:drop-shadow(0 8px 16px #7B3FE466)}.logo svg,.logo img{width:100%;height:100%;display:block;border-radius:50%;object-fit:cover}
+.logo{width:60px;height:60px;flex:none;filter:drop-shadow(0 8px 16px #7B3FE466)}.logo svg,.logo img{width:100%;height:100%;display:block;border-radius:50%;object-fit:cover}
 .brand{font-weight:850;letter-spacing:.14em;font-size:15px}.brand b{color:var(--gold)}
 nav{margin-left:auto;display:flex;gap:18px;align-items:center;font-weight:650;font-size:14px;color:var(--muted)}
 nav a.btn{background:linear-gradient(90deg,var(--brand),#5a22c8);color:#fff;padding:8px 14px;border-radius:999px;box-shadow:0 8px 20px -10px #7B3FE4}
@@ -40313,7 +40346,7 @@ STAFF_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
  padding:calc(10px + env(safe-area-inset-top)) 16px 10px;border-bottom:1px solid #F5C54222;
  background:#0b0714f2;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
 .homebar{display:flex;align-items:center;gap:10px;min-height:48px;min-width:0;flex:1 1 auto}
-.logo{width:44px;height:44px;flex:none;display:block}.brand{font-weight:850;letter-spacing:.14em;color:inherit;text-decoration:none;
+.logo{width:56px;height:56px;flex:none;display:block}.brand{font-weight:850;letter-spacing:.14em;color:inherit;text-decoration:none;
  display:flex;align-items:center;min-height:44px}.brand b{color:var(--gold)}
 .pill{background:linear-gradient(90deg,var(--gold),var(--brand));color:#14003A;font-weight:850;
  font-size:11px;letter-spacing:.12em;text-transform:uppercase;padding:7px 11px;border-radius:999px}
@@ -42073,7 +42106,7 @@ ACCOUNT_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
  padding:calc(10px + env(safe-area-inset-top)) 16px 10px;border-bottom:1px solid #F5C54222;
  background:#0b0714f2;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
 .homebar{display:flex;align-items:center;gap:10px;min-height:48px;min-width:0;flex:1 1 auto}
-.logo{width:44px;height:44px;flex:none;display:block}.brand{font-weight:850;letter-spacing:.14em;color:inherit;text-decoration:none;
+.logo{width:56px;height:56px;flex:none;display:block}.brand{font-weight:850;letter-spacing:.14em;color:inherit;text-decoration:none;
  display:flex;align-items:center;min-height:44px}.brand b{color:var(--gold)}
 .nav{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
 .navchip{display:inline-flex;align-items:center;height:44px;padding:0 12px;border-radius:12px;border:1px solid var(--line);
