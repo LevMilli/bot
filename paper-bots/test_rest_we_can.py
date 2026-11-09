@@ -175,6 +175,7 @@ class RestWeCanDensify(unittest.TestCase):
             self.assertTrue(out.get("commodity_smoked"))
             self.assertTrue(out.get("btc_carry_smoked"))
             self.assertTrue(out.get("coinbase_smoked"))
+            self.assertTrue(out.get("memecoin_smoked"))
             self.assertTrue(out.get("inx_sp_smoked"))
             self.assertTrue(out.get("inx_sized_smoked"))
             self.assertFalse(out["live_orders_enabled"])
@@ -184,6 +185,7 @@ class RestWeCanDensify(unittest.TestCase):
             self.assertTrue(any(s["bot"] == "commodity-15m" for s in seen))
             self.assertTrue(any(s["bot"] == "btc-carry" for s in seen))
             self.assertTrue(any(s["bot"] == "coinbase-spot" for s in seen))
+            self.assertTrue(any(s["bot"] == "memecoin" for s in seen))
             self.assertTrue(any(
                 s["bot"] == "kalshi-sp" and s["action"] == "settle" for s in seen
             ))

@@ -194,6 +194,7 @@ class ShadowTimerTick(unittest.TestCase):
             self.assertTrue(out.get("commodity_smoked"))
             self.assertTrue(out.get("btc_carry_smoked"))
             self.assertTrue(out.get("coinbase_smoked"))
+            self.assertTrue(out.get("memecoin_smoked"))
             sports_rows = [r for r in (out.get("shadow_rows") or []) if r.get("bot") == "sports-gap"]
             self.assertEqual(len(sports_rows), 1)
             self.assertEqual(sports_rows[0].get("action"), "shadow-smoke")
@@ -212,14 +213,22 @@ class ShadowTimerTick(unittest.TestCase):
             ]
             self.assertEqual(len(coinbase_rows), 1)
             self.assertEqual(coinbase_rows[0].get("action"), "shadow-smoke")
+            meme_rows = [r for r in (out.get("shadow_rows") or []) if r.get("bot") == "memecoin"]
+            self.assertEqual(len(meme_rows), 1)
+            self.assertEqual(meme_rows[0].get("action"), "shadow-smoke")
+            self.assertTrue(meme_rows[0].get("paper_only"))
+            self.assertFalse(meme_rows[0].get("live_orders_enabled"))
             self.assertTrue(any(s["bot"] == "sports-gap" for s in seen))
             self.assertTrue(any(s["bot"] == "commodity-15m" for s in seen))
             self.assertTrue(any(s["bot"] == "btc-carry" for s in seen))
             self.assertTrue(any(s["bot"] == "coinbase-spot" for s in seen))
+            self.assertTrue(any(s["bot"] == "memecoin" for s in seen))
             self.assertTrue(any(s["bot"] == "btc15m" for s in seen))
             # Commodity smoke has no DESK_SHADOW env / shadow_profile.
             commodity_calls = [s for s in seen if s["bot"] == "commodity-15m"]
             self.assertTrue(all(s.get("shadow") is None for s in commodity_calls))
+            meme_calls = [s for s in seen if s["bot"] == "memecoin"]
+            self.assertTrue(all(s.get("shadow") is None for s in meme_calls))
 
     def test_btc_shadow_journals_ungated(self):
         src = BTC.read_text(encoding="utf-8")
@@ -261,9 +270,11 @@ class ShadowTimerTick(unittest.TestCase):
         self.assertIn("commodity-15m", tick_src)
         self.assertIn("btc-carry", tick_src)
         self.assertIn("coinbase-spot", tick_src)
+        self.assertIn("memecoin", tick_src)
         self.assertIn("commodity_smoked", tick_src)
         self.assertIn("btc_carry_smoked", tick_src)
         self.assertIn("coinbase_smoked", tick_src)
+        self.assertIn("memecoin_smoked", tick_src)
         self.assertNotIn("tip_invent", tick_src.lower())
         self.assertNotIn("LIVE_ORDERS = True", tick_src)
 

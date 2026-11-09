@@ -3774,13 +3774,13 @@ def run_shadow_tick(
     *,
     run_bots: bool = True,
 ) -> dict:
-    """One-shot paper shadow smoke — densify edge08 + sports + commodity + carry + coinbase + INX.
+    """One-shot paper shadow smoke — densify edge08 + sports + commodity + carry + coinbase + meme + INX.
 
     Forces a DESK_SHADOW edge08 pass (bypasses 5m cadence), smokes sports-gap,
-    commodity-15m, btc-carry, coinbase-spot, and INX paper settles (hard-stop /
-    t-final / t-stop / near-miss densify), touches heartbeat, best-effort history
-    settle. Never sets LIVE_ORDERS. Floors stay locked. Writes tick+catchup
-    markers so doctor isn't false-stale.
+    commodity-15m, btc-carry, coinbase-spot, memecoin, and INX paper settles
+    (hard-stop / t-final / t-stop / near-miss densify), touches heartbeat,
+    best-effort history settle. Never sets LIVE_ORDERS. Floors stay locked.
+    Writes tick+catchup markers so doctor isn't false-stale.
     """
     root = _root(root)
     if now is None:
@@ -3895,6 +3895,24 @@ def run_shadow_tick(
             "paper_only": True,
             "live_orders_enabled": False,
         })
+        # Memecoin paper smoke — densify tip CARD between 180s AUTO slots so why
+        # is not blank while the tower is armed (sports/coinbase twin). Main
+        # paper account; no DESK_SHADOW env; never LIVE; fee floor 0.05 locked.
+        try:
+            meme = run_bot("memecoin", "run", root)
+        except Exception as exc:  # noqa: BLE001
+            meme = {"ok": False, "error": type(exc).__name__, "blocked": False, "summary": ""}
+        shadow_rows.append({
+            "bot": "memecoin",
+            "action": "shadow-smoke",
+            "shadow_id": None,
+            "ok": bool(meme.get("ok")),
+            "blocked": bool(meme.get("blocked")),
+            "error": meme.get("error") or "",
+            "summary": meme.get("summary") or "",
+            "paper_only": True,
+            "live_orders_enabled": False,
+        })
         # INX paper smoke — settle outside scan windows; during AUTO run windows
         # smoke the real paper scan so tip why is not settle "No open paper"
         # while the tower is in-window (#496 firm-queue twin). Never LIVE.
@@ -3965,6 +3983,7 @@ def run_shadow_tick(
         "commodity_smoked": any(r.get("bot") == "commodity-15m" for r in shadow_rows),
         "btc_carry_smoked": any(r.get("bot") == "btc-carry" for r in shadow_rows),
         "coinbase_smoked": any(r.get("bot") == "coinbase-spot" for r in shadow_rows),
+        "memecoin_smoked": any(r.get("bot") == "memecoin" for r in shadow_rows),
         "inx_sp_smoked": any(r.get("bot") == "kalshi-sp" for r in shadow_rows),
         "inx_sized_smoked": any(r.get("bot") == "kalshi-sized" for r in shadow_rows),
         "catchup": catchup,
@@ -3974,8 +3993,9 @@ def run_shadow_tick(
         "repaired": catchup.get("repaired"),
         "note": (
             "Shadow tick — paper DESK_SHADOW edge08 + sports-gap + commodity-15m "
-            "+ btc-carry + coinbase-spot + INX scan-or-settle smoke + catch-up densify. "
-            "Never LIVE_ORDERS; never tip invent; Discord never auto-posts."
+            "+ btc-carry + coinbase-spot + memecoin + INX scan-or-settle smoke "
+            "+ catch-up densify. Never LIVE_ORDERS; never tip invent; Discord "
+            "never auto-posts."
         ),
     }
 
