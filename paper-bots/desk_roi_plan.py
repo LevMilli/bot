@@ -11194,7 +11194,12 @@ def plan_summary(
         "weekly_scorecard": latest_weekly_scorecard(root),
         "graduation": graduation_board(root, bots=bots),
         "hillclimb_kill": hillclimb_kill_status(root),
-        "profit_lock": profit_lock_status(root),
+        # Prefer live bots whenever provided (#487 cold_harvest twin).
+        "profit_lock": (
+            capture_profit_lock(root, bots=bots)
+            if (root and bots)
+            else profit_lock_status(root)
+        ),
         "skip_regret_weekly": latest_skip_regret_weekly(root),
         # Prefer live bots.today when provided (#484 firm_health twin).
         "daily_r": (

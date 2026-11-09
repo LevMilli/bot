@@ -82,6 +82,21 @@ class MasterWire(unittest.TestCase):
             self.assertEqual(summary["profit_lock"]["size_mult"], 0.5)
             self.assertIn("profit_lock", summary.get("roi_plan") or {})
 
+    def test_master_profit_lock_prefers_live_bots_over_stale(self):
+        """Same-day stale week_pnl must not lag live commodity green (#487 twin)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            morning = [{"id": "commodity-15m", "today": 10.16, "open_risk": 0, "history": [], "gate_a": {}}]
+            desk_roi_plan.capture_profit_lock(tmp, bots=morning, label="2026-11-09")
+            stale = (desk_roi_plan.profit_lock_status(tmp).get("latest") or {})
+            self.assertAlmostEqual(float(stale.get("week_pnl") or 0), 10.16, places=2)
+            live = [{"id": "commodity-15m", "today": 35.02, "open_risk": 0, "history": [], "gate_a": {}}]
+            summary = desk_master.master_summary(
+                tmp, bots=live, cfg={"max_open_risk": 100},
+            )
+            pl = summary.get("profit_lock") or {}
+            row = pl.get("latest") if isinstance(pl.get("latest"), dict) else pl
+            self.assertAlmostEqual(float(row.get("week_pnl") or 0), 35.02, places=2)
+
 
 if __name__ == "__main__":
     unittest.main()
