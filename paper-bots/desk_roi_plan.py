@@ -7385,6 +7385,222 @@ def cpi_nowcast_observe(
     }
 
 
+def _fee_clear_probe(
+    *,
+    fair,
+    ask,
+    venue: str,
+    label: str,
+    extra: dict | None = None,
+) -> dict:
+    """Shared fee-aware fair−ask probe for tower densify observes."""
+    import desk_profit
+
+    floor = float(desk_profit.DEFAULT_VENUE_MIN_EDGE.get(venue) or 0.0)
+    f = _finite(fair)
+    a = _finite(ask)
+    row = {
+        "ok": False,
+        "clear": False,
+        "action": "skip",
+        "label": label,
+        "fair": f,
+        "ask": a,
+        "fee": None,
+        "edge": None,
+        "floor": floor,
+        "venue": venue,
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+    }
+    if extra:
+        row.update(extra)
+    if f is None or a is None:
+        row["reason"] = "need fair + ask — no invent"
+        return row
+    if not (0.0 < a < 1.0) or not (0.0 < f < 1.0):
+        row["ok"] = True
+        row["reason"] = "fair/ask out of range"
+        return row
+    fee = estimate_kalshi_fee(a, 1.0)
+    edge = float(f) - float(a) - float(fee)
+    row.update({
+        "ok": True,
+        "fee": round(float(fee), 4),
+        "edge": round(edge, 4),
+        "fair": round(float(f), 4),
+        "ask": round(float(a), 4),
+    })
+    if edge + 1e-12 < floor:
+        row["reason"] = (
+            f"edge {edge:.4f} < floor {floor:g} "
+            f"(fair {f:.3f} ask {a:.3f} fee {fee:.4f})"
+        )
+        return row
+    row["clear"] = True
+    row["action"] = "buy"
+    row["reason"] = (
+        f"clears floor: fair {f:.3f} ask {a:.3f} fee {fee:.4f} edge {edge:.4f}"
+    )
+    return row
+
+
+def btc_vol_binary_probe(row: dict | None = None) -> dict:
+    """DVOL/sigma model fair vs btc15m ask. Floor kalshi_btc15m 0.05 locked."""
+    raw = row if isinstance(row, dict) else {}
+    fair = raw.get("vol_fair") if raw.get("vol_fair") is not None else raw.get("fair")
+    ask = raw.get("ask") if raw.get("ask") is not None else raw.get("kalshi_ask")
+    dvol = _finite(raw.get("dvol"))
+    return _fee_clear_probe(
+        fair=fair,
+        ask=ask,
+        venue="kalshi_btc15m",
+        label=str(raw.get("label") or raw.get("ticker") or "btc15m"),
+        extra={"dvol": dvol, "kind": "btc_vol_binary"},
+    )
+
+
+def commodity_curve_probe(row: dict | None = None) -> dict:
+    """Curve/roll-yield fair vs commodity-15m ask. Floor 0.05 locked."""
+    raw = row if isinstance(row, dict) else {}
+    fair = (
+        raw.get("curve_fair") if raw.get("curve_fair") is not None
+        else raw.get("fair")
+    )
+    ask = raw.get("ask") if raw.get("ask") is not None else raw.get("kalshi_ask")
+    roll = _finite(raw.get("roll_yield"))
+    regime = str(raw.get("eia_regime") or raw.get("regime") or "")
+    return _fee_clear_probe(
+        fair=fair,
+        ask=ask,
+        venue="kalshi_commodity15m",
+        label=str(raw.get("label") or raw.get("ticker") or "commodity"),
+        extra={
+            "roll_yield": roll,
+            "eia_regime": regime,
+            "kind": "commodity_curve",
+        },
+    )
+
+
+def vol_curve_observe(
+    root: str | None = None,
+    *,
+    btc_rows: list | None = None,
+    commodity_rows: list | None = None,
+) -> dict:
+    """BTC vol-binary + commodity curve densify observe board."""
+    btc_path = commodity_path = None
+    if root:
+        bp = os.path.join(root, "desk_btc_vol_binary.json")
+        cp = os.path.join(root, "desk_commodity_curve.json")
+        if os.path.isfile(bp):
+            btc_path = bp
+        if os.path.isfile(cp):
+            commodity_path = cp
+
+    def _load(path, keys):
+        if not path:
+            return []
+        try:
+            with open(path, encoding="utf-8") as handle:
+                blob = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return []
+        if isinstance(blob, list):
+            return blob
+        if isinstance(blob, dict):
+            for k in keys:
+                if isinstance(blob.get(k), list):
+                    return blob[k]
+        return []
+
+    btc_default = btc_rows if btc_rows is not None else _load(
+        btc_path, ("rows", "quotes", "windows"),
+    )
+    cmd_default = commodity_rows if commodity_rows is not None else _load(
+        commodity_path, ("rows", "quotes", "contracts"),
+    )
+    if not btc_default:
+        btc_default = [
+            {"label": "thin_dvol", "vol_fair": 0.54, "ask": 0.52, "dvol": 48.0},
+            {"label": "fat_dvol", "vol_fair": 0.62, "ask": 0.50, "dvol": 55.0},
+            {"label": "incomplete_btc", "ask": 0.51},
+        ]
+    if not cmd_default:
+        cmd_default = [
+            {
+                "label": "thin_curve",
+                "curve_fair": 0.54,
+                "ask": 0.52,
+                "roll_yield": 0.001,
+                "eia_regime": "neutral",
+            },
+            {
+                "label": "fat_backwardation",
+                "curve_fair": 0.61,
+                "ask": 0.50,
+                "roll_yield": -0.012,
+                "eia_regime": "draw",
+            },
+            {"label": "incomplete_cmd", "roll_yield": 0.002},
+        ]
+    btc_out = []
+    btc_clears = 0
+    for raw in btc_default:
+        if not isinstance(raw, dict):
+            continue
+        probe = btc_vol_binary_probe(raw)
+        if probe.get("clear"):
+            btc_clears += 1
+        btc_out.append(probe)
+    cmd_out = []
+    cmd_clears = 0
+    for raw in cmd_default:
+        if not isinstance(raw, dict):
+            continue
+        probe = commodity_curve_probe(raw)
+        if probe.get("clear"):
+            cmd_clears += 1
+        cmd_out.append(probe)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "ok": True,
+        "btc": {
+            "n": len(btc_out),
+            "clears_n": btc_clears,
+            "rows": btc_out,
+            "source": btc_path,
+            "floor": 0.05,
+            "venue": "kalshi_btc15m",
+        },
+        "commodity": {
+            "n": len(cmd_out),
+            "clears_n": cmd_clears,
+            "rows": cmd_out,
+            "source": commodity_path,
+            "floor": 0.05,
+            "venue": "kalshi_commodity15m",
+        },
+        "clears_n": btc_clears + cmd_clears,
+        "label": (
+            f"vol_curve btc={btc_clears}/{len(btc_out)} "
+            f"cmd={cmd_clears}/{len(cmd_out)} floors_locked"
+        ),
+        "note": (
+            "BTC DVOL/vol-binary + commodity curve/EIA densify observe. "
+            "Incomplete fair/ask skipped — no invent. Floors stay 0.05. Never LIVE."
+        ),
+    }
+
+
 def half_kelly_crb_observe(
     root: str | None = None,
     *,
