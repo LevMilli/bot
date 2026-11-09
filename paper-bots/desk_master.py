@@ -760,16 +760,17 @@ def master_summary(
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_ec = desk_roi_plan.latest_eth_calibration(root)
-            if root and bots and (
-                not isinstance(latest_ec, dict)
-                or str(latest_ec.get("label") or "") != today
-            ):
+            # Prefer live bots whenever provided — same-day stale calib card must
+            # not lag live ETH history (#491 btc twin).
+            if root and bots:
                 plan["eth_calibration"] = desk_roi_plan.capture_eth_calibration(
                     root, bots=bots, label=today,
                 )
             else:
-                plan["eth_calibration"] = latest_ec or desk_roi_plan.eth_calibration_report(bots)
+                plan["eth_calibration"] = (
+                    desk_roi_plan.latest_eth_calibration(root)
+                    or desk_roi_plan.eth_calibration_report(bots)
+                )
         except Exception:
             plan["eth_calibration"] = None
         try:
