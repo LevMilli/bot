@@ -1951,6 +1951,25 @@ Phase 3 exit quality is **COMPLETE** for paper observe. Remaining work is staff 
 | INX twins / meme | `learning_skip(..., side, hour_ct)` + record `side` |
 | Fallback | classic market × bucket when fine sample thin |
 
+### Phase 4 calib/CLV gate — COMPLETE
+
+| Ticket | Where |
+| --- | --- |
+| Formal calib-gate certifier | `desk_roi_plan.phase4_calib_gate` |
+| Sports CLV journal + 52% bar | `clv_completeness` · `SPORTS_CLV_BAR=0.52` (when n≥20) |
+| Per-league CLV board | `desk_more.clv_by_league` (NFL…NHL) |
+| INX band lock | live `80_90` + `PHASE4_INX_BAND_LOCK`; thin → keep_live_band |
+| Dual-side INX pick | `desk_inx.dual_side_pick` (fee-aware residual/ask) |
+| BTC/ETH/sports/commodity calib | reports publish; `auto_write_phi=False` |
+| Learn v2 + adverse cool + depth=10 | `learning_skip(side,hour_ct)` · `adverse_cool_blocks` · `DEFAULT_DEPTH_NEED` |
+| Masters | `roi_plan.phase4_calib` + `roi_plan.calib_clv` |
+| CLI / Makefile | `make living-phase4-gate` · `staff_living_status phase4-gate` |
+| Money pulse | `phase4_calib` on `living-money-pulse` |
+| Tests | `test_phase4_calib_gate.py` |
+| Floors / LIVE / Φ | never softens floors; never arms `LIVE_ORDERS`; never auto-writes Φ |
+
+Phase 4 calibration & CLV is **COMPLETE** for paper observe. Live beat-close ≥52% and INX research promote remain ops (need board n); do not invent evidence or change bands/floors to force a pretty backtest.
+
 ### Bulk E3–E7 engineerable (Nov 7)
 
 | Ticket | Where |
