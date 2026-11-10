@@ -1125,6 +1125,12 @@ class PimpDeskTests(unittest.TestCase):
             "CARD: z < 1.25 (0.91)\n"
         )
         self.assertIn("SIGNAL: SKIP", pimp_desk._btc_skip(btc))
+        hold = (
+            "SIGNAL: HOLD BTCUSDT unlevered\n"
+            "CARD: holding unlevered BTC spot long / perp short; red month is a mark, not a flip\n"
+        )
+        self.assertEqual(pimp_desk._btc_skip(hold), "")
+        self.assertNotIn("skip", pimp_desk.bot_gates_hit({"present": True, "skip": ""}))
         # No-window line densifies skip when CARD is bland (#499 twin).
         no_win = (
             "No open KXBTC15M window right now — still tracking ETH/ladder history.\n"
@@ -1885,6 +1891,14 @@ class PimpDeskTests(unittest.TestCase):
         }
         self.assertFalse(pimp_desk.tower_needs_midnight_reload(sticky_sp))
         self.assertFalse(pimp_desk.tower_needs_midnight_reload(sticky_sports))
+        # Entry fee leaves carry at $499.25. That is the hold, even if the
+        # panel has not counted the open yet. Reloading it pays the fee again.
+        carry_fee = {
+            "id": "btc-carry", "present": True, "open_count": 0,
+            "cash": 499.25, "today": 0.0, "realized": 0.0, "history": [],
+        }
+        self.assertTrue(pimp_desk.tower_doing_good(carry_fee))
+        self.assertFalse(pimp_desk.tower_needs_midnight_reload(carry_fee))
         with tempfile.TemporaryDirectory() as tmp:
             _tree(tmp, QUIET)
             # Broke memecoin account on disk.

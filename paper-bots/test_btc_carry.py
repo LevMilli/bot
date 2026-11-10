@@ -246,6 +246,7 @@ class BtcCarryRules(unittest.TestCase):
         self.assertTrue(urls)
         self.assertTrue(all("data.binance.vision" in url for url in urls))
         self.assertFalse(any("fapi.binance.com" in url for url in urls))
+        self.assertTrue(any("/daily/premiumIndexKlines/" in url and "/8h/" in url for url in urls))
         blob = io.BytesIO()
         with zipfile.ZipFile(blob, "w") as archive:
             archive.writestr(
