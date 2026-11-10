@@ -604,9 +604,9 @@ BOT_PLANS = {
         "buy": [
             "Shadow sleeve only — spends no desk cash and takes no tower risk share",
             "ETH-USD and SOL-USD longs; BTC-USD is research-only (btc15m owns that factor)",
-            "Public Coinbase 15m candles; no API key",
-            "Edge = 25% of the last 15m move minus round-trip US intro taker 0.90% + 0.10% slip each side",
-            "Buy only if z ≥ 2 and edge ≥ locked coinbase_spot 0.05",
+            "Public Coinbase 15m candles, 45 days paged; no API key",
+            "Buy only when replaying an up bar through the stop, fee-floor take-profit, z flip, and 24h hold clears locked coinbase_spot 0.05 after the 2% taker round trip",
+            "The sample needs n ≥ 20, hit ≥ 40%, median > 0, and the latest 20 must clear too. A past bar is not a fill",
             "Skip when btc15m holds YES; spot cash book does not short",
             "Fixed $25 ticket from the shadow $500 sleeve; max 1 open",
         ],

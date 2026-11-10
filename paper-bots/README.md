@@ -79,7 +79,7 @@ empty paper account: no trade history or saved state is included in this pack.
 
 ## Coinbase spot tower (shadow)
 
-`coinbase-spot-paper/` is a separate book from the BTC 15-minute Kalshi tower. Coinbase is only a price feed for that tower. This one paper-trades ETH-USD and SOL-USD on public candles, long only, and only when a 15-minute move still clears the US intro taker (0.90% a side) plus slippage plus the locked `coinbase_spot` floor of 0.05. Ordinary bars skip. BTC-USD is logged and never bought. The sleeve is shadow: $500 of its own paper cash, no desk risk share. New towers follow `TOWER_SETUP.md`.
+`coinbase-spot-paper/` is a separate book from the BTC 15-minute Kalshi tower. Coinbase is only a price feed for that tower. This one paper-trades ETH-USD and SOL-USD on public candles, long only, and only when replaying that long through the tower's exits still clears the US intro taker (0.90% a side) plus slippage plus the locked `coinbase_spot` floor of 0.05. A past bar is not a fill. BTC-USD is logged and never bought. The sleeve is shadow: $500 of its own paper cash, no desk risk share. New towers follow `TOWER_SETUP.md`.
 
 ## BTC carry tower (shadow)
 

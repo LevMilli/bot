@@ -1,6 +1,7 @@
 """Coinbase spot tower: fee floor, skip base, exits, scaffold check. No network."""
 from __future__ import annotations
 
+import datetime as dt
 import importlib.util
 import json
 import os
@@ -43,6 +44,38 @@ def _moon():
     return closes
 
 
+def _prefix():
+    """Eight down bars so the replay's first entry is the series we build."""
+    closes = [100.0]
+    for _ in range(8):
+        closes.append(closes[-1] * 0.999)
+    return closes
+
+
+def _losers(n=20):
+    """Up bar, then a -2% bar that stops out. Net is about -4% after the 2% round trip."""
+    closes = _prefix()
+    for _ in range(n):
+        closes.append(closes[-1] * 1.005)
+        closes.append(closes[-1] * 0.98)
+    closes.append(closes[-1] * 1.005)
+    return closes
+
+
+def _winners(n=20):
+    """Up bar, then a smooth climb through the 7% fee-floor take-profit."""
+    closes = _prefix()
+    for _ in range(n):
+        closes.append(closes[-1] * 1.005)
+        entry = closes[-1]
+        px = entry
+        for _step in range(7):
+            px *= 1.011
+            closes.append(px)
+    closes.append(closes[-1] * 1.005)
+    return closes
+
+
 class CoinbaseSpotRules(unittest.TestCase):
     def test_floor_cannot_be_softened(self):
         bot = _bot()
@@ -51,6 +84,7 @@ class CoinbaseSpotRules(unittest.TestCase):
         self.assertLessEqual(cfg["capture_haircut"], 0.25)
         self.assertGreaterEqual(cfg["taker_fee"], 0.009)
         self.assertGreaterEqual(cfg["slippage"], 0.001)
+        self.assertGreaterEqual(bot.locked_cfg({"history_days": 5})["history_days"], 45)
         parsed, err = desk_profit.parse_venue_min_edge({"coinbase_spot": 0.01})
         self.assertIsNone(parsed)
         self.assertIn("cannot lower", err or "")
@@ -84,28 +118,53 @@ class CoinbaseSpotRules(unittest.TestCase):
         self.assertIn("ETH-USD", card["products_trade"])
         self.assertIn("BTC-USD", card["products_research_only"])
 
-    def test_run_skips_quiet_buys_moon_and_refuses_btc(self):
+    def test_run_skips_a_moon_bar_and_refuses_btc(self):
         bot = _bot()
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "coinbase-spot-paper"))
             with open(os.path.join(HERE, "coinbase-spot-paper", "config.json"), encoding="utf-8") as handle:
                 cfg = json.load(handle)
             books = {
-                "ETH-USD": _quiet(),
+                "ETH-USD": _moon(),
                 "SOL-USD": _quiet(),
                 "BTC-USD": _moon(),
             }
             out = _capture(bot, tmp, cfg, books)
             self.assertIn("no trade", out)
+            self.assertIn("forward sample", out)
+            self.assertNotIn("15m needs ~28%", out)
+            self.assertNotIn("paper buy", out)
             self.assertIn("SKIP BTC-USD", out)
-            self.assertIn("research only", out)
             state = json.load(open(os.path.join(tmp, "coinbase-spot-paper", "paper_account.json"), encoding="utf-8"))
             self.assertEqual(state["open"], [])
             self.assertTrue(state["shadow_only"])
-            books["ETH-USD"] = _moon()
-            out = _capture(bot, tmp, cfg, books)
+            self.assertAlmostEqual(state["cash"], 500.0, places=2)
+
+    def test_losing_replay_stays_flat_and_a_clearing_replay_buys(self):
+        bot = _bot()
+        cfg = bot.locked_cfg({})
+        losers = _losers()
+        trades = bot.replay_up_longs(losers, cfg)
+        self.assertGreaterEqual(len(trades), 20)
+        self.assertLess(float(sorted(trades)[len(trades) // 2]), 0)
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "coinbase-spot-paper"))
+            out = _capture(bot, tmp, cfg, {"ETH-USD": losers, "SOL-USD": _quiet(), "BTC-USD": _quiet()})
+            self.assertIn("lose after the 2% round trip", out)
+            self.assertNotIn("paper buy", out)
+            self.assertNotIn("15m needs ~28%", out)
+            state = json.load(open(os.path.join(tmp, "coinbase-spot-paper", "paper_account.json"), encoding="utf-8"))
+            self.assertEqual(state["open"], [])
+        winners = _winners()
+        cleared = bot.replay_up_longs(winners, cfg)
+        self.assertGreaterEqual(len(cleared), 20)
+        self.assertGreaterEqual(sum(cleared) / len(cleared), 0.05)
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "coinbase-spot-paper"))
+            out = _capture(bot, tmp, cfg, {"ETH-USD": winners, "SOL-USD": winners, "BTC-USD": winners})
             self.assertIn("paper buy ETH-USD", out)
-            self.assertNotIn("no trade", out)
+            self.assertNotIn("paper buy BTC-USD", out)
+            self.assertIn("research only", out)
             state = json.load(open(os.path.join(tmp, "coinbase-spot-paper", "paper_account.json"), encoding="utf-8"))
             self.assertEqual(len(state["open"]), 1)
             self.assertEqual(state["open"][0]["ticker"], "ETH-USD")
@@ -123,7 +182,7 @@ class CoinbaseSpotRules(unittest.TestCase):
             self.assertIn("btc15m YES open", out)
             self.assertIn("no trade", out)
             os.remove(os.path.join(tmp, "btc15m-signal", "paper_account.json"))
-            _capture(bot, tmp, cfg, {"ETH-USD": _moon(), "SOL-USD": _quiet(), "BTC-USD": _quiet()})
+            _capture(bot, tmp, cfg, {"ETH-USD": _winners(), "SOL-USD": _quiet(), "BTC-USD": _quiet()})
             state = json.load(open(os.path.join(tmp, "coinbase-spot-paper", "paper_account.json"), encoding="utf-8"))
             entry = state["open"][0]["entry_price"]
             crashed = [entry * 0.97] * 5
@@ -163,8 +222,8 @@ class CoinbaseSpotRules(unittest.TestCase):
             self.assertIn("CARD: data TimeoutError", out)
             self.assertNotRegex(out, r"CARD: z .* < ")
 
-    def test_card_densifies_fee_bar_on_z_skip(self):
-        """Quiet bars must show the locked ~28% fee-bar need, not a bare z miss."""
+    def test_card_states_the_forward_sample_not_a_past_bar(self):
+        """A quiet book names the missing forward sample. It does not ask for a 28% bar."""
         bot = _bot()
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "coinbase-spot-paper"))
@@ -181,10 +240,19 @@ class CoinbaseSpotRules(unittest.TestCase):
                     fetch=lambda product: _quiet(),
                 )
             out = buf.getvalue()
-            self.assertRegex(out, r"CARD: z .* < 2")
-            self.assertIn("15m needs ~28% bar", out)
-            self.assertIn("ordinary bars skip", out)
+            self.assertIn("CARD: flat: forward sample n=", out)
+            self.assertIn("needs 20 closed longs", out)
+            self.assertNotIn("15m needs ~28%", out)
             self.assertIn("no trade", out)
+
+    def test_open_candle_is_not_a_close(self):
+        bot = _bot()
+        now = dt.datetime(2026, 11, 10, 16, 0, tzinfo=dt.timezone.utc)
+        gran = 900
+        closed_ts = int(now.timestamp()) - gran
+        open_ts = int(now.timestamp()) - 10
+        kept = bot.drop_open_candle([closed_ts, open_ts], [100.0, 130.0], now, gran)
+        self.assertEqual(kept, [100.0])
 
     def test_key_in_env_refuses(self):
         bot = _bot()
