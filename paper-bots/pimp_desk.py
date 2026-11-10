@@ -1518,13 +1518,23 @@ def _save_run(root: str, bot_id: str, row: dict) -> None:
 _MANAGE_WHEN_GATED = frozenset({"sports-gap", "memecoin", "btc15m", "btc-carry"})
 
 
-def _child_env(block_entries: bool = False, shadow: dict | None = None) -> dict:
+def _child_env(
+    block_entries: bool = False,
+    shadow: dict | None = None,
+    *,
+    block_reason: str = "",
+) -> dict:
     env = {key: os.environ[key] for key in _ENV_KEEP if os.environ.get(key)}
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PAPER_ONLY"] = "1"
     if block_entries:
         env["DESK_BLOCK_ENTRIES"] = "1"
+        # Prefer-1: pass the real entry_gate line so manage-when-gated children
+        # densify ruin / daily-loss / max-open — never bland DESK_BLOCK_ENTRIES=1.
+        why = str(block_reason or os.environ.get("DESK_BLOCK_REASON") or "").strip()
+        if why:
+            env["DESK_BLOCK_REASON"] = why[:240]
     if shadow:
         env["DESK_SHADOW"] = "1"
         env["DESK_SHADOW_ID"] = str(shadow.get("id") or "")
@@ -3589,7 +3599,11 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
             proc = subprocess.Popen(
                 [sys.executable, script, *spec["argv"][1:]],
                 cwd=cwd,
-                env=_child_env(block_entries=block_entries, shadow=shadow_env),
+                env=_child_env(
+                    block_entries=block_entries,
+                    shadow=shadow_env,
+                    block_reason=gate_note,
+                ),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,

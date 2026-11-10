@@ -255,6 +255,20 @@ class PimpDeskTests(unittest.TestCase):
             self.assertFalse(refused["ok"])
             self.assertFalse(os.path.exists(os.path.join(tmp, "memecoin-paper", "ran")))
 
+    def test_child_env_passes_block_reason_with_entries(self):
+        """Post-#550 Prefer-1: manage-when-gated must densify real gate, not bland ENTRIES=1."""
+        env = pimp_desk._child_env(
+            block_entries=True,
+            block_reason="ruin drill soft: new entries off. Settles/exits still run under soft.",
+        )
+        self.assertEqual(env.get("DESK_BLOCK_ENTRIES"), "1")
+        self.assertIn("ruin drill", env.get("DESK_BLOCK_REASON", "").lower())
+        self.assertEqual(env.get("PAPER_ONLY"), "1")
+        # No reason → do not invent a bland DESK_BLOCK_REASON key.
+        bare = pimp_desk._child_env(block_entries=True)
+        self.assertEqual(bare.get("DESK_BLOCK_ENTRIES"), "1")
+        self.assertNotIn("DESK_BLOCK_REASON", bare)
+
     def test_save_roundtrip_and_unknown_bot(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg, err = pimp_desk.save_settings({
