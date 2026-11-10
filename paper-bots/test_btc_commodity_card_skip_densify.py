@@ -77,10 +77,11 @@ class BtcCardSkipDensify(unittest.TestCase):
         chunk = src[max_idx:max_idx + 2400]
         self.assertIn("desk_brain.record_decision", chunk)
         self.assertIn("reasons=[max_note]", chunk)
-        # Prefer-1: gate_lock covers settle/cool/stale — refuse max-buys invent.
+        # Prefer-1: gate_lock covers settle/cool/stale/ruin — refuse max-buys invent.
         self.assertIn("gate_lock", chunk)
         self.assertIn("adverse cool", chunk)
         self.assertIn("stale-world", chunk)
+        self.assertIn("ruin drill", chunk)
         cmd_src = CMD.read_text(encoding="utf-8")
         cmd_idx = cmd_src.find("if buys >= max_buys_eff:")
         self.assertGreater(cmd_idx, 0)
@@ -91,6 +92,7 @@ class BtcCardSkipDensify(unittest.TestCase):
         self.assertIn("gate_lock", cmd_chunk)
         self.assertIn("adverse cool", cmd_chunk)
         self.assertIn("stale-world", cmd_chunk)
+        self.assertIn("ruin drill", cmd_chunk)
 
     def test_desk_block_path_densifies_brain_like_max_buys(self):
         """Desk/account blocked fill must call record_decision (#407 sibling)."""
