@@ -446,12 +446,13 @@ a {
   opacity: 0.9;
 }
 
-.tower-tab.offline {
+.tower-tab.closed {
   opacity: 0.72;
 }
 
-.tower-tab.offline .tower-tab-beam {
-  filter: saturate(0.35);
+.tower-tab.closed .tower-tab-beam {
+  filter: none;
+  background: #243044;
 }
 
 .tower-holo-compact {
@@ -731,10 +732,16 @@ a {
   font-size: 0.62rem;
 }
 
-.tower-holo.offline {
-  opacity: 0.7;
-  border-style: dashed;
-  filter: saturate(0.5);
+.tower-holo.closed {
+  opacity: 0.9;
+  border-style: solid;
+  filter: none;
+  background: rgba(8, 10, 18, 0.92);
+}
+
+.tower-holo.closed strong,
+.tower-holo.closed .holo-pnl {
+  color: #8b95ad;
 }
 
 .vault-holo {

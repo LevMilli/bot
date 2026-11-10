@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { Group, InstancedMesh, Mesh } from 'three'
 import type { BotRow } from '../types'
-import { beamColorFor } from '../data/format'
+import { beamColorFor, towerClosed } from '../data/format'
 import { isSupportTower } from '../data/floorMap'
 import { TowerHologram } from '../hud/Holograms'
 
@@ -93,14 +93,16 @@ function TradeTower({ bot, index, position, selected, onSelect, vista = false }:
   const beamCore = useRef<Mesh>(null)
   const color = beamColorFor(bot.id, index)
   const offline = bot.present === false
+  const closed = towerClosed(bot)
   const street = bot.id === 'wall-street'
   const height = street ? 10.8 : offline ? 5.4 : 7.6 + (index % 3) * 1.35 + (index === 0 ? 1.2 : 0)
   const width = street ? 2.25 : 1.9 + (index % 2) * 0.28
   const hero = index === 0 && !offline
 
   useFrame(({ clock }) => {
+    if (closed) return
     const t = clock.getElapsedTime()
-    const pulse = offline ? 0.1 : 0.7 + Math.sin(t * 2.4 + index) * 0.28
+    const pulse = 0.7 + Math.sin(t * 2.4 + index) * 0.28
     if (beamCore.current) {
       const mat = beamCore.current.material as { opacity?: number }
       if (mat.opacity != null) mat.opacity = pulse
@@ -120,12 +122,18 @@ function TradeTower({ bot, index, position, selected, onSelect, vista = false }:
       {/* neon baseplate */}
       <mesh position={[0, 0.04, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[width + 0.55, width + 0.55]} />
-        <meshStandardMaterial color="#050510" emissive={color} emissiveIntensity={0.18} />
+        <meshStandardMaterial
+          color="#050510"
+          emissive={closed ? '#000000' : color}
+          emissiveIntensity={closed ? 0 : 0.18}
+        />
       </mesh>
-      <mesh position={[0, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[(width + 0.35) / 2, (width + 0.55) / 2, 4]} />
-        <meshBasicMaterial color={color} transparent opacity={0.75} />
-      </mesh>
+      {!closed && (
+        <mesh position={[0, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[(width + 0.35) / 2, (width + 0.55) / 2, 4]} />
+          <meshBasicMaterial color={color} transparent opacity={0.75} />
+        </mesh>
+      )}
 
       <mesh
         position={[0, height / 2, 0]}
@@ -163,33 +171,38 @@ function TradeTower({ bot, index, position, selected, onSelect, vista = false }:
         />
       </mesh>
 
-      <WindowInstances height={height} width={width} seed={index + 3} offline={offline} sparse />
+      <WindowInstances height={height} width={width} seed={index + 3} offline={closed} sparse />
 
       {/* roof cap */}
       <mesh position={[0, height + 0.08, 0]}>
         <boxGeometry args={[width + 0.22, 0.16, width + 0.22]} />
-        <meshStandardMaterial color="#0c0c14" emissive={color} emissiveIntensity={0.7} />
+        <meshStandardMaterial
+          color="#0c0c14"
+          emissive={closed ? '#000000' : color}
+          emissiveIntensity={closed ? 0 : 0.7}
+        />
       </mesh>
-      {street && (
+      {street && !closed && (
         <mesh position={[0, height + 0.32, 0]}>
           <boxGeometry args={[width + 0.46, 0.18, width + 0.46]} />
           <meshStandardMaterial color="#1a1408" emissive="#c6a15b" emissiveIntensity={1.15} />
         </mesh>
       )}
 
-      {/* neon beam + halo rings */}
+      {/* neon beam + halo rings — dark when the tower is closed */}
+      {!closed && (
       <group ref={beamGroup} position={[0, height + 0.2, 0]}>
         <mesh ref={beamCore} position={[0, hero ? 6.4 : 5.6, 0]}>
           <cylinderGeometry args={[hero ? 0.42 : 0.32, hero ? 0.62 : 0.52, hero ? 12.5 : 11, 24]} />
-          <meshBasicMaterial color={color} transparent opacity={offline ? 0.18 : 1} depthWrite={false} toneMapped={false} />
+          <meshBasicMaterial color={color} transparent opacity={1} depthWrite={false} toneMapped={false} />
         </mesh>
         <mesh position={[0, hero ? 6.4 : 5.6, 0]}>
           <cylinderGeometry args={[hero ? 0.09 : 0.06, hero ? 0.12 : 0.09, hero ? 12.8 : 11.2, 12]} />
-          <meshBasicMaterial color="#ffffff" transparent opacity={offline ? 0.14 : 1} depthWrite={false} toneMapped={false} />
+          <meshBasicMaterial color="#ffffff" transparent opacity={1} depthWrite={false} toneMapped={false} />
         </mesh>
         <mesh position={[0, hero ? 6.4 : 5.6, 0]}>
           <cylinderGeometry args={[hero ? 0.62 : 0.48, hero ? 0.92 : 0.78, hero ? 12.2 : 10.6, 24]} />
-          <meshBasicMaterial color={color} transparent opacity={offline ? 0.06 : 0.35} depthWrite={false} toneMapped={false} />
+          <meshBasicMaterial color={color} transparent opacity={0.35} depthWrite={false} toneMapped={false} />
         </mesh>
         {[0, 1, 2, 3, 4, 5].map((i) => (
           <mesh key={i} rotation={[Math.PI / 2, 0, 0]} position={[0, 1.1 + i * 1.4, 0]}>
@@ -197,7 +210,7 @@ function TradeTower({ bot, index, position, selected, onSelect, vista = false }:
             <meshBasicMaterial
               color={i % 2 === 0 ? '#ffffff' : color}
               transparent
-              opacity={offline ? 0.1 : 0.95}
+              opacity={0.95}
               depthWrite={false}
               toneMapped={false}
             />
@@ -216,6 +229,7 @@ function TradeTower({ bot, index, position, selected, onSelect, vista = false }:
           </mesh>
         )}
       </group>
+      )}
 
       {!vista && (
         <TowerHologram bot={bot} index={index} height={height} onSelect={onSelect} />
@@ -233,11 +247,13 @@ function SupportRelay({ bot, index, position, selected, onSelect, vista = false 
   const dish = useRef<Group>(null)
   const color = beamColorFor(bot.id, index)
   const offline = bot.present === false
+  const closed = towerClosed(bot)
   const height = offline ? 3.15 : 4.5
   const radius = 1.05
   const bands = [0.32, 0.58, 0.84]
 
   useFrame(({ clock }) => {
+    if (closed) return
     const t = clock.getElapsedTime()
     if (dish.current) dish.current.rotation.y = t * 0.28 + index
     if (halo.current) {
@@ -266,12 +282,18 @@ function SupportRelay({ bot, index, position, selected, onSelect, vista = false 
     <group position={position}>
       <mesh position={[0, 0.04, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[radius + 0.62, 8]} />
-        <meshStandardMaterial color="#050510" emissive={color} emissiveIntensity={0.16} />
+        <meshStandardMaterial
+          color="#050510"
+          emissive={closed ? '#000000' : color}
+          emissiveIntensity={closed ? 0 : 0.16}
+        />
       </mesh>
-      <mesh position={[0, 0.055, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[radius + 0.28, radius + 0.5, 8]} />
-        <meshBasicMaterial color={color} transparent opacity={0.7} toneMapped={false} />
-      </mesh>
+      {!closed && (
+        <mesh position={[0, 0.055, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[radius + 0.28, radius + 0.5, 8]} />
+          <meshBasicMaterial color={color} transparent opacity={0.7} toneMapped={false} />
+        </mesh>
+      )}
 
       <mesh position={[0, height / 2, 0]} castShadow {...pick}>
         <cylinderGeometry args={[radius, radius * 1.06, height, 8]} />
@@ -288,9 +310,9 @@ function SupportRelay({ bot, index, position, selected, onSelect, vista = false 
         <mesh key={t} position={[0, height * t, 0]}>
           <cylinderGeometry args={[radius + 0.045, radius + 0.045, 0.07, 8]} />
           <meshBasicMaterial
-            color={offline ? '#2a3348' : color}
+            color={closed ? '#2a3348' : color}
             transparent
-            opacity={offline ? 0.35 : 0.92}
+            opacity={closed ? 0.2 : 0.92}
             toneMapped={false}
           />
         </mesh>
@@ -298,7 +320,11 @@ function SupportRelay({ bot, index, position, selected, onSelect, vista = false 
 
       <mesh position={[0, height + 0.08, 0]}>
         <cylinderGeometry args={[radius * 0.42, radius * 0.72, 0.18, 8]} />
-        <meshStandardMaterial color="#0c0c14" emissive={color} emissiveIntensity={offline ? 0.15 : 0.65} />
+        <meshStandardMaterial
+          color="#0c0c14"
+          emissive={closed ? '#000000' : color}
+          emissiveIntensity={closed ? 0 : 0.65}
+        />
       </mesh>
 
       <group ref={dish} position={[0, height + 0.72, 0]}>
@@ -306,8 +332,8 @@ function SupportRelay({ bot, index, position, selected, onSelect, vista = false 
           <coneGeometry args={[0.78, 0.28, 8, 1, true]} />
           <meshStandardMaterial
             color="#101018"
-            emissive={color}
-            emissiveIntensity={offline ? 0.12 : 0.55}
+            emissive={closed ? '#000000' : color}
+            emissiveIntensity={closed ? 0 : 0.55}
             metalness={0.45}
             roughness={0.32}
             side={THREE.DoubleSide}
@@ -315,14 +341,16 @@ function SupportRelay({ bot, index, position, selected, onSelect, vista = false 
         </mesh>
         <mesh position={[0, 0.02, 0]}>
           <cylinderGeometry args={[0.045, 0.045, 0.55, 8]} />
-          <meshBasicMaterial color={offline ? '#2a3348' : '#f4f7ff'} toneMapped={false} />
+          <meshBasicMaterial color={closed ? '#2a3348' : '#f4f7ff'} toneMapped={false} />
         </mesh>
       </group>
 
-      <mesh ref={halo} position={[0, height + 1.28, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[0.92, 0.03, 8, 28]} />
-        <meshBasicMaterial color={color} transparent opacity={0.8} depthWrite={false} toneMapped={false} />
-      </mesh>
+      {!closed && (
+        <mesh ref={halo} position={[0, height + 1.28, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.92, 0.03, 8, 28]} />
+          <meshBasicMaterial color={color} transparent opacity={0.8} depthWrite={false} toneMapped={false} />
+        </mesh>
+      )}
 
       {!vista && <TowerHologram bot={bot} index={index} height={height + 1.15} onSelect={onSelect} />}
     </group>

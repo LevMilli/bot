@@ -75,6 +75,11 @@ export function pnlTone(n: Money): 'up' | 'down' | 'flat' {
   return Number(n) > 0 ? 'up' : 'down'
 }
 
+/** Plaza lights stay off when the tower is missing or the desk has it paused. */
+export function towerClosed(bot: BotRow): boolean {
+  return bot.present === false || Boolean(bot.paused)
+}
+
 export function statusLabel(bot: BotRow): string {
   if (bot.present === false) return bot.empty || bot.why || 'offline'
   if (bot.paused) return 'paused'

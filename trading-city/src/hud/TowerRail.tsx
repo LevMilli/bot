@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import {
   beamColorFor,
+  towerClosed,
   hologramPnl,
   hologramPnlValue,
   money,
@@ -72,17 +73,17 @@ function TowerTab({
   onSelect: (id: string) => void
 }) {
   const color = beamColorFor(bot.id, index)
-  const offline = bot.present === false
+  const closed = towerClosed(bot)
   const status = statusLabel(bot)
-  const supportIdle = isResearchTower(bot.id) && !offline && !bookPnlApplies(bot)
-  const tone = offline || supportIdle ? 'flat' : pnlTone(hologramPnlValue(bot))
-  const figure = supportIdle ? supportHeadline(bot) : offline ? 'offline' : hologramPnl(bot)
+  const supportIdle = isResearchTower(bot.id) && !closed && !bookPnlApplies(bot)
+  const tone = closed || supportIdle ? 'flat' : pnlTone(hologramPnlValue(bot))
+  const figure = supportIdle ? supportHeadline(bot) : closed ? 'closed' : hologramPnl(bot)
   return (
     <li>
       <button
         type="button"
-        className={`tower-tab ${offline ? 'offline' : ''}`}
-        style={{ ['--tab-beam' as string]: color }}
+        className={`tower-tab ${closed ? 'closed' : ''}`}
+        style={{ ['--tab-beam' as string]: closed ? '#243044' : color }}
         onClick={() => onSelect(bot.id)}
         title={status}
       >
@@ -93,10 +94,10 @@ function TowerTab({
             <span className={supportIdle ? 'tower-tab-pnl tower-tab-wait' : `tower-tab-pnl tone-${tone}`}>
               {figure}
             </span>
-            {!supportIdle && !offline && bot.open_count != null && bot.open_count > 0 && (
+            {!supportIdle && !closed && bot.open_count != null && bot.open_count > 0 && (
               <span className="tower-tab-open">open {bot.open_count}</span>
             )}
-            {!supportIdle && !offline && bot.cash != null && (
+            {!supportIdle && !closed && bot.cash != null && (
               <span className="tower-tab-cash">{money(bot.cash)}</span>
             )}
           </span>
@@ -135,7 +136,7 @@ export function TowerRail({ bots, onSelect }: Props) {
 
   if (!bots.length) return null
 
-  const live = bots.filter((b) => b.present !== false).length
+  const live = bots.filter((b) => !towerClosed(b)).length
   const research = [
     ...bots.filter((bot) => isSupportTower(bot.id)),
     ...bots.filter((bot) => bot.id === 'wall-street'),
@@ -159,7 +160,10 @@ export function TowerRail({ bots, onSelect }: Props) {
       >
         <span className="tower-menu-beams" aria-hidden>
           {bots.map((bot, i) => (
-            <i key={bot.id} style={{ background: beamColorFor(bot.id, i) }} />
+            <i
+              key={bot.id}
+              style={{ background: towerClosed(bot) ? '#243044' : beamColorFor(bot.id, i) }}
+            />
           ))}
         </span>
         <span className="tower-menu-copy">

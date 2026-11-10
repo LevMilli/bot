@@ -7,6 +7,7 @@ import {
   money,
   pnlTone,
   statusLabel,
+  towerClosed,
 } from '../data/format'
 
 /**
@@ -24,9 +25,9 @@ export function TowerHologram({
   height: number
   onSelect: (id: string) => void
 }) {
-  const offline = bot.present === false
+  const closed = towerClosed(bot)
   const color = beamColorFor(bot.id, index)
-  const pnlToneClass = offline ? 'flat' : pnlTone(hologramPnlValue(bot))
+  const pnlToneClass = closed ? 'flat' : pnlTone(hologramPnlValue(bot))
   const floorLabel =
     bot.id === 'wall-street'
       ? `6 desks · ${bot.traders && bot.traders >= 100 ? bot.traders : 120}`
@@ -43,11 +44,12 @@ export function TowerHologram({
     >
       <button
         type="button"
-        className={`holo html-holo tower-holo tower-holo-compact ${offline ? 'offline' : ''}`}
-        style={{
-          borderColor: color,
-          boxShadow: `0 0 12px ${color}40`,
-        }}
+        className={`holo html-holo tower-holo tower-holo-compact ${closed ? 'closed' : ''}`}
+        style={
+          closed
+            ? { borderColor: '#243044', boxShadow: 'none' }
+            : { borderColor: color, boxShadow: `0 0 12px ${color}40` }
+        }
         onClick={(e) => {
           e.stopPropagation()
           onSelect(bot.id)
@@ -56,9 +58,9 @@ export function TowerHologram({
       >
         <strong>{bot.name}</strong>
         <span className={`holo-pnl tone-${pnlToneClass}`}>
-          {offline ? 'offline' : floorLabel || hologramPnl(bot)}
+          {closed ? 'closed' : floorLabel || hologramPnl(bot)}
         </span>
-        {!offline && (bot.skip_board?.length ?? 0) > 0 && (
+        {!closed && (bot.skip_board?.length ?? 0) > 0 && (
           <span className="tower-skips">
             {(bot.skip_board || [])
               .slice(0, 3)
