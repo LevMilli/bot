@@ -653,6 +653,250 @@ def helper_advice_log_board(root: str | None = None) -> dict:
     }
 
 
+def _fill_taxed(row: dict) -> float | None:
+    pt = _finite(row.get("pnl_taxed"))
+    if pt is not None:
+        return float(pt)
+    pnl = _finite(row.get("pnl"))
+    if pnl is None:
+        return None
+    n_c = _finite(row.get("contracts")) or 1.0
+    return float(pnl) - FILL_TAX_DEFAULT * max(1.0, n_c)
+
+
+def _last_advice_decision(
+    advice_rows: list[dict],
+    *,
+    helper: str,
+    bot: str,
+    at: str,
+) -> str:
+    """Most recent accept|reject for helper(+bot) at or before fill timestamp."""
+    helper_id = str(helper or "")
+    bot_id = str(bot or "")
+    stamp = str(at or "")
+    last = ""
+    for row in advice_rows:
+        if str(row.get("helper") or "") != helper_id:
+            continue
+        row_bot = str(row.get("bot") or "")
+        if bot_id and row_bot and row_bot != bot_id:
+            continue
+        row_at = str(row.get("at") or "")
+        if stamp and row_at and row_at > stamp:
+            continue
+        dec = str(row.get("decision") or "").strip().lower()
+        if dec in ADVICE_DECISIONS:
+            last = dec
+    return last
+
+
+def helper_advice_lift_board(root: str | None = None) -> dict:
+    """Measure insight advice lift on taxed EV along the Gate A path (#898).
+
+    Join advice accept/reject journal with helper-attributed fills. Observe only —
+    never places fills, never staff-arms, never softens floors.
+    """
+    advice_store = _load(
+        _path(HELPER_ADVICE_LOG_NAME, root),
+        {"paper_only": True, "rows": [], "fee_floors_locked": True},
+    )
+    fill_store = _load(
+        _path(HELPER_FILLS_NAME, root),
+        {"paper_only": True, "rows": []},
+    )
+    advice_rows = sorted(
+        [r for r in (advice_store.get("rows") or []) if isinstance(r, dict)],
+        key=lambda r: str(r.get("at") or ""),
+    )
+    fill_rows = [r for r in (fill_store.get("rows") or []) if isinstance(r, dict)]
+
+    buckets: dict[str, list[float]] = {"accept": [], "reject": [], "none": []}
+    by_helper: dict[str, dict] = {}
+    linked = 0
+    for fill in fill_rows:
+        taxed = _fill_taxed(fill)
+        if taxed is None:
+            continue
+        helper = str(fill.get("helper") or "")
+        bot = str(fill.get("bot") or "")
+        state = _last_advice_decision(
+            advice_rows, helper=helper, bot=bot, at=str(fill.get("at") or ""),
+        ) or "none"
+        if state not in buckets:
+            state = "none"
+        buckets[state].append(float(taxed))
+        if state in ADVICE_DECISIONS:
+            linked += 1
+        h = helper or "?"
+        slot = by_helper.setdefault(
+            h,
+            {
+                "helper": h,
+                "accept_n": 0,
+                "reject_n": 0,
+                "none_n": 0,
+                "accept_ev": None,
+                "reject_ev": None,
+                "lift": None,
+                "_accept": [],
+                "_reject": [],
+            },
+        )
+        if state == "accept":
+            slot["accept_n"] += 1
+            slot["_accept"].append(float(taxed))
+        elif state == "reject":
+            slot["reject_n"] += 1
+            slot["_reject"].append(float(taxed))
+        else:
+            slot["none_n"] += 1
+
+    def _mean(xs: list[float]) -> float | None:
+        return round(sum(xs) / len(xs), 4) if xs else None
+
+    accept_ev = _mean(buckets["accept"])
+    reject_ev = _mean(buckets["reject"])
+    none_ev = _mean(buckets["none"])
+    lift = None
+    if accept_ev is not None and reject_ev is not None:
+        lift = round(accept_ev - reject_ev, 4)
+    elif accept_ev is not None and none_ev is not None:
+        lift = round(accept_ev - none_ev, 4)
+
+    helper_rows = []
+    for slot in by_helper.values():
+        a = slot.pop("_accept")
+        r = slot.pop("_reject")
+        slot["accept_ev"] = _mean(a)
+        slot["reject_ev"] = _mean(r)
+        if slot["accept_ev"] is not None and slot["reject_ev"] is not None:
+            slot["lift"] = round(slot["accept_ev"] - slot["reject_ev"], 4)
+        helper_rows.append(slot)
+    helper_rows.sort(
+        key=lambda x: (
+            -(x["accept_n"] + x["reject_n"] + x["none_n"]),
+            str(x.get("helper") or ""),
+        ),
+    )
+
+    thin = len(buckets["accept"]) < 5 or (
+        len(buckets["reject"]) < 5 and len(buckets["none"]) < 5
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "staff_arm": False,
+        "places_orders": False,
+        "advice_n": len(advice_rows),
+        "fill_n": len(fill_rows),
+        "linked_n": linked,
+        "accept_n": len(buckets["accept"]),
+        "reject_n": len(buckets["reject"]),
+        "none_n": len(buckets["none"]),
+        "accept_ev": accept_ev,
+        "reject_ev": reject_ev,
+        "none_ev": none_ev,
+        "lift": lift,
+        "evidence_thin": thin,
+        "by_helper": helper_rows[:24],
+        "gate_a_path": True,
+        "label": (
+            f"advice_lift lift={lift} accept_n={len(buckets['accept'])} "
+            f"reject_n={len(buckets['reject'])} "
+            f"{'THIN' if thin else 'ok'} (observe · Gate A path)"
+        ),
+        "note": (
+            "Insight advice lift on helper-fill taxed EV (#898). "
+            "Accept vs reject (else vs untagged). Observe only — never arms."
+        ),
+    }
+
+
+# Forbidden execution tokens inside helpers/ (#899–900). Digest writers only.
+INSIGHT_HELPER_EXEC_FORBIDDEN = (
+    "paper_buy(",
+    "paper_sell(",
+    "paper_buy =",
+    "paper_sell =",
+    "def paper_buy",
+    "def paper_sell",
+)
+INSIGHT_HELPER_OPEN_WRITE_FORBIDDEN = (
+    '["opens"].append',
+    "['opens'].append",
+    '.get("opens", []).append',
+    ".get('opens', []).append",
+)
+INSIGHT_HELPER_SCAN_SKIP = frozenset({
+    "__init__.py",
+    "advice_schema.py",  # schema only; no execution
+})
+
+
+def insight_helpers_execution_lock(root: str | None = None) -> dict:
+    """#899/#900: insight helpers must not write opens or call paper_buy/sell.
+
+    Static scan of helpers/*.py. Observe / assert only — never places.
+    """
+    helpers_dir = os.path.join(_root(root), "helpers")
+    violations: list[dict] = []
+    scanned = 0
+    if os.path.isdir(helpers_dir):
+        for name in sorted(os.listdir(helpers_dir)):
+            if not name.endswith(".py") or name in INSIGHT_HELPER_SCAN_SKIP:
+                continue
+            path = os.path.join(helpers_dir, name)
+            if not os.path.isfile(path):
+                continue
+            scanned += 1
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    body = handle.read()
+            except OSError:
+                continue
+            for token in INSIGHT_HELPER_EXEC_FORBIDDEN:
+                if token in body:
+                    violations.append({
+                        "helper": name,
+                        "rule": "no_paper_buy_sell",
+                        "token": token,
+                        "plan": "#900",
+                    })
+            for token in INSIGHT_HELPER_OPEN_WRITE_FORBIDDEN:
+                if token in body:
+                    violations.append({
+                        "helper": name,
+                        "rule": "no_opens_write",
+                        "token": token,
+                        "plan": "#899",
+                    })
+    ok = not violations
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "places_orders": False,
+        "may_place_alone": False,
+        "ok": ok,
+        "pass": ok,
+        "scanned_n": scanned,
+        "violation_n": len(violations),
+        "violations": violations[:40],
+        "label": (
+            f"insight_exec_lock ok={ok} scanned={scanned} "
+            f"violations={len(violations)} (#899/#900)"
+        ),
+        "note": (
+            "Insight helpers must not write paper_state opens (#899) or call "
+            "paper_buy/paper_sell (#900). Digest/observe only."
+        ),
+    }
+
+
 # ---- Eligible-fill funnel + throughput vs M1 -------------------------------
 
 def eligible_fill_funnel(root: str | None = None, bots: list | None = None) -> dict:

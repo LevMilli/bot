@@ -66,6 +66,43 @@ class E3E4Boards(unittest.TestCase):
             self.assertEqual(board["accept_n"], 1)
             self.assertEqual(board["reject_n"], 1)
 
+    def test_helper_advice_lift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            desk_roi_plan.record_helper_advice_decision(
+                tmp, helper="calendar_scanner", bot="btc15m",
+                decision="accept", reason="pilot",
+                advice={"floors_locked": True, "ttl": 30},
+            )
+            desk_roi_plan.record_helper_advice_decision(
+                tmp, helper="clv_closer", bot="sports-gap",
+                decision="reject", reason="thin",
+            )
+            for i in range(3):
+                desk_roi_plan.record_helper_fill(
+                    tmp, helper="calendar_scanner", bot="btc15m",
+                    pnl=0.4, contracts=1, fill_id=f"a{i}",
+                )
+            for i in range(3):
+                desk_roi_plan.record_helper_fill(
+                    tmp, helper="clv_closer", bot="sports-gap",
+                    pnl=-0.1, contracts=1, fill_id=f"r{i}",
+                )
+            lift = desk_roi_plan.helper_advice_lift_board(tmp)
+            self.assertEqual(lift["accept_n"], 3)
+            self.assertEqual(lift["reject_n"], 3)
+            self.assertIsNotNone(lift["lift"])
+            self.assertGreater(lift["lift"], 0)
+            self.assertTrue(lift["observe_only"])
+            self.assertFalse(lift["staff_arm"])
+
+    def test_insight_helpers_execution_lock(self):
+        lock = desk_roi_plan.insight_helpers_execution_lock()
+        self.assertTrue(lock["ok"])
+        self.assertTrue(lock["pass"])
+        self.assertGreater(lock["scanned_n"], 10)
+        self.assertEqual(lock["violation_n"], 0)
+        self.assertFalse(lock["may_place_alone"])
+
     def test_eligible_and_throughput(self):
         with tempfile.TemporaryDirectory() as tmp:
             desk_roi_plan.record_fit(tmp, bot="btc15m", outcome="buy", ticker="T1")
@@ -99,6 +136,7 @@ class E3E4Boards(unittest.TestCase):
             for key in (
                 "selective_kill", "tip_funnel", "gate_a_pilot",
                 "gate_a_pilot_sports_clv", "gate_a_pilots", "helper_advice_log",
+                "helper_advice_lift", "insight_helpers_execution_lock",
                 "eligible_fill_funnel", "throughput_vs_m1",
             ):
                 self.assertIn(key, plan)

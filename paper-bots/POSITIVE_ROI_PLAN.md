@@ -2085,9 +2085,13 @@ Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers/chi
 | Opp-cost on BTC + commodity | `note_pending_high_edge` / `flush_opp_cost_on_buy` mirrors sports |
 | Helper advice schema | `helpers.advice_schema.validate_helper_advice` |
 | Incubation idea-bank only | `incubation_blocks_auto` weather/econ/Polymarket refuse main AUTO |
-| Gate A pilot densify | `gate_a_pilot_btc_calendar` (observe · no staff arm) |
+| Gate A pilot densify | `gate_a_pilot_btc_calendar` · `gate_a_pilot_sports_clv` (observe · no staff arm) |
+| Helper advice accept/reject log | `record_helper_advice_decision` / `helper_advice_log_board` (#897) |
+| Advice lift on taxed EV | `helper_advice_lift_board` (#898 Gate A path · observe) |
+| Insight helpers no-place lock | `insight_helpers_execution_lock` (#899/#900 — no opens / no paper_buy) |
+| Expand gate M1+Master | `betting_expand_gate` swarm≥3:1 + firm M1≥0 + fee-clear Master (#881) |
 | Eligible-fill + throughput vs M1 | `eligible_fill_funnel` / `throughput_vs_m1_board` |
-| Masters | `roi_plan.selective_kill` · `tip_funnel` · `gate_a_pilot` · `eligible_fill_funnel` · `throughput_vs_m1` |
+| Masters | `roi_plan.selective_kill` · `tip_funnel` · `gate_a_pilot` · `gate_a_pilots` · `helper_advice_log` · `helper_advice_lift` · `insight_helpers_execution_lock` · `eligible_fill_funnel` · `throughput_vs_m1` |
 
 ## Hard rules unchanged
 
