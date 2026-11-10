@@ -1772,6 +1772,7 @@ def main() -> int:
             "hillclimb-sunday-review", "hillclimb-dry-run", "hillclimb-evidence",
             "hillclimb-e9-week", "hillclimb-daily", "hillclimb-broadcast",
             "hillclimb-kill-postmortem", "hillclimb-lock-win", "hillclimb-discipline",
+            "chaos-drills",
             "promote-ready-pack", "staff-promote-batch-ready",
             "disarm-thin", "staff-disarm-thin",
             "dual-control-status", "dual-control-observe",
@@ -4663,6 +4664,11 @@ def main() -> int:
         out = desk_roi_plan.hillclimb_e9_week_board(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
+    if args.action == "chaos-drills":
+        import desk_roi_e9_chaos
+        out = desk_roi_e9_chaos.run_chaos_drill_pack(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
     if args.action == "hillclimb-daily":
         out = desk_roi_plan.hillclimb_lever_daily_check(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
