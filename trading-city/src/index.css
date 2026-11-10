@@ -1417,7 +1417,7 @@ a {
 }
 
 .boss-dash-panel {
-  width: min(1100px, 96vw);
+  width: min(1180px, 96vw);
   max-height: 100%;
   overflow: auto;
   border: 1px solid rgba(45, 226, 230, 0.35);
@@ -1516,6 +1516,12 @@ a {
   border: 1px solid rgba(154, 163, 199, 0.22);
   padding: 0.65rem 0.7rem;
   background: rgba(8, 10, 22, 0.65);
+  max-height: min(58vh, 28rem);
+  overflow: auto;
+}
+
+.boss-side .boss-mini {
+  margin-top: 0.45rem;
 }
 
 .boss-side h3 {
@@ -1577,6 +1583,45 @@ a {
   padding: 0;
 }
 
+.boss-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  align-items: center;
+  margin-bottom: 0.65rem;
+}
+
+.boss-tools h3 {
+  margin: 0;
+}
+
+.boss-tools label,
+.boss-learn-head label {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  color: #7ec8d8;
+  font-size: 0.72rem;
+}
+
+.boss-tools select,
+.boss-learn-head select {
+  background: #060812;
+  color: #d7e6ff;
+  border: 1px solid rgba(45, 226, 230, 0.35);
+  font: inherit;
+  padding: 0.25rem 0.4rem;
+}
+
+.boss-pulse {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  margin: 0 0 0.75rem;
+  color: #9aa3c7;
+  font-size: 0.72rem;
+}
+
 .boss-history li {
   display: grid;
   grid-template-columns: 1.2fr 1fr auto;
@@ -1584,6 +1629,27 @@ a {
   padding: 0.35rem 0;
   border-bottom: 1px solid rgba(154, 163, 199, 0.14);
   font-size: 0.75rem;
+}
+
+.boss-history li.all {
+  grid-template-columns: 1.15fr 0.7fr 1fr auto;
+}
+
+.boss-result {
+  color: #7ec8d8;
+  font-style: normal;
+}
+
+.boss-positions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.boss-positions li {
+  font-size: 0.72rem;
+  color: #c5d0e0;
+  margin: 0.2rem 0;
 }
 
 .boss-history .up {
