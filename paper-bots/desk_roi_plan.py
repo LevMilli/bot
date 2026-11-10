@@ -8074,6 +8074,296 @@ def phase10_ruin_gate(
     }
 
 
+# Phase 11 continuous hillclimb locks — one allowlisted lever/week forever;
+# raise-only floors; no midweek thrash; no auto param write; P9 LIVE blocked.
+PHASE11_HILLCLIMB_LOCKS = {
+    "allowlist": [
+        "VOL_SAFE",
+        "HIT_FOR_BIG",
+        "venue_min_edge_btc",
+        "min_cushion_btc",
+        "kelly_fraction",
+    ],
+    "none_lever": HILLCLIMB_NONE_LEVER,
+    "raise_only": ["venue_min_edge_btc", "min_cushion_btc"],
+    "idea_review_days": IDEA_REVIEW_DAYS,
+    "auto_revert": False,
+    "auto_apply": False,
+    "parallel_levers": False,
+    "midweek_thrash": False,
+    "sports_daily_r": 1.5,
+    "commodity_daily_r": 2.0,
+    "note": (
+        "One lever/week from allowlist (or NONE). venue_min_edge_btc / "
+        "min_cushion_btc raise-only. Sunday promote/demote; midweek thrash banned. "
+        "Kill → staff demote (auto_revert=False). Idea review 90d. Quarterly W rebaseline. "
+        "Exit: none — steady state. Forbidden: parallel conflicting lever changes."
+    ),
+}
+
+
+def phase11_hillclimb_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Phase 11 continuous hillclimb steady-state gate (master plan).
+
+    Pass when infrastructure + locks are honest:
+      1. Allowlist = VOL_SAFE / HIT_FOR_BIG / venue_min_edge_btc / min_cushion_btc /
+         kelly_fraction (+ NONE).
+      2. Raise-only on venue_min_edge_btc + min_cushion_btc.
+      3. One-lever discipline; midweek thrash blocked; parallel levers forbidden.
+      4. Kill flag observe-only with auto_revert=False (staff demote path).
+      5. Sunday packet review gate for non-NONE picks.
+      6. Idea review cadence 90d; quarterly rebaseline status present.
+      7. Sports 1.5R + commodity 2.0R locked; floors locked; LIVE off.
+
+    Plan exit gate is None (forever steady state). economic_pass is ops:
+    staff has an active lever (or NONE) this Chicago week — empty stays False.
+
+    Observe / certify only — never auto-picks, never auto-reverts params,
+    never arms LIVE, never softens floors.
+    """
+    _ = bots  # bots unused — hillclimb is desk-journal + constants
+    required = (
+        "VOL_SAFE",
+        "HIT_FOR_BIG",
+        "venue_min_edge_btc",
+        "min_cushion_btc",
+        "kelly_fraction",
+    )
+    al = hillclimb_allowlist() or {}
+    levers = al.get("levers") if isinstance(al.get("levers"), dict) else {}
+    allow_ok = (
+        all(name in HILLCLIMB_ALLOWLIST for name in required)
+        and all(name in levers for name in required)
+        and str(al.get("none_lever") or "") == HILLCLIMB_NONE_LEVER
+        and bool(HILLCLIMB_ALLOWLIST["venue_min_edge_btc"].get("raise_only"))
+        and bool(HILLCLIMB_ALLOWLIST["min_cushion_btc"].get("raise_only"))
+        and not bool(HILLCLIMB_ALLOWLIST["VOL_SAFE"].get("raise_only"))
+    )
+
+    templates = hillclimb_lever_evidence_templates() or {}
+    templates_ok = (
+        bool(templates.get("auto_apply") is False)
+        and bool(templates.get("observe_only") is True)
+        and all(
+            (templates.get("templates") or {}).get(n, {}).get("writes_venue_params") is False
+            for n in required
+        )
+    )
+
+    discipline = hillclimb_one_lever_discipline(root) or {}
+    discipline_ok = bool(discipline.get("pass") or discipline.get("ok"))
+
+    lever_st = hillclimb_lever_status(root) or {}
+    lever_ok = (
+        bool(lever_st.get("auto_promote") is False)
+        and bool(lever_st.get("auto_revert") is False)
+        and bool(lever_st.get("observe_only") is True)
+        and bool(lever_st.get("process_only") is True)
+        and callable(staff_pick_hillclimb_lever)
+        and callable(staff_demote_hillclimb_lever)
+    )
+
+    # Midweek thrash banned: second pick same week without force must fail.
+    thrash_ok = False
+    try:
+        import tempfile
+        with tempfile.TemporaryDirectory() as probe:
+            staff_mark_sunday_packet_reviewed(probe, who="phase11_gate")
+            first = staff_pick_hillclimb_lever(
+                probe, "VOL_SAFE", note="infra probe", force=False,
+            )
+            second = staff_pick_hillclimb_lever(
+                probe, "HIT_FOR_BIG", note="thrash probe", force=False,
+            )
+            thrash_ok = bool(first.get("ok")) and not bool(second.get("ok"))
+    except Exception:
+        thrash_ok = False
+
+    # Raise-only refuse soften: proposed below floor must fail.
+    raise_ok = False
+    try:
+        import tempfile
+        with tempfile.TemporaryDirectory() as probe:
+            soft = staff_pick_hillclimb_lever(
+                probe,
+                "venue_min_edge_btc",
+                proposed_value=0.03,
+                force=True,
+                note="raise-only probe",
+            )
+            raise_ok = not bool(soft.get("ok"))
+    except Exception:
+        raise_ok = False
+
+    kill = hillclimb_kill_status(root) or {}
+    kill_ok = (
+        bool(kill.get("auto_revert") is False)
+        and bool(kill.get("fee_floors_locked") is True)
+        and callable(staff_hillclimb_kill_postmortem)
+        and callable(hillclimb_postmortem_board)
+    )
+
+    sunday = sunday_packet_review_status(root) or {}
+    sunday_ok = (
+        callable(staff_mark_sunday_packet_reviewed)
+        and "gate_ok" in sunday
+        and bool(sunday.get("fee_floors_locked") is True)
+    )
+
+    ideas = idea_review_status(root) or {}
+    ideas_ok = (
+        int(IDEA_REVIEW_DAYS) == 90
+        and int(ideas.get("review_days") or 0) == 90
+        and bool(ideas.get("auto_promote") is False)
+    )
+
+    quarterly = quarterly_rebaseline_status(root) or {}
+    quarterly_ok = (
+        bool(quarterly.get("fee_floors_locked") is True)
+        and "has_quarterly" in quarterly
+    )
+
+    e9 = {}
+    try:
+        e9 = hillclimb_e9_week_board(root) or {}
+    except Exception:
+        e9 = {}
+    e9_ok = True  # optional densify board — presence not required for infra
+
+    r_sports = _finite(DAILY_R_BUDGET.get("sports-gap"))
+    r_cmd = _finite(DAILY_R_BUDGET.get("commodity-15m"))
+    r_ok = (
+        r_sports is not None and abs(float(r_sports) - 1.5) < 1e-9
+        and r_cmd is not None and abs(float(r_cmd) - 2.0) < 1e-9
+    )
+    floors_ok = bool((fee_floors_locked_check() or {}).get("ok"))
+    live_off = bool(LIVE_ORDERS_ENABLED) is False
+
+    active_this_week = bool(lever_st.get("active_this_week"))
+    economic_pass = bool(active_this_week and discipline_ok)
+
+    gate_pass = (
+        allow_ok
+        and templates_ok
+        and discipline_ok
+        and lever_ok
+        and thrash_ok
+        and raise_ok
+        and kill_ok
+        and sunday_ok
+        and ideas_ok
+        and quarterly_ok
+        and e9_ok
+        and r_ok
+        and floors_ok
+        and live_off
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "auto_apply": False,
+        "auto_revert": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "force_arm": False,
+        "invent_fills": False,
+        "places_orders": False,
+        "parallel_levers": False,
+        "midweek_thrash": False,
+        "phase": "P11",
+        "pass": gate_pass,
+        "economic_pass": economic_pass,
+        "steady_state": True,
+        "locks": dict(PHASE11_HILLCLIMB_LOCKS),
+        "allowlist": {
+            "pass": allow_ok,
+            "levers": list(required),
+            "none_lever": HILLCLIMB_NONE_LEVER,
+            "raise_only": ["venue_min_edge_btc", "min_cushion_btc"],
+        },
+        "templates": {
+            "pass": templates_ok,
+            "auto_apply": False,
+            "writes_venue_params": False,
+        },
+        "discipline": {
+            "pass": discipline_ok,
+            "ok": discipline.get("ok"),
+            "single_entry": discipline.get("single_entry"),
+            "off_allowlist": discipline.get("off_allowlist"),
+            "lever": discipline.get("lever"),
+        },
+        "lever_process": {
+            "pass": lever_ok and thrash_ok and raise_ok,
+            "active_this_week": active_this_week,
+            "needs_staff_pick": bool(lever_st.get("needs_staff_pick")),
+            "thrash_blocked": thrash_ok,
+            "raise_only_blocks_soften": raise_ok,
+            "auto_revert": False,
+            "label": lever_st.get("label"),
+        },
+        "kill": {
+            "pass": kill_ok,
+            "kill": bool(kill.get("kill")),
+            "auto_revert": False,
+        },
+        "sunday_review": {
+            "pass": sunday_ok,
+            "reviewed": bool(sunday.get("reviewed")),
+            "week": sunday.get("week"),
+        },
+        "idea_review": {
+            "pass": ideas_ok,
+            "review_days": IDEA_REVIEW_DAYS,
+            "open_n": ideas.get("open_n"),
+            "stale_n": ideas.get("stale_n"),
+        },
+        "quarterly": {
+            "pass": quarterly_ok,
+            "has_quarterly": bool(quarterly.get("has_quarterly")),
+        },
+        "daily_r": {
+            "pass": r_ok,
+            "sports": r_sports,
+            "commodity": r_cmd,
+            "expected": {"sports-gap": 1.5, "commodity-15m": 2.0},
+        },
+        "economic": {
+            "active_this_week": active_this_week,
+            "discipline_ok": discipline_ok,
+            "steady_state": True,
+            "exit_gate": None,
+        },
+        "label": (
+            f"P11 hillclimb-gate {'PASS' if gate_pass else 'FAIL'} "
+            f"infra={gate_pass} economic={economic_pass} "
+            f"active_week={active_this_week} "
+            f"discipline={discipline_ok} "
+            f"thrash_blocked={thrash_ok} "
+            f"raise_only={raise_ok}"
+        ),
+        "note": (
+            "Phase 11 continuous hillclimb gate — one allowlisted lever/week; "
+            "raise-only floors; Sunday review; kill→staff demote; idea 90d; "
+            "quarterly W rebaseline. Exit gate is None (steady state). "
+            "economic_pass = active lever this Chicago week (ops). "
+            "Never softens floors; never arms LIVE_ORDERS; never auto-picks "
+            "or auto-reverts params; never parallel conflicting levers."
+        ),
+        "decision": (
+            "phase11_hillclimb_gate_pass"
+            if gate_pass
+            else "phase11_hillclimb_gate_fail"
+        ),
+    }
+
+
 def _exit_kind(text: str | None) -> str:
     t = str(text or "").lower()
     if "scale" in t:
@@ -15103,6 +15393,7 @@ def plan_summary(
         "phase7_portfolio": phase7_portfolio_gate(root, bots=bots, cfg=cfg),
         "phase8_helpers": phase8_helpers_gate(root, bots=bots),
         "phase10_ruin": phase10_ruin_gate(root, bots=bots),
+        "phase11_hillclimb": phase11_hillclimb_gate(root, bots=bots),
         "weekly_scorecard": latest_weekly_scorecard(root),
         "graduation": graduation_board(root, bots=bots),
         # Prefer live bots whenever provided (#488 profit_lock twin).
