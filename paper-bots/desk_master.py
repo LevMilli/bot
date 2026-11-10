@@ -668,6 +668,14 @@ def master_summary(
         except Exception:
             plan["exit_plans"] = None
         try:
+            plan["phase3_exits"] = desk_roi_plan.phase3_exit_gate(root, bots=bots)
+        except Exception:
+            plan["phase3_exits"] = None
+        try:
+            plan["exit_quality"] = desk_roi_plan.exit_quality_observe(root, bots=bots)
+        except Exception:
+            plan["exit_quality"] = None
+        try:
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")

@@ -1904,6 +1904,24 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Meme exit histogram | `meme_exit_histogram` |
 | Wired | `exit_quality_observe.exit_regret` · Masters `roi_plan.exit_regret` |
 
+### Phase 3 exit gate — COMPLETE
+
+| Ticket | Where |
+| --- | --- |
+| Formal exit-gate certifier | `desk_roi_plan.phase3_exit_gate` |
+| Settle-backstop waivers (explicit) | `PHASE3_SETTLE_BACKSTOP_WAIVERS` |
+| Intermediate exits required | fee-clear + loser towers (not bare settle-only) |
+| BTC TP honest + commodity flip live | `default_exit_plan` flags |
+| Sports HS + time-final shadow | code live flags stay staff-gated |
+| Coverage when opens exist | `exit_plan_coverage` |
+| Masters | `roi_plan.phase3_exits` + `roi_plan.exit_quality` |
+| CLI / Makefile | `make living-phase3-gate` · `staff_living_status phase3-gate` |
+| Money pulse | `phase3_exits` on `living-money-pulse` |
+| Tests | `test_phase3_exit_gate.py` |
+| Floors / LIVE | never softens floors; never arms `LIVE_ORDERS`; shadows stay staff-promote |
+
+Phase 3 exit quality is **COMPLETE** for paper observe. Remaining work is staff promote of shadows when n≥30 EV≥0 (ops, not new exit invent) and P4+ economic spine.
+
 ### ETH calib slice (Phase 4)
 
 | Ticket | Where |
