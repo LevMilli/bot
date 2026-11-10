@@ -694,6 +694,12 @@ def master_summary(
         except Exception:
             plan["phase5_throughput"] = None
         try:
+            plan["phase6_graduation"] = desk_roi_plan.phase6_graduation_gate(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["phase6_graduation"] = None
+        try:
             plan["exit_quality"] = desk_roi_plan.exit_quality_observe(root, bots=bots)
         except Exception:
             plan["exit_quality"] = None

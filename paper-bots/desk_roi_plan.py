@@ -7060,6 +7060,222 @@ def phase5_throughput_gate(
     }
 
 
+# Phase 6 Master graduation locks — 2 Chicago weeks M1–M7; never Master on
+# volume alone; meme pause/retire is staff-only; commodity stays 2.0R.
+PHASE6_GRADUATION_ORDER = (
+    "sports-gap",
+    "btc15m",
+    "commodity-15m",
+    "kalshi-sized",
+    "kalshi-sp",
+    "memecoin",
+)
+PHASE6_GRADUATION_LOCKS = {
+    "weeks_required": GRADUATION_WEEKS_REQUIRED,
+    "m_codes": tuple(GRADUATION_CODES),
+    "order": PHASE6_GRADUATION_ORDER,
+    "masters_exit_n": 3,
+    "meme_window_days": MEME_RETIRE_WINDOW_DAYS,
+    "meme_auto_retire": False,
+    "auto_promote": False,
+    "commodity_daily_r": 2.0,
+    "note": (
+        "Master = 2 consecutive Chicago weeks all M1–M7. Order: sports → BTC → "
+        "commodity → sized → S&P → meme. Exit ≥3 Masters; meme Master or "
+        "staff-paused via retirement clock. Never Master on volume alone "
+        "(thin_n denial). Never auto-promote / auto-retire."
+    ),
+}
+
+
+def phase6_graduation_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Phase 6 Master graduation exit gate (master plan).
+
+    Pass when infrastructure + locks are honest:
+      1. Graduation board: weeks_required=2, auto_promote=False, M1–M7 codes.
+      2. Capture path + tower Master checklist (desk_master M1–M7) exist.
+      3. thin_n denial prevents Master-on-volume-alone.
+      4. Badge fail-closed gates (fee_ledger / news / CLI bypass) wired.
+      5. Meme retirement clock: recommend_pause only; never auto-retire / expand.
+      6. Graduation order covers fee-clear + loser towers.
+      7. Commodity daily R locked at 2.0; floors locked; LIVE_ORDERS off.
+
+    Economic exit (≥3 Masters + meme Master|paused) reported separately —
+    empty/thin boards still pass the infrastructure gate (no invent fills).
+
+    Observe / certify only — never force-arms, staff-clears, or invents weeks.
+    """
+    board = graduation_board(root, bots=bots) or {}
+    weeks_req = int(board.get("weeks_required") or 0)
+    weeks_ok = weeks_req == int(GRADUATION_WEEKS_REQUIRED) == 2
+    auto_ok = bool(board.get("auto_promote") is False)
+    codes_ok = tuple(GRADUATION_CODES) == ("M1", "M2", "M3", "M4", "M5", "M6", "M7")
+    thin_denial_ok = "thin_n" in list(board.get("denial_code_enum") or [])
+    capture_ok = callable(capture_graduation_week)
+
+    # Tower Master checklist still exposes M1–M7 on desk_master rows.
+    m_row_ok = False
+    try:
+        import desk_master
+        import inspect
+        src = inspect.getsource(desk_master.tower_master_row)
+        m_row_ok = all(c in src for c in GRADUATION_CODES)
+    except Exception:
+        m_row_ok = False
+
+    gates = board.get("gates") if isinstance(board.get("gates"), dict) else (
+        graduation_gate_flags(root, bots=bots) or {}
+    )
+    gates_ok = (
+        isinstance(gates, dict)
+        and "fee_ledger_fail" in gates
+        and "news_fail_open" in gates
+        and "cli_bypass" in gates
+        and bool(gates.get("cli_bypass")) is False
+        and bool(LIVE_ORDERS_ENABLED) is False
+    )
+
+    order_ok = set(PHASE6_GRADUATION_ORDER) == set(FEE_CLEAR) | set(LOSER_IDS)
+
+    meme_bot = None
+    if isinstance(bots, list):
+        meme_bot = next(
+            (b for b in bots if isinstance(b, dict) and str(b.get("id") or "") == "memecoin"),
+            None,
+        )
+    meme = meme_retirement_clock(meme_bot)
+    meme_ok = (
+        isinstance(meme, dict)
+        and bool(meme.get("retired") is False)  # never auto-retire flag
+        and bool(meme.get("expand_volume") is False)
+        and int(meme.get("window_days") or 0) == int(MEME_RETIRE_WINDOW_DAYS)
+        and "auto" not in str(meme.get("action") or "").lower()
+    )
+
+    masters = list(board.get("masters") or [])
+    masters_n = int(board.get("masters_n") or len(masters) or 0)
+    meme_status = "not_ready"
+    meme_tower = (board.get("towers") or {}).get("memecoin") if isinstance(
+        board.get("towers"), dict
+    ) else None
+    if isinstance(meme_tower, dict) and meme_tower.get("status") == "master":
+        meme_status = "master"
+    elif bool(meme.get("recommend_pause")) or bool(meme.get("retired")):
+        meme_status = "paused"
+    elif str(meme.get("action") or "") in ("pause_entries", "retired"):
+        meme_status = "paused"
+    else:
+        meme_status = str(
+            (meme_tower or {}).get("status") or meme.get("action") or "measuring"
+        )
+
+    economic_pass = bool(masters_n >= 3 and meme_status in ("master", "paused"))
+
+    commodity_r = _finite((DAILY_R_BUDGET or {}).get("commodity-15m"))
+    r_ok = commodity_r is not None and abs(float(commodity_r) - 2.0) < 1e-9
+    floors_ok = bool((fee_floors_locked_check() or {}).get("ok"))
+
+    gate_pass = (
+        weeks_ok
+        and auto_ok
+        and codes_ok
+        and thin_denial_ok
+        and capture_ok
+        and m_row_ok
+        and gates_ok
+        and order_ok
+        and meme_ok
+        and r_ok
+        and floors_ok
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "force_arm": False,
+        "invent_fills": False,
+        "phase": "P6",
+        "pass": gate_pass,
+        "economic_pass": economic_pass,
+        "locks": dict(PHASE6_GRADUATION_LOCKS),
+        "graduation": {
+            "pass": weeks_ok and auto_ok and capture_ok and thin_denial_ok,
+            "weeks_required": weeks_req,
+            "weeks_n": board.get("weeks_n"),
+            "masters": masters,
+            "masters_n": masters_n,
+            "masters_exit_n": 3,
+            "masters_badged": board.get("masters_badged"),
+            "status_by_bot": {
+                bid: (board.get("towers") or {}).get(bid, {}).get("status")
+                for bid in PHASE6_GRADUATION_ORDER
+                if isinstance((board.get("towers") or {}).get(bid), dict)
+            },
+            "denial_code_enum": board.get("denial_code_enum"),
+            "auto_promote": False,
+        },
+        "m_codes": {
+            "pass": codes_ok and m_row_ok,
+            "codes": list(GRADUATION_CODES),
+            "tower_master_row": m_row_ok,
+        },
+        "badge_gates": {
+            "pass": gates_ok,
+            "fee_ledger_fail": bool(gates.get("fee_ledger_fail")),
+            "news_fail_open": bool(gates.get("news_fail_open")),
+            "cli_bypass": bool(gates.get("cli_bypass")),
+            "master_badge_fail_closed": bool(gates.get("master_badge_fail_closed")),
+            "badge_allowed": bool(gates.get("badge_allowed")),
+        },
+        "meme": {
+            "pass": meme_ok,
+            "status": meme_status,
+            "recommend_pause": bool(meme.get("recommend_pause")),
+            "retired": bool(meme.get("retired")),
+            "expand_volume": bool(meme.get("expand_volume")),
+            "window_days": meme.get("window_days"),
+            "n": meme.get("n"),
+            "expectancy_taxed": meme.get("expectancy_taxed"),
+            "action": meme.get("action"),
+            "auto_retire": False,
+        },
+        "order": {
+            "pass": order_ok,
+            "towers": list(PHASE6_GRADUATION_ORDER),
+        },
+        "daily_r": {
+            "pass": r_ok,
+            "commodity": commodity_r,
+            "expected_commodity": 2.0,
+        },
+        "label": (
+            f"P6 graduation-gate {'PASS' if gate_pass else 'FAIL'} "
+            f"infra={gate_pass} economic={economic_pass} "
+            f"masters={masters_n}/3 meme={meme_status} "
+            f"weeks={weeks_req} cmd_R={commodity_r}"
+        ),
+        "note": (
+            "Phase 6 Master graduation gate — 2 Chicago weeks M1–M7; thin_n "
+            "blocks volume-only Master; meme pause via retirement clock "
+            "(never auto-retire); exit ≥3 Masters + meme Master|paused is "
+            "economic_pass (ops). Never softens floors; never arms LIVE_ORDERS; "
+            "never invents fills/weeks; never force-arms or staff-clears."
+        ),
+        "decision": (
+            "phase6_graduation_gate_pass"
+            if gate_pass
+            else "phase6_graduation_gate_fail"
+        ),
+    }
+
+
 def _exit_kind(text: str | None) -> str:
     t = str(text or "").lower()
     if "scale" in t:
@@ -14085,6 +14301,7 @@ def plan_summary(
         "phase3_exits": phase3_exit_gate(root, bots=bots),
         "phase4_calib": phase4_calib_gate(root, bots=bots),
         "phase5_throughput": phase5_throughput_gate(root, bots=bots),
+        "phase6_graduation": phase6_graduation_gate(root, bots=bots),
         "weekly_scorecard": latest_weekly_scorecard(root),
         "graduation": graduation_board(root, bots=bots),
         # Prefer live bots whenever provided (#488 profit_lock twin).

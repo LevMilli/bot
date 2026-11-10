@@ -1989,6 +1989,25 @@ Phase 4 calibration & CLV is **COMPLETE** for paper observe. Live beat-close ≥
 
 Phase 5 selective throughput is **COMPLETE** for paper observe. Weekday buys ≥+25% vs W0 + taxed EV hold remain ops proof on the live board — do not invent fills or lower cushion/z/news to force volume.
 
+### Phase 6 Master graduation gate — COMPLETE
+
+| Ticket | Where |
+| --- | --- |
+| Formal graduation-gate certifier | `desk_roi_plan.phase6_graduation_gate` |
+| 2 Chicago weeks M1–M7 | `GRADUATION_WEEKS_REQUIRED=2` · `graduation_board` / `capture_graduation_week` |
+| Master checklist | `desk_master.tower_master_row` M1–M7 |
+| Volume-alone blocked | `thin_n` denial in `_graduation_denial_for_card` |
+| Badge fail-closed | `graduation_gate_flags` (fee_ledger / news / CLI bypass) |
+| Graduation order | sports → BTC → commodity → sized → S&P → meme |
+| Meme path | `meme_retirement_clock` — recommend pause; never auto-retire / expand |
+| Masters | `roi_plan.phase6_graduation` (+ existing `graduation` / `meme_retirement`) |
+| CLI / Makefile | `make living-phase6-gate` · `staff_living_status phase6-gate` |
+| Money pulse | `phase6_graduation` on `living-money-pulse` |
+| Tests | `test_phase6_graduation_gate.py` |
+| Floors / LIVE | never softens floors; never arms `LIVE_ORDERS`; never invents weeks; never force-arms |
+
+Phase 6 Master graduation is **COMPLETE** for paper observe. Economic exit (≥3 Masters + meme Master\|paused) is `economic_pass` on the gate — ops proof on the live board; do not invent graduation weeks or declare Master on volume alone.
+
 ### Bulk E3–E7 engineerable (Nov 7)
 
 | Ticket | Where |
