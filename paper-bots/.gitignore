@@ -58,6 +58,7 @@ desk_fee_ledger.json
 desk_shadow_tick_at.txt
 desk_shadow_catchup_at.txt
 desk_helper_fills.json
+desk_helper_advice_log.json
 desk_helper_promote.json
 desk_cold_harvest.json
 desk_hillclimb_lever.json

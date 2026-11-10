@@ -3262,7 +3262,7 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["living_memory_line"] = tl.get("memory_line")
         desk_row["fee_floors_assert"] = desk_living.fee_floors_assert(root)
         desk_row["betting_expand_gate"] = desk_living.betting_expand_gate(
-            root, remember=True,
+            root, bots=bots, remember=True,
         )
         # Snapshot path observes doctor without rewriting the weekly marker.
         desk_row["living_doctor"] = desk_living.living_doctor(root, record=False)

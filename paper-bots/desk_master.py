@@ -847,6 +847,16 @@ def master_summary(
         except Exception:
             plan["gate_a_pilot"] = None
         try:
+            plan["gate_a_pilot_sports_clv"] = desk_roi_plan.gate_a_pilot_sports_clv(root)
+            plan["gate_a_pilots"] = desk_roi_plan.gate_a_pilots_board(root)
+        except Exception:
+            plan["gate_a_pilot_sports_clv"] = None
+            plan["gate_a_pilots"] = None
+        try:
+            plan["helper_advice_log"] = desk_roi_plan.helper_advice_log_board(root)
+        except Exception:
+            plan["helper_advice_log"] = None
+        try:
             plan["eligible_fill_funnel"] = desk_roi_plan.eligible_fill_funnel(
                 root, bots=bots,
             )

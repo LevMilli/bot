@@ -556,14 +556,33 @@ class DeskLivingTests(unittest.TestCase):
                 self.assertTrue(
                     any("doctor_fresh=False" in str(p) for p in (masters.get("priority") or []))
                 )
-            # Fresh empty root → blocked until seed fills digests.
+            # Fresh empty root → blocked (swarm thin and/or no M1 Master).
             with tempfile.TemporaryDirectory() as empty:
                 thin = desk_living.betting_expand_gate(empty)
                 self.assertTrue(thin.get("blocked"))
                 seeded = desk_living.seed_missing_digests(empty)
                 fat = desk_living.betting_expand_gate(empty)
-                if seeded.get("after", {}).get("pass"):
-                    self.assertTrue(fat.get("allow_betting_expand"))
+                # Swarm seed alone is not enough — need firm M1≥0 + fee-clear Master (#881).
+                self.assertFalse(fat.get("m1_pass"))
+                self.assertFalse(fat.get("fee_clear_master"))
+                self.assertTrue(fat.get("blocked"))
+                self.assertFalse(fat.get("allow_betting_expand"))
+                green_bots = [
+                    {
+                        "id": "sports-gap",
+                        "history": [{"pnl": 1.0, "contracts": 1}] * 12,
+                    },
+                    {
+                        "id": "btc15m",
+                        "history": [{"pnl": 0.5, "contracts": 1}] * 12,
+                    },
+                ]
+                ready = desk_living.betting_expand_gate(empty, bots=green_bots)
+                if seeded.get("after", {}).get("pass") and ready.get("swarm_pass"):
+                    self.assertTrue(ready.get("m1_pass"))
+                    self.assertTrue(ready.get("fee_clear_master"))
+                    self.assertTrue(ready.get("allow_betting_expand"))
+                    self.assertFalse(ready.get("blocked"))
             with open(map_path, encoding="utf-8") as handle:
                 body = handle.read()
             self.assertIn("auto_publish", body)
