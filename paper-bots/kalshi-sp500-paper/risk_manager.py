@@ -5,7 +5,7 @@ Rules (Market_Context.md + Strategy.md):
   1. Skip news days: Fed decision, CPI, jobs report, GDP/PCE, election day and
      the day after, market holidays and half days  (dates in calendar.json).
   2. Max 1 trade per day (daily strategy).
-  3. Daily loss limit $50: once today's realised loss reaches $50, stop for the day.
+  3. Daily loss limit $25: once today's realised loss reaches $25, stop for the day.
   4. Kill switch: if the paper bankroll is at or below $400, halt everything
      until a human reviews it.
   5. Stake: floor($25 / ask) contracts, and never more than you can afford

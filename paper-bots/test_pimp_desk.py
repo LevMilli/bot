@@ -305,8 +305,8 @@ class PimpDeskTests(unittest.TestCase):
         scans = [s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "run"]
         settles = [s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "settle"]
         self.assertEqual(brief["at_ct"], "08:00")
-        self.assertEqual([s["at_ct"] for s in scans], ["12:05", "13:05", "13:40"])
-        self.assertEqual(scans[2]["until_ct"], "14:00")
+        self.assertEqual([s["at_ct"] for s in scans], ["12:00"])
+        self.assertEqual(scans[0]["until_ct"], "14:00")
         self.assertEqual([s["at_ct"] for s in settles], ["13:00", "16:00"])
         self.assertEqual(settles[0]["until_ct"], "15:55")
         self.assertEqual(pimp_desk.ACTIONS["kalshi-sp"]["brief"]["argv"], ("bot.py", "brief", "--dry-run"))
@@ -321,9 +321,8 @@ class PimpDeskTests(unittest.TestCase):
         self.assertIn("stop-bleed", text)
         self.assertIn("dual lanes", text)
         self.assertIn("8:00", text)
-        self.assertIn("12:05", text)
-        self.assertIn("13:05", text)
-        self.assertIn("13:40", text)
+        self.assertIn("12:00", text)
+        self.assertIn("14:00", text)
         self.assertNotIn("14:20", text)
         self.assertIn("dry run", text)
         self.assertNotIn("guarantee", text)
@@ -338,17 +337,17 @@ class PimpDeskTests(unittest.TestCase):
             night = dt.datetime(2026, 10, 30, 3, 0, tzinfo=pimp_desk.CT)
             saturday = dt.datetime(2026, 10, 31, 12, 10, tzinfo=pimp_desk.CT)
             self.assertIn(("kalshi-sp", "brief", "08:00"), names(morning))
-            self.assertNotIn(("kalshi-sp", "run", "12:05"), names(morning))
-            self.assertIn(("kalshi-sp", "run", "12:05"), names(noon))
-            self.assertIn(("kalshi-sp", "run", "13:05"), names(mid))
-            self.assertIn(("kalshi-sp", "run", "13:40"), names(third_slot))
+            self.assertNotIn(("kalshi-sp", "run", "12:00"), names(morning))
+            self.assertIn(("kalshi-sp", "run", "12:00"), names(noon))
+            self.assertIn(("kalshi-sp", "run", "12:00"), names(mid))
+            self.assertIn(("kalshi-sp", "run", "12:00"), names(third_slot))
             self.assertNotIn(("kalshi-sp", "brief", "08:00"), names(noon))
             self.assertIn(("memecoin", "run", None), names(noon))
-            self.assertNotIn(("kalshi-sp", "run", "12:05"), names(late))
+            self.assertNotIn(("kalshi-sp", "run", "12:00"), names(late))
             self.assertEqual([row[0] for row in names(night)],
                              ["sports-gap", "btc15m", "commodity-15m", "memecoin", "coinbase-spot", "btc-carry"])
             self.assertNotIn(("kalshi-sized", "settle", "13:00"), names(night))
-            self.assertIn(("kalshi-sp", "run", "12:05"), names(saturday))
+            self.assertIn(("kalshi-sp", "run", "12:00"), names(saturday))
             saturday_scan = dt.datetime(2026, 10, 31, 12, 35, tzinfo=pimp_desk.CT)
             self.assertIn(("kalshi-sized", "run", "12:05"), names(saturday_scan))
         snap = _checkout_snapshot()
@@ -1546,9 +1545,7 @@ class PimpDeskTests(unittest.TestCase):
             pimp_desk._atomic_write(
                 pimp_desk.auto_path(tmp),
                 json.dumps({
-                    "kalshi-sp:run:12:05": "2026-11-09",
-                    "kalshi-sp:run:13:05": "2026-11-09",
-                    "kalshi-sp:run:13:40": "2026-11-09",
+                    "kalshi-sp:run:12:00": "2026-11-09",
                 }) + "\n",
             )
             sp = pimp_desk._next_for("kalshi-sp", tmp, now)

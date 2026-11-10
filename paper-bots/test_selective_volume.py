@@ -39,7 +39,12 @@ class SelectiveVolumeTests(unittest.TestCase):
             cash_by_bot={"kalshi-sp": 444.37, "kalshi-sized": 500.0},
         )
         self.assertAlmostEqual(shares["memecoin"], desk_more.MEME_RED_SHARE)
-        self.assertAlmostEqual(shares["kalshi-sp"], desk_more.INX_LOSER_SHARE)
+        self.assertAlmostEqual(
+            shares["kalshi-sp"], desk_more.DEFAULT_TOWER_BUDGET_SHARE["kalshi-sp"]
+        )
+        self.assertAlmostEqual(
+            shares["kalshi-sized"], desk_more.DEFAULT_TOWER_BUDGET_SHARE["kalshi-sized"]
+        )
         self.assertAlmostEqual(shares["sports-gap"], desk_more.SPORTS_RED_SHARE)
         self.assertGreater(shares["btc15m"], desk_more.DEFAULT_TOWER_BUDGET_SHARE["btc15m"])
         self.assertGreater(

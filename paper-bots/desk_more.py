@@ -868,8 +868,10 @@ def effective_tower_shares(
     if meme is not None and meme <= -lock:
         cut_total += _cut_share(shares, "memecoin", float(MEME_RED_SHARE))
         exclude.add("memecoin")
-    # INX drawdown: shrink both S&P twins, feed fee-clear towers.
-    for inx_id in ("kalshi-sp", "kalshi-sized"):
+    # Sized twin still shrinks under the soft $460 cash bar.
+    # Kalshi S&P keeps its full tower share: staff cleared the soft halt so a
+    # fee-clear ticket can print. The $460 number, kill, and fee floor stay stone.
+    for inx_id in ("kalshi-sized",):
         cash = cash_map.get(inx_id)
         if cash is not None and cash <= float(INX_DRAWDOWN_CASH):
             cut_total += _cut_share(shares, inx_id, float(INX_LOSER_SHARE))
@@ -1707,8 +1709,15 @@ def self_check() -> None:
         {"tower_risk_budgets": dict(DEFAULT_TOWER_BUDGET_SHARE)},
         cash_by_bot={"kalshi-sp": 444.0, "kalshi-sized": 500.0},
     )
-    assert abs(inx_shares["kalshi-sp"] - INX_LOSER_SHARE) < 1e-9
-    assert inx_shares["btc15m"] > DEFAULT_TOWER_BUDGET_SHARE["btc15m"]
+    assert abs(inx_shares["kalshi-sp"] - DEFAULT_TOWER_BUDGET_SHARE["kalshi-sp"]) < 1e-9
+    assert abs(inx_shares["kalshi-sized"] - DEFAULT_TOWER_BUDGET_SHARE["kalshi-sized"]) < 1e-9
+    sized_cut = effective_tower_shares(
+        {"tower_risk_budgets": dict(DEFAULT_TOWER_BUDGET_SHARE)},
+        cash_by_bot={"kalshi-sp": 444.0, "kalshi-sized": 444.0},
+    )
+    assert abs(sized_cut["kalshi-sp"] - DEFAULT_TOWER_BUDGET_SHARE["kalshi-sp"]) < 1e-9
+    assert abs(sized_cut["kalshi-sized"] - INX_LOSER_SHARE) < 1e-9
+    assert sized_cut["btc15m"] > DEFAULT_TOWER_BUDGET_SHARE["btc15m"]
     assert selective_max_buys("btc15m", base=3, today=1.0) == 4
     assert selective_max_buys("btc15m", base=3, today=-1.0) == 3
     assert selective_max_buys("memecoin", base=2, today=5.0) == 2

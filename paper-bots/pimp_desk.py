@@ -248,11 +248,11 @@ ACTIONS = {
 # One automatic pass. Intervals are seconds. Clock times are America/Chicago.
 # Daily clock slots: INX run windows retry on NO TRADE (see _remember) so fair/band
 # can clear later in-window — max 1 fill/day stays stone in the bots. The Kalshi
-# scan uses the desk's paper scan (no --any-time). Forced S&P scans at
-# 12:05 / 13:05 / 13:40 CT (up to 3/day) — third slot ends by 14:00 so it still
-# clears the stone 60m late-σ entry floor before 15:00 settle (old 14:20 slot was
-# always refuse). Morning brief stays dry run. Settle polls flip/exit; 4 PM lands
-# closed paper. Memecoin manages exits ~3m (still scans; dual lanes; stop-bleed).
+# scan uses the desk's paper scan (no --any-time). S&P stays open the whole legal
+# session, 12:00–14:00 CT, so a fee-clear book is not missed between short slots.
+# The window ends at 14:00 so it still clears the stone 60m late-σ floor before
+# 15:00 settle (old 14:20 slot was always refuse). Morning brief stays dry run.
+# Settle polls flip/exit; 4 PM lands closed paper. Memecoin manages exits ~3m.
 AUTO_RETRY_SEC = 900
 AUTO = (
     # Faster sports polls so tip-soon + dual lanes can land multiple fills.
@@ -271,11 +271,9 @@ AUTO = (
     # FedWatch→Kalshi relative value. Shadow + idea-bank. Floor stays econ 0.05.
     {"id": "fed-watch", "action": "run", "every_sec": 300},
     {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "11:59"},
-    # Forced INX scan slots (plan E1 #123) — up to 3 fee-aware scans / Chicago day.
-    # Third window ends ≤14:00 CT so late-σ 60m floor can still clear (15:00 settle).
-    {"id": "kalshi-sp", "action": "run", "at_ct": "12:05", "until_ct": "12:25"},
-    {"id": "kalshi-sp", "action": "run", "at_ct": "13:05", "until_ct": "13:25"},
-    {"id": "kalshi-sp", "action": "run", "at_ct": "13:40", "until_ct": "14:00"},
+    # Full legal session. Retries on NO TRADE. Max 1 fill/day stays in the bot.
+    # Ends 14:00 CT so the 60m late-σ floor can still clear before 15:00 settle.
+    {"id": "kalshi-sp", "action": "run", "at_ct": "12:00", "until_ct": "14:00"},
     # Model-flip / settle polls before 15:00 CT binary settle (mirror sized).
     {"id": "kalshi-sp", "action": "settle", "at_ct": "13:00", "until_ct": "15:55"},
     {"id": "kalshi-sp", "action": "settle", "at_ct": "16:00", "until_ct": "23:30"},
@@ -450,8 +448,8 @@ BOT_PLANS = {
     },
     "kalshi-sp": {
         "buy": [
-            "Up to 3 scans/day 12:00–14:55 CT",
-            "Safest YES/NO ask in the 80–92¢ band; venue kalshi_inx edge",
+            "Scan open 12:00–14:00 CT; retries on no-trade; does not force a fill",
+            "YES/NO ask in the 80–92¢ band only when Φ fair clears venue kalshi_inx",
             "Stake floor($25 / ask); correlation + learning clear",
             "Adapt layer still logs vol/performance for desk study",
             "Pre-FOMC calm after 12:00 CT day before; post-print +30m on macro days",
@@ -463,9 +461,9 @@ BOT_PLANS = {
         "failsafes": [
             "Desk entry_gate on scan (not settle/brief)",
             "Weekend + news/holiday calendar",
-            "Max 3 trades/day; bot daily loss −$50",
-            "Kill switch bankroll ≤ $400; paper_mode required",
-            "Correlation veto + starve; pause file",
+            "Max 1 trade/day; bot daily loss −$25",
+            "Kill switch bankroll ≤ $400; soft $460 halt staff-cleared; paper_mode required",
+            "Correlation veto + learning skip; pause file",
         ],
         "exit_quality": "partial",
         "entry_gated": True,
@@ -549,7 +547,7 @@ BOT_PLANS = {
     },
     "kalshi-sized": {
         "buy": [
-            "KXINXU 3 PM CT; S&P forced scans 12:05 / 13:05 / 13:40 CT; sized window retries on NO TRADE",
+            "KXINXU 3 PM CT; S&P scan open 12:00–14:00 CT; sized window retries on NO TRADE",
             "Ask band 80–92¢; order-book confirm",
             "Desk Kelly-lite stake (not fixed $25); venue kalshi_inx edge",
             "Anti-double vs kalshi-sp same ticker; residual edge ≥ venue + 1¢",
@@ -3674,7 +3672,7 @@ def timer_text() -> str:
         "and syncs the Kalshi public trade tape for desk series. "
         "Commodity 15m about every 90 seconds. "
         "Kalshi morning brief once at 8:00 AM, dry run. "
-        "Kalshi paper scans forced at 12:05, 13:05, and 13:40 CT (up to 3/day). "
+        "Kalshi S&P paper scan open 12:00–14:00 CT (retries on no-trade; max 1 fill). "
         "Kalshi paper settle once at 4:00 PM. "
         "Coinbase spot shadow about every 5 minutes (public candles, no desk cash). "
         "BTC carry shadow about every 5 minutes (public funding archive, no desk cash). "
