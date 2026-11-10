@@ -9,6 +9,7 @@ const AUTO_LEARN_KEY = 'apex-city-auto-learn-v1'
 type StaffNotes = Record<string, string>
 type Tab = 'floor' | 'history' | 'learn'
 type FloorFilter = 'all' | 'trading' | 'research' | 'open' | 'paused'
+type HistoryLoad = '60' | '100' | '200' | 'all'
 
 type HistRow = {
   key: string
@@ -108,6 +109,7 @@ export function BossDashboard({ bots, desk, roi, snap, onClose, onFocusBot }: Pr
   const [autoLearn, setAutoLearn] = useState(true)
   const [tab, setTab] = useState<Tab>('floor')
   const [historyBot, setHistoryBot] = useState('all')
+  const [historyLoad, setHistoryLoad] = useState<HistoryLoad>('60')
   const [floorFilter, setFloorFilter] = useState<FloorFilter>('all')
 
   useEffect(() => {
@@ -163,11 +165,11 @@ export function BossDashboard({ bots, desk, roi, snap, onClose, onFocusBot }: Pr
     return allHistory.filter((row) => row.botId === historyBot)
   }, [allHistory, historyBot])
 
-  const historyCap = historyBot === 'all' ? 60 : 24
+  const historyCap = historyLoad === 'all' ? history.length : Number(historyLoad)
   const historyShown = history.slice(0, historyCap)
-  const historyNet = history.reduce((sum, row) => sum + (row.pnl || 0), 0)
-  const historyWins = history.filter((row) => (row.pnl ?? 0) > 0).length
-  const historyLosses = history.filter((row) => (row.pnl ?? 0) < 0).length
+  const historyNet = historyShown.reduce((sum, row) => sum + (row.pnl || 0), 0)
+  const historyWins = historyShown.filter((row) => (row.pnl ?? 0) > 0).length
+  const historyLosses = historyShown.filter((row) => (row.pnl ?? 0) < 0).length
   const historyName =
     historyBot === 'all' ? 'All towers' : bots.find((bot) => bot.id === historyBot)?.name || historyBot
 
@@ -403,6 +405,19 @@ export function BossDashboard({ bots, desk, roi, snap, onClose, onFocusBot }: Pr
                   ))}
                 </select>
               </label>
+              <label>
+                Loaded
+                <select
+                  aria-label="Trades loaded"
+                  value={historyLoad}
+                  onChange={(e) => setHistoryLoad(e.target.value as HistoryLoad)}
+                >
+                  <option value="60">60</option>
+                  <option value="100">100</option>
+                  <option value="200">200</option>
+                  <option value="all">All</option>
+                </select>
+              </label>
             </div>
             {!history.length ? (
               <p className="boss-muted">No closed paper settles for this filter.</p>
@@ -422,9 +437,8 @@ export function BossDashboard({ bots, desk, roi, snap, onClose, onFocusBot }: Pr
               </ul>
             )}
             <p className="boss-muted">
-              {history.length} settles · net {money(historyNet, true)} · {historyWins} won ·{' '}
-              {historyLosses} lost
-              {history.length > historyShown.length ? ` · showing latest ${historyShown.length}` : ''}
+              Loaded {historyShown.length} of {history.length} · net {money(historyNet, true)} ·{' '}
+              {historyWins} won · {historyLosses} lost
               {' · '}
               Desk today {money(desk?.today, true)} · open risk {money(desk?.open_risk)} ·{' '}
               {desk?.status_line || snap?.banner || 'paper desk'}
