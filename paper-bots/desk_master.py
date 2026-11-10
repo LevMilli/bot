@@ -634,6 +634,11 @@ def master_summary(
             plan["hillclimb_e9_week"] = None
             plan["hillclimb_broadcast"] = None
         try:
+            import desk_roi_e9_chaos
+            plan["chaos_drills"] = desk_roi_e9_chaos.chaos_drill_board(root)
+        except Exception:
+            plan["chaos_drills"] = None
+        try:
             plan["dual_control"] = desk_roi_plan.dual_control_status(root)
         except Exception:
             plan["dual_control"] = None
