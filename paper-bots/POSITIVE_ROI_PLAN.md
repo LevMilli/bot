@@ -2234,6 +2234,8 @@ Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers/chi
 
 ### Next
 
+Formal spine **P3–P11 COMPLETE** (observe gates). Prefer-1 invent densify **EXHAUSTED** on tip after #550/#551 (ruin `gate_lock` + manage-when-gated `DESK_BLOCK_REASON`). Soft-max tip invent stays EXHAUSTED. **P9 LIVE stays blocked.**
+
 | Ticket | Where |
 | --- | --- |
 | Staff pick hillclimb lever this Chicago week | TC-151 process — Sunday review then `make living-hillclimb-pick HILLCLIMB_LEVER=…` (or NONE) |
@@ -2241,6 +2243,7 @@ Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers/chi
 | Distance milestone week closes | #987–1000 — record taxed M1 / bleed / eligible fills each Chicago week; never invent |
 | Dual-control / LIVE_ORDERS (deferred) | observe scaffolding shipped; live arm still staff-gated off |
 | E9 staff/LIVE path | deferred — paper green + staff first |
+| Prefer-1 invent densify | **EXHAUSTED** — reopen only if invent reappears; no soft observe / tip invent |
 
 ### INX research no-force path
 
