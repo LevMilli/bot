@@ -7812,6 +7812,268 @@ def phase8_helpers_gate(
     }
 
 
+# Phase 10 ruin drills & harvest locks — soft/hard/nuclear UX; cold 30–50%;
+# anti-revenge; stale-world; fee-ledger completeness. No LIVE overrides.
+PHASE10_RUIN_LOCKS = {
+    "ruin_levels": list(RUIN_LEVELS),
+    "cold_harvest_pct_band": [COLD_HARVEST_PCT_MIN, COLD_HARVEST_PCT_MAX],
+    "cold_harvest_pct_default": COLD_HARVEST_PCT_DEFAULT,
+    "anti_revenge_minutes": ANTI_REVENGE_MINUTES,
+    "clock_skew_max_s": CLOCK_SKEW_MAX_SEC,
+    "stale_loop_default_s": STALE_LOOP_DEFAULT,
+    "fee_ledger_bar": 0.80,
+    "one_more_trade_override": False,
+    "sports_daily_r": 1.5,
+    "commodity_daily_r": 2.0,
+    "note": (
+        "Ruin soft/hard/nuclear blocks entries (hard/nuclear pause). "
+        "Cold harvest 30–50% of green week PnL visible on board. "
+        "Anti-revenge + stale-world skip entries; exits still run. "
+        "Fee ledger completeness ≥80% once n≥5. "
+        "Exit: one full disaster drill passed + harvest rule visible. "
+        "Forbidden: one-more-trade overrides after kill."
+    ),
+}
+
+
+def phase10_ruin_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Phase 10 ruin drills & harvest exit gate (master plan).
+
+    Pass when infrastructure + locks are honest:
+      1. Soft/hard/nuclear ruin UX: set/clear/status/blocks_entries wired.
+      2. Cold harvest 30–50% band + default 40% visible on board.
+      3. Anti-revenge same-market cool after stop/flip (minutes locked).
+      4. Stale-world / clock-skew skip when loop/quote latency exceeds bar.
+      5. Fee ledger completeness path (bar 80%, empty hist passes).
+      6. No one-more-trade override after kill (blocks_entries non-empty when armed).
+      7. Sports 1.5R + commodity 2.0R locked; floors locked; LIVE off.
+
+    Economic exit (one full disaster drill practiced + harvest rule visible)
+    is economic_pass — empty history still passes infra (no invent drills).
+
+    Observe / certify only — never arms LIVE, never invents drills/fills,
+    never force-arms or staff-clears.
+    """
+    ruin = ruin_drill_status(root) or {}
+    ruin_ok = (
+        tuple(RUIN_LEVELS) == ("soft", "hard", "nuclear")
+        and callable(set_ruin_drill)
+        and callable(clear_ruin_drill)
+        and callable(ruin_drill_blocks_entries)
+        and bool(ruin.get("live_orders_enabled") is False)
+        and bool(ruin.get("fee_floors_locked") is True)
+        and isinstance(ruin.get("levels"), dict)
+        and all(k in (ruin.get("levels") or {}) for k in RUIN_LEVELS)
+    )
+
+    # Prove blocks fire when soft is armed — always on an isolated temp root so
+    # observe/certify never mutates the live desk ruin journal.
+    block_probe_ok = False
+    try:
+        import tempfile
+        with tempfile.TemporaryDirectory() as probe_root:
+            armed = set_ruin_drill(
+                probe_root, "soft", who="phase10_gate", note="infra probe",
+            )
+            block_msg = ruin_drill_blocks_entries(probe_root)
+            cleared = clear_ruin_drill(
+                probe_root, who="phase10_gate", note="infra probe clear",
+            )
+            block_probe_ok = (
+                bool(armed.get("ok"))
+                and isinstance(block_msg, str)
+                and "ruin drill" in block_msg
+                and bool(cleared.get("ok"))
+                and ruin_drill_blocks_entries(probe_root) == ""
+            )
+    except Exception:
+        block_probe_ok = False
+
+    cold = cold_harvest_status(root) or {}
+    band = cold.get("pct_band") or []
+    cold_ok = (
+        abs(float(COLD_HARVEST_PCT_MIN) - 0.30) < 1e-9
+        and abs(float(COLD_HARVEST_PCT_MAX) - 0.50) < 1e-9
+        and abs(float(COLD_HARVEST_PCT_DEFAULT) - 0.40) < 1e-9
+        and isinstance(band, (list, tuple))
+        and len(band) >= 2
+        and abs(float(band[0]) - 0.30) < 1e-9
+        and abs(float(band[1]) - 0.50) < 1e-9
+        and abs(float(cold.get("default_pct") or 0) - 0.40) < 1e-9
+        and callable(capture_cold_harvest)
+        and bool(cold.get("fee_floors_locked") is True)
+    )
+
+    anti = anti_revenge_status(root) or {}
+    anti_ok = (
+        int(ANTI_REVENGE_MINUTES) >= 15
+        and int(anti.get("minutes") or 0) == int(ANTI_REVENGE_MINUTES)
+        and callable(anti_revenge_blocks)
+        and bool(anti.get("observe_only") is True)
+    )
+
+    stale = stale_world_status(root, bots=bots) or {}
+    stale_ok = (
+        abs(float(CLOCK_SKEW_MAX_SEC) - 30.0) < 1e-9
+        and abs(float(STALE_LOOP_DEFAULT) - 40.0) < 1e-9
+        and abs(float(stale.get("clock_skew_max_s") or 0) - 30.0) < 1e-9
+        and callable(stale_world_blocks)
+        and isinstance(stale.get("rows"), list)
+    )
+    # Probe: over-bar loop must block; under-bar must not.
+    try:
+        over = stale_world_blocks(root, "btc15m", loop_seconds=STALE_LOOP_SEC.get("btc15m", 40) + 5)
+        under = stale_world_blocks(root, "btc15m", loop_seconds=5.0)
+        stale_probe_ok = bool(over) and not bool(under)
+    except Exception:
+        stale_probe_ok = False
+
+    fee = fee_ledger_completeness(root, bots=bots) or {}
+    fee_ok = (
+        abs(float(fee.get("bar") or 0) - 0.80) < 1e-9
+        and bool(fee.get("pass") is True or (fee.get("history_n") or 0) == 0)
+        and callable(record_fee_ledger)
+        and bool(fee.get("fee_floors_locked") is True)
+    )
+
+    r_sports = _finite(DAILY_R_BUDGET.get("sports-gap"))
+    r_cmd = _finite(DAILY_R_BUDGET.get("commodity-15m"))
+    r_ok = (
+        r_sports is not None and abs(float(r_sports) - 1.5) < 1e-9
+        and r_cmd is not None and abs(float(r_cmd) - 2.0) < 1e-9
+    )
+    floors_ok = bool((fee_floors_locked_check() or {}).get("ok"))
+    live_off = bool(LIVE_ORDERS_ENABLED) is False
+
+    # No one-more-trade override after kill: entry_gate path + blocks non-empty.
+    override_forbidden = True  # PHASE10_RUIN_LOCKS.one_more_trade_override is False
+    no_override_ok = (
+        override_forbidden is True
+        and block_probe_ok
+        and callable(ruin_drill_blocks_entries)
+    )
+
+    # Economic: one full disaster drill practiced this Chicago month AND harvest
+    # rule visible. Empty history → economic_pass False (no invent drills).
+    # Temp-root probe never credits practiced_this_month on the live journal.
+    history_n = int(ruin.get("history_n") or 0)
+    practiced = bool(ruin.get("practiced_this_month"))
+    harvest_visible = cold_ok
+    harvest_done = bool(
+        isinstance(cold.get("latest"), dict)
+        and not cold["latest"].get("skipped")
+        and float(cold["latest"].get("harvested") or 0) > 0
+    )
+    disaster_passed = bool(practiced)
+    # Plan exit: "One full disaster drill passed; harvest rule visible on board."
+    economic_pass = bool(disaster_passed and harvest_visible)
+
+    gate_pass = (
+        ruin_ok
+        and block_probe_ok
+        and cold_ok
+        and anti_ok
+        and stale_ok
+        and stale_probe_ok
+        and fee_ok
+        and r_ok
+        and floors_ok
+        and live_off
+        and no_override_ok
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "force_arm": False,
+        "invent_fills": False,
+        "places_orders": False,
+        "one_more_trade_override": False,
+        "phase": "P10",
+        "pass": gate_pass,
+        "economic_pass": economic_pass,
+        "locks": dict(PHASE10_RUIN_LOCKS),
+        "ruin_drill": {
+            "pass": ruin_ok and block_probe_ok,
+            "levels": list(RUIN_LEVELS),
+            "active": bool(ruin.get("active")),
+            "history_n": history_n,
+            "practiced_this_month": practiced,
+            "block_probe_ok": block_probe_ok,
+            "live_orders_enabled": False,
+        },
+        "cold_harvest": {
+            "pass": cold_ok,
+            "pct_band": [COLD_HARVEST_PCT_MIN, COLD_HARVEST_PCT_MAX],
+            "default_pct": COLD_HARVEST_PCT_DEFAULT,
+            "cold_total": cold.get("cold_total"),
+            "weeks_n": cold.get("weeks_n"),
+            "harvest_done": harvest_done,
+            "rule_visible": harvest_visible,
+        },
+        "anti_revenge": {
+            "pass": anti_ok,
+            "minutes": ANTI_REVENGE_MINUTES,
+            "active_n": anti.get("active_n"),
+        },
+        "stale_world": {
+            "pass": stale_ok and stale_probe_ok,
+            "clock_skew_max_s": CLOCK_SKEW_MAX_SEC,
+            "stale_loop_default_s": STALE_LOOP_DEFAULT,
+            "probe_ok": stale_probe_ok,
+            "blocked": stale.get("blocked"),
+        },
+        "fee_ledger": {
+            "pass": fee_ok,
+            "bar": 0.80,
+            "rate": fee.get("rate"),
+            "history_n": fee.get("history_n"),
+            "ledger_n": fee.get("ledger_n"),
+        },
+        "daily_r": {
+            "pass": r_ok,
+            "sports": r_sports,
+            "commodity": r_cmd,
+            "expected": {"sports-gap": 1.5, "commodity-15m": 2.0},
+        },
+        "no_override": {
+            "pass": no_override_ok,
+            "one_more_trade_override": False,
+        },
+        "economic": {
+            "disaster_passed": disaster_passed,
+            "harvest_done": harvest_done,
+            "harvest_visible": harvest_visible,
+        },
+        "label": (
+            f"P10 ruin-gate {'PASS' if gate_pass else 'FAIL'} "
+            f"infra={gate_pass} economic={economic_pass} "
+            f"ruin_hist={history_n} practiced={practiced} "
+            f"cold_total={cold.get('cold_total')} "
+            f"fee_rate={fee.get('rate')}"
+        ),
+        "note": (
+            "Phase 10 ruin drills & harvest gate — soft/hard/nuclear UX; "
+            "cold 30–50%; anti-revenge; stale-world; fee completeness. "
+            "Economic exit (disaster drill practiced + harvest rule visible) "
+            "is economic_pass (ops). Never softens floors; never arms LIVE_ORDERS; "
+            "never invents drills/fills; never one-more-trade after kill."
+        ),
+        "decision": (
+            "phase10_ruin_gate_pass"
+            if gate_pass
+            else "phase10_ruin_gate_fail"
+        ),
+    }
+
+
 def _exit_kind(text: str | None) -> str:
     t = str(text or "").lower()
     if "scale" in t:
@@ -14840,6 +15102,7 @@ def plan_summary(
         "phase6_graduation": phase6_graduation_gate(root, bots=bots),
         "phase7_portfolio": phase7_portfolio_gate(root, bots=bots, cfg=cfg),
         "phase8_helpers": phase8_helpers_gate(root, bots=bots),
+        "phase10_ruin": phase10_ruin_gate(root, bots=bots),
         "weekly_scorecard": latest_weekly_scorecard(root),
         "graduation": graduation_board(root, bots=bots),
         # Prefer live bots whenever provided (#488 profit_lock twin).

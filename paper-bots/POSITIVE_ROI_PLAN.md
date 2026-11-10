@@ -2048,6 +2048,26 @@ Phase 7 firm portfolio is **COMPLETE** for paper observe. Economic exit (firm M1
 
 Phase 8 helper evidence is **COMPLETE** for paper observe. Economic exit (≥1 helper-proven promote **or** documented reject) is `economic_pass` — ops proof on the live board; do not invent helper fills or force-arm thin Gate A.
 
+### Phase 10 ruin drills & harvest gate — COMPLETE
+
+| Ticket | Where |
+| --- | --- |
+| Formal ruin-gate certifier | `desk_roi_plan.phase10_ruin_gate` |
+| Soft / hard / nuclear UX | `set_ruin_drill` / `clear_ruin_drill` / `ruin_drill_blocks_entries` |
+| Cold harvest 30–50% | `capture_cold_harvest` · `cold_harvest_status` (default 40%) |
+| Anti-revenge | `anti_revenge_status` / `anti_revenge_blocks` (30m) |
+| Stale-world / clock skew | `stale_world_status` / `stale_world_blocks` (loop bar + 30s skew) |
+| Fee ledger completeness | `fee_ledger_completeness` (bar ≥80% once n≥5) |
+| No one-more-trade | entry blocks while drill active; `one_more_trade_override=False` |
+| Daily R locks | sports **1.5R** · commodity **2.0R ($40)** |
+| Masters | `roi_plan.phase10_ruin` (+ ruin_drill / cold_harvest / stale_world) |
+| CLI / Makefile | `make living-phase10-gate` · `staff_living_status phase10-gate` |
+| Money pulse | `phase10_ruin` on `living-money-pulse` |
+| Tests | `test_phase10_ruin_gate.py` |
+| Floors / LIVE | never softens floors; never arms `LIVE_ORDERS`; never invents drills/fills; never one-more-trade after kill |
+
+Phase 10 ruin drills & harvest is **COMPLETE** for paper observe. Economic exit (one full disaster drill practiced this Chicago month + harvest rule visible) is `economic_pass` — ops proof on the live board; do not invent drills or force harvest on red weeks. **P9 LIVE stays blocked.**
+
 ### Bulk E3–E7 engineerable (Nov 7)
 
 | Ticket | Where |
