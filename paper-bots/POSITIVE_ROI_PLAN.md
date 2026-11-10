@@ -2161,13 +2161,44 @@ Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers/chi
 | One-lever / allowlist discipline | `hillclimb_one_lever_discipline` (#930/#931) |
 | Combined board | `hillclimb_e9_week_board` · Masters `roi_plan.hillclimb_e9_week` |
 
+### E9 chaos drills (#968–979) — shipped
+
+| Ticket | Where |
+| --- | --- |
+| Fail-closed drill pack | `desk_roi_e9_chaos.run_chaos_drill_pack` · `make living-chaos-drills` |
+| Masters observe | `roi_plan.chaos_drills` |
+| Covers | timer dead · calendar CDN · EIA · open-risk queue · meme −$5 · INX $460 · sports −$10 · profit-lock 0.5× · daily R (commodity **2.0R**) · hillclimb kill · ruin nuclear · floors never soften |
+| Never | LIVE · force-arm · auto lever · invent fills · soften floors |
+
+### E9 doctrine + distance milestones (#951–954, #981–986) — shipped
+
+| Ticket | Where |
+| --- | --- |
+| Combined board | `desk_roi_e9_doctrine.doctrine_distance_board` · `make living-doctrine-distance` |
+| Masters observe | `roi_plan.doctrine_distance` |
+| Milestones | −$225 → −$150 → −$75 → $0 → +$25 — celebrate **earned** crosses only |
+| Doctrine cards | bots earn the print · insight first · fresher quotes · fee-clear fills · make-more stack |
+| E9 exit card | ritual · ≤1 lever/week · dual-control locked · climbing to $0 earned |
+| Never | tip chips · invent PnL · spreadsheet edits · soften floors |
+
+### E9 docs / training closeout (#955–967)
+
+| Ticket | Where |
+| --- | --- |
+| Next section stays observe/hillclimb-truthful | this file · `### Next` below |
+| Thousand-step shipped-vs-open | store `docs/thousand-step-make-money-plan.md` (monthly checklist) |
+| Campus cosmetics when money conflicts | campus plan never overrides fee floors / LIVE off |
+| BUY/SELL inventory sync | `BUY_SELL_FAILSAFE_INVENTORY.md` — floors 0.06/0.05/0.02; no exit/fee invent |
+| Day-one training | `STAFF_DAY_ONE.md` — E0 oaths · quiet≠broken · eligible≠all fills |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
 | Staff pick hillclimb lever this Chicago week | TC-151 process — Sunday review then `make living-hillclimb-pick HILLCLIMB_LEVER=…` (or NONE) |
+| Promote evidence catch-up (tape) | hard-stop / INX / edge08 / green_boost / helper Gate A / t-stop / t-final — wait n≥30 EV≥0; prefer `*-promote-ready` (no force-arm) |
+| Distance milestone week closes | #987–1000 — record taxed M1 / bleed / eligible fills each Chicago week; never invent |
 | Dual-control / LIVE_ORDERS (deferred) | observe scaffolding shipped; live arm still staff-gated off |
-| Force-armed evidence catch-up (deferred) | hard-stop / near-miss / INX n bars — prefer `*-promote-ready` |
 | E9 staff/LIVE path | deferred — paper green + staff first |
 
 ### INX research no-force path

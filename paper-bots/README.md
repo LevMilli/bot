@@ -134,7 +134,7 @@ make living-export
 make living-test
 ```
 
-Staff map: `LIVING_UPGRADE.md`. Plan tickets: `POSITIVE_ROI_PLAN.md`.
+Staff map: `LIVING_UPGRADE.md`. Plan tickets: `POSITIVE_ROI_PLAN.md`. Day-one oaths: `STAFF_DAY_ONE.md`.
 
 ## Notes
 - All times are shown in US Central (CT) or UTC as labeled.
