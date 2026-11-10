@@ -712,6 +712,12 @@ def master_summary(
         except Exception:
             plan["phase8_helpers"] = None
         try:
+            plan["phase10_ruin"] = desk_roi_plan.phase10_ruin_gate(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["phase10_ruin"] = None
+        try:
             plan["exit_quality"] = desk_roi_plan.exit_quality_observe(root, bots=bots)
         except Exception:
             plan["exit_quality"] = None
