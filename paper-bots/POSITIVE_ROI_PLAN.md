@@ -1904,6 +1904,24 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Meme exit histogram | `meme_exit_histogram` |
 | Wired | `exit_quality_observe.exit_regret` · Masters `roi_plan.exit_regret` |
 
+### Phase 3 exit gate — COMPLETE
+
+| Ticket | Where |
+| --- | --- |
+| Formal exit-gate certifier | `desk_roi_plan.phase3_exit_gate` |
+| Settle-backstop waivers (explicit) | `PHASE3_SETTLE_BACKSTOP_WAIVERS` |
+| Intermediate exits required | fee-clear + loser towers (not bare settle-only) |
+| BTC TP honest + commodity flip live | `default_exit_plan` flags |
+| Sports HS + time-final shadow | code live flags stay staff-gated |
+| Coverage when opens exist | `exit_plan_coverage` |
+| Masters | `roi_plan.phase3_exits` + `roi_plan.exit_quality` |
+| CLI / Makefile | `make living-phase3-gate` · `staff_living_status phase3-gate` |
+| Money pulse | `phase3_exits` on `living-money-pulse` |
+| Tests | `test_phase3_exit_gate.py` |
+| Floors / LIVE | never softens floors; never arms `LIVE_ORDERS`; shadows stay staff-promote |
+
+Phase 3 exit quality is **COMPLETE** for paper observe. Remaining work is staff promote of shadows when n≥30 EV≥0 (ops, not new exit invent) and P4+ economic spine.
+
 ### ETH calib slice (Phase 4)
 
 | Ticket | Where |
@@ -1932,6 +1950,144 @@ Code default `SPORTS_HARD_STOP_LIVE` stays False. Fee floors stay 0.06 / 0.05 / 
 | Sports / BTC | already passed side+hour; **record** now stamps `side` |
 | INX twins / meme | `learning_skip(..., side, hour_ct)` + record `side` |
 | Fallback | classic market × bucket when fine sample thin |
+
+### Phase 4 calib/CLV gate — COMPLETE
+
+| Ticket | Where |
+| --- | --- |
+| Formal calib-gate certifier | `desk_roi_plan.phase4_calib_gate` |
+| Sports CLV journal + 52% bar | `clv_completeness` · `SPORTS_CLV_BAR=0.52` (when n≥20) |
+| Per-league CLV board | `desk_more.clv_by_league` (NFL…NHL) |
+| INX band lock | live `80_90` + `PHASE4_INX_BAND_LOCK`; thin → keep_live_band |
+| Dual-side INX pick | `desk_inx.dual_side_pick` (fee-aware residual/ask) |
+| BTC/ETH/sports/commodity calib | reports publish; `auto_write_phi=False` |
+| Learn v2 + adverse cool + depth=10 | `learning_skip(side,hour_ct)` · `adverse_cool_blocks` · `DEFAULT_DEPTH_NEED` |
+| Masters | `roi_plan.phase4_calib` + `roi_plan.calib_clv` |
+| CLI / Makefile | `make living-phase4-gate` · `staff_living_status phase4-gate` |
+| Money pulse | `phase4_calib` on `living-money-pulse` |
+| Tests | `test_phase4_calib_gate.py` |
+| Floors / LIVE / Φ | never softens floors; never arms `LIVE_ORDERS`; never auto-writes Φ |
+
+Phase 4 calibration & CLV is **COMPLETE** for paper observe. Live beat-close ≥52% and INX research promote remain ops (need board n); do not invent evidence or change bands/floors to force a pretty backtest.
+
+### Phase 5 selective throughput gate — COMPLETE
+
+| Ticket | Where |
+| --- | --- |
+| Formal throughput-gate certifier | `desk_roi_plan.phase5_throughput_gate` |
+| Selective +1 green-only | `desk_more.selective_max_buys` (fee-clear; red never boosts) |
+| Sports green_boost lock | default 0 until 2w M1≥0 + CLV≥52%; `auto_promote=False` |
+| Near-miss promote lock | n≥30 labeled EV≥0; code `NEAR_MISS_LIVE=False`; no thin force-arm |
+| Firm queue + tip funnel + skip-regret | `rebuild_firm_queue` · `tip_funnel_board` · `skip_regret_candidates` |
+| Empty CARD &lt;3s + opp-cost | `empty_card_status` · `opp_cost_summary` |
+| Commodity daily R | locked **2.0R ($40)** via `DAILY_R_BUDGET` |
+| Masters | `roi_plan.phase5_throughput` + `roi_plan.selective_throughput` |
+| CLI / Makefile | `make living-phase5-gate` · `staff_living_status phase5-gate` |
+| Money pulse | `phase5_throughput` on `living-money-pulse` |
+| Tests | `test_phase5_throughput_gate.py` |
+| Floors / LIVE | never softens floors; never arms `LIVE_ORDERS`; never invents fills; never force-arms or staff-clears |
+
+Phase 5 selective throughput is **COMPLETE** for paper observe. Weekday buys ≥+25% vs W0 + taxed EV hold remain ops proof on the live board — do not invent fills or lower cushion/z/news to force volume.
+
+### Phase 6 Master graduation gate — COMPLETE
+
+| Ticket | Where |
+| --- | --- |
+| Formal graduation-gate certifier | `desk_roi_plan.phase6_graduation_gate` |
+| 2 Chicago weeks M1–M7 | `GRADUATION_WEEKS_REQUIRED=2` · `graduation_board` / `capture_graduation_week` |
+| Master checklist | `desk_master.tower_master_row` M1–M7 |
+| Volume-alone blocked | `thin_n` denial in `_graduation_denial_for_card` |
+| Badge fail-closed | `graduation_gate_flags` (fee_ledger / news / CLI bypass) |
+| Graduation order | sports → BTC → commodity → sized → S&P → meme |
+| Meme path | `meme_retirement_clock` — recommend pause; never auto-retire / expand |
+| Masters | `roi_plan.phase6_graduation` (+ existing `graduation` / `meme_retirement`) |
+| CLI / Makefile | `make living-phase6-gate` · `staff_living_status phase6-gate` |
+| Money pulse | `phase6_graduation` on `living-money-pulse` |
+| Tests | `test_phase6_graduation_gate.py` |
+| Floors / LIVE | never softens floors; never arms `LIVE_ORDERS`; never invents weeks; never force-arms |
+
+Phase 6 Master graduation is **COMPLETE** for paper observe. Economic exit (≥3 Masters + meme Master\|paused) is `economic_pass` on the gate — ops proof on the live board; do not invent graduation weeks or declare Master on volume alone.
+
+### Phase 7 firm portfolio gate — COMPLETE
+
+| Ticket | Where |
+| --- | --- |
+| Formal portfolio-gate certifier | `desk_roi_plan.phase7_portfolio_gate` |
+| Correlation veto / haircut | `desk_profit.correlation_matrix` — BTC↔INX hard veto; WTI↔Brent 0.5×; meme isolated |
+| Daily R budgets | sports 1.5R / BTC+commodity **2.0R** · `daily_r_blocks` |
+| Profit-lock harvest | `$40` → `0.5×` size · `profit_lock_status` |
+| Incubation lane | n≥50 fee-aware settles · `incubation_board` (`auto_promote=False`) |
+| Meme retirement path | `meme_retirement_clock` — pause recommend; never auto-retire / expand |
+| Barbell + green-or-gone | meme ≤15% desk / fee-clear ≥70% open · `green_or_gone_status` |
+| Masters | `roi_plan.phase7_portfolio` (+ correlation / capital_os / profit_lock / …) |
+| CLI / Makefile | `make living-phase7-gate` · `staff_living_status phase7-gate` |
+| Money pulse | `phase7_portfolio` on `living-money-pulse` |
+| Tests | `test_phase7_portfolio_gate.py` |
+| Floors / LIVE | never softens floors; never arms `LIVE_ORDERS`; never invents fills; never auto-transfers Kalshi→meme cash |
+
+Phase 7 firm portfolio is **COMPLETE** for paper observe. Economic exit (firm M1≥0 × 2 weeks with ≥3 active towers + retirement path tested) is `economic_pass` — ops proof on the live board.
+
+### Phase 8 helper evidence gate — COMPLETE
+
+| Ticket | Where |
+| --- | --- |
+| Formal helpers-gate certifier | `desk_roi_plan.phase8_helpers_gate` |
+| Helper Gate A | `helper_gate_a` / `helper_promote_status` — n≥20 taxed EV≥0; `auto_promote=False` |
+| Place-alone lock | `helper_may_place_alone` default False · `helper_autonomy_blocks` until Gate A + staff arm |
+| Insight exec lock | `insight_helpers_execution_lock` — no `paper_buy`/`paper_sell` / opens write |
+| Skip-regret twin | `skip_regret_candidates` · `staff_log_skip_regret_decision` — never auto-loosens |
+| Advice lift board | `helper_advice_lift_board` · Gate A path · observe only |
+| Gate A pilots | `gate_a_pilots_board` — btc/calendar + sports/clv; staff_arm=False |
+| ETH calib + ladder shadow | `eth_calibration_report` (no auto Φ) · `desk_phase3.LADDER_MIN_P=0.80` |
+| Daily R locks | sports **1.5R** · commodity **2.0R ($40)** |
+| Masters | `roi_plan.phase8_helpers` (+ helper_gate_a / skip_regret / advice boards) |
+| CLI / Makefile | `make living-phase8-gate` · `staff_living_status phase8-gate` |
+| Money pulse | `phase8_helpers` on `living-money-pulse` |
+| Tests | `test_phase8_helpers_gate.py` |
+| Floors / LIVE | never softens floors; never arms `LIVE_ORDERS`; never invents fills; never helper auto-buys |
+
+Phase 8 helper evidence is **COMPLETE** for paper observe. Economic exit (≥1 helper-proven promote **or** documented reject) is `economic_pass` — ops proof on the live board; do not invent helper fills or force-arm thin Gate A.
+
+### Phase 10 ruin drills & harvest gate — COMPLETE
+
+| Ticket | Where |
+| --- | --- |
+| Formal ruin-gate certifier | `desk_roi_plan.phase10_ruin_gate` |
+| Soft / hard / nuclear UX | `set_ruin_drill` / `clear_ruin_drill` / `ruin_drill_blocks_entries` |
+| Cold harvest 30–50% | `capture_cold_harvest` · `cold_harvest_status` (default 40%) |
+| Anti-revenge | `anti_revenge_status` / `anti_revenge_blocks` (30m) |
+| Stale-world / clock skew | `stale_world_status` / `stale_world_blocks` (loop bar + 30s skew) |
+| Fee ledger completeness | `fee_ledger_completeness` (bar ≥80% once n≥5) |
+| No one-more-trade | entry blocks while drill active; `one_more_trade_override=False` |
+| Daily R locks | sports **1.5R** · commodity **2.0R ($40)** |
+| Masters | `roi_plan.phase10_ruin` (+ ruin_drill / cold_harvest / stale_world) |
+| CLI / Makefile | `make living-phase10-gate` · `staff_living_status phase10-gate` |
+| Money pulse | `phase10_ruin` on `living-money-pulse` |
+| Tests | `test_phase10_ruin_gate.py` |
+| Floors / LIVE | never softens floors; never arms `LIVE_ORDERS`; never invents drills/fills; never one-more-trade after kill |
+
+Phase 10 ruin drills & harvest is **COMPLETE** for paper observe. Economic exit (one full disaster drill practiced this Chicago month + harvest rule visible) is `economic_pass` — ops proof on the live board; do not invent drills or force harvest on red weeks. **P9 LIVE stays blocked.**
+
+### Phase 11 continuous hillclimb gate — COMPLETE
+
+| Ticket | Where |
+| --- | --- |
+| Formal hillclimb-gate certifier | `desk_roi_plan.phase11_hillclimb_gate` |
+| Allowlist + NONE | `HILLCLIMB_ALLOWLIST` · `VOL_SAFE` / `HIT_FOR_BIG` / `venue_min_edge_btc` / `min_cushion_btc` / `kelly_fraction` |
+| Raise-only floors | `venue_min_edge_btc` · `min_cushion_btc` refuse soften |
+| One-lever discipline | `hillclimb_one_lever_discipline` · midweek thrash blocked |
+| Sunday review gate | `sunday_packet_review_status` (#901) before non-NONE pick |
+| Kill → staff demote | `hillclimb_kill_status` · `staff_hillclimb_kill_postmortem` (`auto_revert=False`) |
+| Idea review 90d | `idea_review_status` · `IDEA_REVIEW_DAYS=90` |
+| Quarterly W rebaseline | `quarterly_rebaseline_status` |
+| Daily R locks | sports **1.5R** · commodity **2.0R ($40)** |
+| Masters | `roi_plan.phase11_hillclimb` (+ hillclimb lever / kill / sunday) |
+| CLI / Makefile | `make living-phase11-gate` · `staff_living_status phase11-gate` |
+| Money pulse | `phase11_hillclimb` on `living-money-pulse` |
+| Tests | `test_phase11_hillclimb_gate.py` |
+| Floors / LIVE | never softens floors; never arms `LIVE_ORDERS`; never auto-picks / auto-reverts; never parallel levers |
+
+Phase 11 continuous hillclimb is **COMPLETE** for paper observe. Plan exit gate is **None** (forever steady state). `economic_pass` = active lever (or NONE) this Chicago week — ops forever. **P9 LIVE stays blocked.**
 
 ### Bulk E3–E7 engineerable (Nov 7)
 
@@ -2025,14 +2181,69 @@ Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers/chi
 
 **Still ops-only:** labeled_n→30 needs market fills over tick loops — code densifies record/label/durability/surfaces only.
 
-### Next
+### E9 hillclimb ritual + evidence templates (#901–923)
 
 | Ticket | Where |
 | --- | --- |
-| Staff pick hillclimb lever this Chicago week | TC-151 process — use evidence pack + `make living-hillclimb-pick HILLCLIMB_LEVER=…` |
+| Sunday packet review gate before non-NONE pick | `staff_mark_sunday_packet_reviewed` / `sunday_packet_review_status` · `make living-hillclimb-sunday-review` |
+| Evidence templates + success/kill + dry-run | `hillclimb_lever_evidence_templates` / `hillclimb_dry_run_board` · `make living-hillclimb-evidence` |
+| NONE lever (observation continues) | `staff_pick_hillclimb_lever(..., "NONE")` |
+| Pack surfaces | `hillclimb_pick_evidence_pack` includes sunday_review + templates |
+
+### E9 lever-week activate / broadcast / daily (#924–931)
+
+| Ticket | Where |
+| --- | --- |
+| Single-entry activation assert | `hillclimb_lever_activation_board` (#924) |
+| Masters broadcast soft_copy | `hillclimb_lever_masters_broadcast` · `make living-hillclimb-broadcast` (#925) |
+| Daily M1/M3/fills + week-2 kill | `hillclimb_lever_daily_check` · `make living-hillclimb-daily` (#926/#927) |
+| Kill postmortem + demote | `staff_hillclimb_kill_postmortem` · `make living-hillclimb-kill-postmortem` (#928) |
+| Win lock journal | `staff_hillclimb_lock_win` · `make living-hillclimb-lock-win` (#929) |
+| One-lever / allowlist discipline | `hillclimb_one_lever_discipline` (#930/#931) |
+| Combined board | `hillclimb_e9_week_board` · Masters `roi_plan.hillclimb_e9_week` |
+
+### E9 chaos drills (#968–979) — shipped
+
+| Ticket | Where |
+| --- | --- |
+| Fail-closed drill pack | `desk_roi_e9_chaos.run_chaos_drill_pack` · `make living-chaos-drills` |
+| Masters observe | `roi_plan.chaos_drills` |
+| Covers | timer dead · calendar CDN · EIA · open-risk queue · meme −$5 · INX $460 · sports −$10 · profit-lock 0.5× · daily R (commodity **2.0R**) · hillclimb kill · ruin nuclear · floors never soften |
+| Never | LIVE · force-arm · auto lever · invent fills · soften floors |
+
+### E9 doctrine + distance milestones (#951–954, #981–986) — shipped
+
+| Ticket | Where |
+| --- | --- |
+| Combined board | `desk_roi_e9_doctrine.doctrine_distance_board` · `make living-doctrine-distance` |
+| Masters observe | `roi_plan.doctrine_distance` |
+| Milestones | −$225 → −$150 → −$75 → $0 → +$25 — celebrate **earned** crosses only |
+| Doctrine cards | bots earn the print · insight first · fresher quotes · fee-clear fills · make-more stack |
+| E9 exit card | ritual · ≤1 lever/week · dual-control locked · climbing to $0 earned |
+| Never | tip chips · invent PnL · spreadsheet edits · soften floors |
+
+### E9 docs / training closeout (#955–967)
+
+| Ticket | Where |
+| --- | --- |
+| Next section stays observe/hillclimb-truthful | this file · `### Next` below |
+| Thousand-step shipped-vs-open | store `docs/thousand-step-make-money-plan.md` (monthly checklist) |
+| Campus cosmetics when money conflicts | campus plan never overrides fee floors / LIVE off |
+| BUY/SELL inventory sync | `BUY_SELL_FAILSAFE_INVENTORY.md` — floors 0.06/0.05/0.02; no exit/fee invent |
+| Day-one training | `STAFF_DAY_ONE.md` — E0 oaths · quiet≠broken · eligible≠all fills |
+
+### Next
+
+Formal spine **P3–P11 COMPLETE** (observe gates). Prefer-1 invent densify **EXHAUSTED** on tip after #550/#551 (ruin `gate_lock` + manage-when-gated `DESK_BLOCK_REASON`). Soft-max tip invent stays EXHAUSTED. **P9 LIVE stays blocked.**
+
+| Ticket | Where |
+| --- | --- |
+| Staff pick hillclimb lever this Chicago week | TC-151 process — Sunday review then `make living-hillclimb-pick HILLCLIMB_LEVER=…` (or NONE) |
+| Promote evidence catch-up (tape) | hard-stop / INX / edge08 / green_boost / helper Gate A / t-stop / t-final — wait n≥30 EV≥0; prefer `*-promote-ready` (no force-arm) |
+| Distance milestone week closes | #987–1000 — record taxed M1 / bleed / eligible fills each Chicago week; never invent |
 | Dual-control / LIVE_ORDERS (deferred) | observe scaffolding shipped; live arm still staff-gated off |
-| Force-armed evidence catch-up (deferred) | hard-stop / near-miss / INX n bars — prefer `*-promote-ready` |
-| E8–E9 staff/LIVE path | deferred — paper green + staff first |
+| E9 staff/LIVE path | deferred — paper green + staff first |
+| Prefer-1 invent densify | **EXHAUSTED** — reopen only if invent reappears; no soft observe / tip invent |
 
 ### INX research no-force path
 
@@ -2085,9 +2296,13 @@ Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers/chi
 | Opp-cost on BTC + commodity | `note_pending_high_edge` / `flush_opp_cost_on_buy` mirrors sports |
 | Helper advice schema | `helpers.advice_schema.validate_helper_advice` |
 | Incubation idea-bank only | `incubation_blocks_auto` weather/econ/Polymarket refuse main AUTO |
-| Gate A pilot densify | `gate_a_pilot_btc_calendar` (observe · no staff arm) |
+| Gate A pilot densify | `gate_a_pilot_btc_calendar` · `gate_a_pilot_sports_clv` (observe · no staff arm) |
+| Helper advice accept/reject log | `record_helper_advice_decision` / `helper_advice_log_board` (#897) |
+| Advice lift on taxed EV | `helper_advice_lift_board` (#898 Gate A path · observe) |
+| Insight helpers no-place lock | `insight_helpers_execution_lock` (#899/#900 — no opens / no paper_buy) |
+| Expand gate M1+Master | `betting_expand_gate` swarm≥3:1 + firm M1≥0 + fee-clear Master (#881) |
 | Eligible-fill + throughput vs M1 | `eligible_fill_funnel` / `throughput_vs_m1_board` |
-| Masters | `roi_plan.selective_kill` · `tip_funnel` · `gate_a_pilot` · `eligible_fill_funnel` · `throughput_vs_m1` |
+| Masters | `roi_plan.selective_kill` · `tip_funnel` · `gate_a_pilot` · `gate_a_pilots` · `helper_advice_log` · `helper_advice_lift` · `insight_helpers_execution_lock` · `eligible_fill_funnel` · `throughput_vs_m1` |
 
 ## Hard rules unchanged
 

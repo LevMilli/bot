@@ -244,3 +244,9 @@ Live Tower 5: KXINXU with desk **Kelly-lite** stake (84–92¢ band), model-flip
 | btc15m | **Yes** | Yes | No | Hardcoded 12 | Partial (real TP + model-flip + settle) |
 | memecoin | Yes | No ($25 flat) | Yes ($150 + −$5 lock) | 6 / red 1 | Strong |
 | kalshi-sized | Yes | Kelly-lite | Yes ($25) | 1/day | Partial (model-flip + settle) |
+
+---
+
+## Sync stamp (E9 docs closeout #964)
+
+Last re-sync after E9 chaos/doctrine observe packs (#540/#541). **No exit/fee change in that ship.** Venue floors still locked sports **0.06** / BTC+commodity **0.05** / INX+DEX **0.02** (chaos drill #979 asserts). LIVE off. Soft-max tip invent exhausted — inventory text only; no new tip chips.

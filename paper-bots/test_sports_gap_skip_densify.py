@@ -208,6 +208,127 @@ class SportsGapSkipDensify(unittest.TestCase):
         self.assertIn("tip_within_minutes", idle_fn)
         self.assertIn('state == "pre"', idle_fn)
 
+    def test_daily_r_settle_only_prepends_card_skip(self):
+        """#482 twin: sports daily-R must prepend so CARD beats earlier evaluate/cool skips."""
+        src = GAP.read_text(encoding="utf-8")
+        idx = src.find('daily_r_blocks("sports-gap"')
+        self.assertGreater(idx, 0)
+        chunk = src[idx:idx + 900]
+        self.assertIn('_densify_gate_skip(r_block, note="sports daily-r densify")', chunk)
+        # #482 leftover: brain densify at settle-only + refuse max-buys invent.
+        self.assertIn("sports daily-r densify", chunk)
+        self.assertIn("gate_lock", src)
+        gap = _load_gap()
+        card = gap._card_line({
+            "trades": [],
+            "skips": [
+                "daily R budget hit for sports-gap: today $30.00 ≥ 1.5R ($30) — settle-only",
+                "gap < 6 (accurate) - no trade",
+            ],
+            "live_games": 4,
+            "matched": 4,
+        })
+        self.assertIn("settle-only", card.lower())
+        self.assertNotIn("gap < 6", card)
+
+    def test_cool_stale_gate_densify_refuses_max_buys_invent(self):
+        """#519 leftover: cool/stale zeroing max_buys must not invent capacity skip."""
+        src = GAP.read_text(encoding="utf-8")
+        cool_idx = src.find('adverse_cool_blocks(DESK_ROOT, "sports-gap")')
+        self.assertGreater(cool_idx, 0)
+        gate_chunk = src[cool_idx:cool_idx + 3200]
+        self.assertIn("sports adverse-cool densify", gate_chunk)
+        self.assertIn("sports stale-world densify", gate_chunk)
+        self.assertIn("sports entry-gate densify", gate_chunk)
+        self.assertIn("_densify_gate_skip", gate_chunk)
+        self.assertIn("gate_lock", gate_chunk)
+        self.assertIn("adverse cool", gate_chunk)
+        self.assertIn("stale-world", gate_chunk)
+        self.assertIn("entry_gate", gate_chunk)
+        self.assertIn("ruin drill", gate_chunk)
+        self.assertIn("daily loss", gate_chunk)
+        # CARD prepend: cool/stale beat evaluate noise.
+        gap = _load_gap()
+        cool_card = gap._card_line({
+            "trades": [],
+            "skips": [
+                "adverse cool-off: sports-gap paused ~12m after 0.2 drop on ABC",
+                "gap < 6 (accurate) - no trade",
+            ],
+            "live_games": 4,
+            "matched": 4,
+        })
+        self.assertIn("adverse cool", cool_card.lower())
+        self.assertNotIn("gap < 6", cool_card)
+        stale_card = gap._card_line({
+            "trades": [],
+            "skips": [
+                "stale-world: last loop 90.0s > 60s bar (sports-gap); skip new entries",
+                "gap < 6 (accurate) - no trade",
+            ],
+            "live_games": 4,
+            "matched": 4,
+        })
+        self.assertIn("stale-world", stale_card.lower())
+        self.assertNotIn("gap < 6", stale_card)
+
+    def test_daily_r_settle_only_classifies_budget_not_other(self):
+        """Settle-only skip taxonomy is BUDGET (fee-clear profit lock), not DATA/other."""
+        import desk_more
+        import desk_roi_plan
+
+        msg = desk_roi_plan.daily_r_blocks("sports-gap", 30.0)
+        self.assertIn("settle-only", msg.lower())
+        self.assertEqual(desk_more.classify_skip(msg), "budget")
+        self.assertEqual(desk_more.stable_skip_code("budget"), "BUDGET")
+
+    def test_entry_gate_card_densify_beats_gap_noise(self):
+        """#531 twin: sports entry_gate / daily-loss must densify CARD ahead of gap noise."""
+        gap = _load_gap()
+        card = gap._card_line({
+            "trades": [],
+            "skips": [
+                "Daily loss stop is hit ($150.00 against $150.00).",
+                "gap < 6 (accurate) - no trade",
+            ],
+            "live_games": 3,
+            "matched": 3,
+        })
+        self.assertIn("daily loss", card.lower())
+        self.assertNotIn("gap < 6", card)
+
+    def test_cool_stale_classify_not_capacity_other(self):
+        """Cool→LEARN and stale→DATA so fee-clear zero-buy taxonomy stays honest."""
+        import desk_more
+
+        cool = "adverse cool-off: sports-gap paused ~12m after 0.2 drop on ABC"
+        stale = "stale-world: last loop 90.0s > 60s bar (sports-gap); skip new entries"
+        skew = "clock-skew: source offset 120s > 90s; skip new entries"
+        self.assertEqual(desk_more.classify_skip(cool), "learning")
+        self.assertEqual(desk_more.stable_skip_code("learning"), "LEARN")
+        self.assertEqual(desk_more.classify_skip(stale), "data")
+        self.assertEqual(desk_more.classify_skip(skew), "data")
+        self.assertEqual(desk_more.stable_skip_code("data"), "DATA")
+        # Capacity invent remains other — not the gate truth code.
+        self.assertEqual(
+            desk_more.classify_skip("max buys this check (0)"),
+            "other",
+        )
+
+    def test_ruin_drill_gate_lock_refuses_max_buys_invent(self):
+        """Post-#549 Prefer-1: ruin entry densify must gate_lock capacity invent."""
+        src = GAP.read_text(encoding="utf-8")
+        max_idx = src.find("if buys_this_check >= max_buys_eff:")
+        self.assertGreater(max_idx, 0)
+        chunk = src[max_idx:max_idx + 1200]
+        self.assertIn("gate_lock", chunk)
+        self.assertIn('"ruin drill"', chunk)
+        import desk_more
+        ruin = "ruin drill soft: new entries off. Settles/exits still run under soft."
+        self.assertEqual(desk_more.classify_skip(ruin), "entry_gate")
+        # entry_gate stable chip is BUDGET (desk_more map) — not capacity OTHER/DATA.
+        self.assertEqual(desk_more.stable_skip_code("entry_gate"), "BUDGET")
+
 
 if __name__ == "__main__":
     unittest.main()

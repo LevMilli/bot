@@ -49,7 +49,8 @@ class PlanSliceE0E1Tests(unittest.TestCase):
 
     def test_inx_forced_slots(self):
         slots = [s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "run"]
-        self.assertEqual([s["at_ct"] for s in slots], ["12:05", "13:05", "14:20"])
+        self.assertEqual([s["at_ct"] for s in slots], ["12:05", "13:05", "13:40"])
+        self.assertEqual(slots[2]["until_ct"], "14:00")
         morning = datetime(2026, 11, 2, 9, 0, tzinfo=CT)
         self.assertIn("12:05", pimp_desk.next_inx_scan_line("kalshi-sp", morning))
 
@@ -61,6 +62,22 @@ class PlanSliceE0E1Tests(unittest.TestCase):
         spec.loader.exec_module(mod)
         self.assertEqual(mod.SCALE_OUT_FAIR_MOVE, 0.08)
         self.assertEqual(mod.SCALE_OUT_FRAC, 0.50)
+
+    def test_sports_scale_out_densifies_closed_and_phase2(self):
+        """Partial scale-out must stamp closed[] clip + remember_scale_out."""
+        path = os.path.join(ROOT, "sports-gap-paper", "gap_bot.py")
+        with open(path, encoding="utf-8") as fh:
+            src = fh.read()
+        densify = src.find("Densify clip into closed[]")
+        self.assertGreater(densify, 0)
+        end = src.find("exit_reason = f\"scale-out +{SCALE_OUT_FAIR_MOVE", densify)
+        chunk = src[densify:end if end > densify else densify + 4000]
+        self.assertIn('s.setdefault("closed", []).append(clip_row)', chunk)
+        self.assertIn('"scale_out_clip": True', chunk)
+        self.assertIn('"exit_price": round(float(bid), 4)', chunk)
+        self.assertIn("desk_phase2.remember_scale_out", chunk)
+        # Runner stays open — still.append after densify.
+        self.assertIn("still.append(p)", chunk)
 
     def test_doctor_traceback_and_card(self):
         with tempfile.TemporaryDirectory() as tmp:

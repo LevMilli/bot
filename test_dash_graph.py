@@ -49,6 +49,29 @@ class DashGraphTests(unittest.TestCase):
             "🚀 Biggest hit: +$10 · Not Lelouch · Over 20.5"))
         self.assertFalse(bot.dashboard_hidden_line("📕 Closed week: this week"))
 
+    def test_app_icon_png_is_square(self):
+        raw = bot.app_icon_png(64)
+        self.assertTrue(raw.startswith(b"\x89PNG"))
+        splash = bot.app_splash_jpeg()
+        self.assertTrue(splash.startswith(b"\xff\xd8"))
+        body = bot.dash_manifest_body()
+        self.assertIn("/pimp-mark-512.png", body)
+        self.assertIn("/pimp-mark-180.png", bot.PWA_HEAD)
+        self.assertIn("pb-shell-156", bot.SW_JS)
+        self.assertIn("/pimp-mark-180.png", bot.DASHBOARD_HTML_V4)
+        from PIL import Image, ImageChops, ImageStat
+        import io
+        icon = Image.open(io.BytesIO(raw)).convert("RGB")
+        self.assertEqual(icon.size, (64, 64))
+        poster = Image.open(bot._dash_brand_path("splash.jpg")).convert("RGB").resize((64, 64))
+        diff = sum(ImageStat.Stat(ImageChops.difference(icon, poster)).mean) / 3
+        self.assertLess(diff, 8)
+        self.assertTrue(bot.DASH_FAVICON.startswith("data:image/jpeg;base64,"))
+        self.assertIn(bot.DASH_FAVICON, bot.DASHBOARD_HTML_V4)
+        self.assertIn(bot.DASH_FAVICON, bot.STAFF_HTML)
+        self.assertIn("border-radius:14px", bot.STAFF_HTML)
+        self.assertNotIn("id=\"pbP\"", bot.DASHBOARD_HTML_V4)
+
     def test_group_stats_filter_matches_hidden_helper(self):
         rows = [{"name": "Lelouch"}, {"name": "LELOUCH"}, {"name": "Levi"}, {"name": "Not Lelouch"}]
         kept = [s["name"] for s in rows if not bot.dashboard_hidden_name(s.get("name"))]

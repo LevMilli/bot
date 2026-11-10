@@ -265,7 +265,7 @@ function HallCosmetics() {
     return out
   }, [])
   const fanXs = [5, 11, 17, 23, 29]
-  const sconceXs = [3.2, 7.4, 11.6, 15.8, 20, 24.2, 28.4]
+  const sconceXs = [3.2, 7.4, 11.6, 15.8, 20, 24.2, 28.4, 32.6, 36.8]
 
   return (
     <group>
@@ -382,7 +382,8 @@ function HallCosmetics() {
       {(() => {
         const pad = 0.35
         const minX = WING_HALL.xMin - pad
-        const maxX = 35.2 + ROOM_HALF_W + pad
+        const bossX = rooms.reduce((max, room) => Math.max(max, room.position[0]), 35.2)
+        const maxX = bossX + ROOM_HALF_W + pad
         const minZ = -ROOM_HALF_D - ROOM_HALF_W - pad
         const maxZ = ROOM_HALF_D + ROOM_HALF_W + pad
         const midX = (minX + maxX) / 2
@@ -567,8 +568,8 @@ function HallCosmetics() {
         </mesh>
       </group>
       <ExitSign position={[WING_HALL.xMax - 0.8, 2.95, 0]} />
-      <PottedPlant position={[29.2, 0, -1.05]} />
-      <PottedPlant position={[29.2, 0, 1.05]} />
+      <PottedPlant position={[33.6, 0, -1.05]} />
+      <PottedPlant position={[33.6, 0, 1.05]} />
       <HallBench position={[22.5, 0, -1.05]} />
       <HallBench position={[22.5, 0, 1.05]} rotationY={Math.PI} />
     </group>

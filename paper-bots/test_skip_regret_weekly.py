@@ -64,6 +64,30 @@ class MasterWire(unittest.TestCase):
             self.assertIn("skip_regret_candidates", plan)
             self.assertIn("skip_regret_decisions", plan)
 
+    def test_master_skip_regret_prefers_live_journal_over_stale(self):
+        """Same-day stale skip-regret card must not lag new labels (#494 twin)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            for i in range(5):
+                desk_top25.record_skip_regret(
+                    tmp, bot="sports-gap", ticker=f"M{i}", soft_gate="z", would_pnl=0.5,
+                )
+            desk_roi_plan.skip_regret_weekly_card(tmp, label="2026-11-09")
+            stale = desk_roi_plan.latest_skip_regret_weekly(tmp) or {}
+            self.assertEqual(int(stale.get("labeled_n") or 0), 5)
+            self.assertFalse(stale.get("green_twin"))
+            for i in range(5, 22):
+                desk_top25.record_skip_regret(
+                    tmp, bot="sports-gap", ticker=f"M{i}", soft_gate="z", would_pnl=0.5,
+                )
+            summary = desk_master.master_summary(
+                tmp,
+                bots=[{"id": "sports-gap", "open_risk": 0, "history": [], "gate_a": {}}],
+                cfg={"max_open_risk": 100},
+            )
+            card = (summary.get("roi_plan") or {}).get("skip_regret_weekly") or {}
+            self.assertEqual(int(card.get("labeled_n") or 0), 22)
+            self.assertTrue(card.get("green_twin"))
+
 
 class SkipRegretStaffPath(unittest.TestCase):
     def test_candidates_filter_fee_gates(self):

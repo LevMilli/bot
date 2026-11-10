@@ -24,6 +24,8 @@ LOCKED_FEE_FLOORS = {
     "kalshi_inx": 0.02,
     "solana_dex": 0.02,
     "coinbase_spot": 0.05,
+    "binance_btc_carry": 0.02,
+    "kalshi_econ": 0.05,
 }
 
 SPEED_KPI_NAME = "desk_speed_kpi.json"

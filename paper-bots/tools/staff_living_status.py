@@ -1723,12 +1723,16 @@ def main() -> int:
             "edge08-status", "edge08-promote", "edge08-promote-ready",
             "edge08-export", "green-boost-export",
             "helper-gate-a", "helper-arm", "helper-backfill",
+            "gate-a-pilots", "gate-a-pilot-sports-clv",
+            "helper-advice-log", "helper-advice-lift",
+            "helper-advice-accept", "helper-advice-reject",
+            "insight-helpers-lock",
             "clv-repair", "clv-completeness",
             "shadow-catchup", "shadow-tick", "shadow-ops",
             "inx-research", "inx-status",
             "skip-regret", "skip-regret-accept", "skip-regret-defer",
             "firm-queue", "completions", "feature-store", "money-pulse",
-            "exit-quality", "promote-distance", "hillclimb-lever", "firm-health",
+            "exit-quality", "phase3-gate", "phase4-gate", "phase5-gate", "phase6-gate", "phase7-gate", "phase8-gate", "phase10-gate", "phase11-gate", "promote-distance", "hillclimb-lever", "firm-health",
             "bleed-week", "daily-r", "opp-cost", "profit-lock", "ops-observe",
             "incubation", "ruin-drill", "cold-harvest", "graduation", "btc-calib",
             "eth-calib",
@@ -1739,6 +1743,23 @@ def main() -> int:
             "eligible-funnel", "insight-ratio", "edge08-compare", "cadence-health",
             "raise-phi-log", "sports-calib", "commodity-calib",
             "baseline-fee", "baseline-capture", "fee-ledger",
+            "half-kelly-crb", "fee-sim", "dutch-book", "sharp-lag-harvest",
+            "fed-watch-harvest", "poly-arb", "cpi-nowcast", "vol-curve",
+            "vol-curve-harvest", "funding-twins", "macro-harvest",
+            "poly-arb-harvest", "line-shopper", "btc-basis-scout",
+            "nhl-poisson-audit", "dvol-regime",
+            "multi-ex-disagree", "funding-scout",
+            "metals-heat", "energy-heat",
+            "inx-band-occupancy",
+            "e8-digest-pack",
+            # E8 remaining pack kebab names (also via e8-digest-pack).
+            "inx-dual-ev-lab", "meme-rug-auditor", "meme-liq-cliff",
+            "opp-cost-clock", "fee-ledger-nag", "masters-canary",
+            "hillclimb-watchdog", "stale-skew-watchdog", "misplaced-publisher",
+            "selective-eligibility", "green-boost-readiness", "daily-r-clerk",
+            "profit-lock-clerk", "barbell-clerk", "corr-clerk",
+            "incubation-registrar", "shadow-edge08-clerk", "skip-regret-clerk",
+            "ruin-drill-proctor",
             "commodity-tstop-status", "commodity-tstop-promote",
             "commodity-tstop-promote-ready",
             "sports-tfinal-status", "sports-tfinal-promote",
@@ -1748,6 +1769,11 @@ def main() -> int:
             "firm-tower-m1", "m5-idle-budget", "distance-stance",
             # Staff SLA pack — observe / no-force; never tip invent; LIVE off.
             "hillclimb-pack", "hillclimb-pick", "hillclimb-pick-log",
+            "hillclimb-sunday-review", "hillclimb-dry-run", "hillclimb-evidence",
+            "hillclimb-e9-week", "hillclimb-daily", "hillclimb-broadcast",
+            "hillclimb-kill-postmortem", "hillclimb-lock-win", "hillclimb-discipline",
+            "chaos-drills",
+            "doctrine-distance",
             "promote-ready-pack", "staff-promote-batch-ready",
             "disarm-thin", "staff-disarm-thin",
             "dual-control-status", "dual-control-observe",
@@ -1759,7 +1785,12 @@ def main() -> int:
     parser.add_argument(
         "--helper",
         default="calendar_scanner",
-        help="Helper id for helper-arm (default calendar_scanner).",
+        help="Helper id for helper-arm / advice log (default calendar_scanner).",
+    )
+    parser.add_argument(
+        "--bot",
+        default="",
+        help="Bot id for helper-advice-accept/reject logs.",
     )
     parser.add_argument(
         "--soft",
@@ -3630,6 +3661,47 @@ def main() -> int:
         out = desk_roi_plan.helper_promote_status(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if not out.get("evidence_thin") else 2
+    if args.action == "gate-a-pilots":
+        out = desk_roi_plan.gate_a_pilots_board(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("any_ready") else 2
+    if args.action == "gate-a-pilot-sports-clv":
+        out = desk_roi_plan.gate_a_pilot_sports_clv(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ready") else 2
+    if args.action == "helper-advice-log":
+        out = desk_roi_plan.helper_advice_log_board(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "helper-advice-lift":
+        out = desk_roi_plan.helper_advice_lift_board(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if not out.get("evidence_thin") else 2
+    if args.action == "insight-helpers-lock":
+        out = desk_roi_plan.insight_helpers_execution_lock(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "helper-advice-accept":
+        out = desk_roi_plan.record_helper_advice_decision(
+            root,
+            helper=str(getattr(args, "helper", None) or "calendar_scanner"),
+            bot=str(getattr(args, "bot", None) or ""),
+            decision="accept",
+            reason=str(getattr(args, "note", None) or "staff accept"),
+            advice={"floors_locked": True, "ttl": 60},
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "helper-advice-reject":
+        out = desk_roi_plan.record_helper_advice_decision(
+            root,
+            helper=str(getattr(args, "helper", None) or "calendar_scanner"),
+            bot=str(getattr(args, "bot", None) or ""),
+            decision="reject",
+            reason=str(getattr(args, "note", None) or "staff reject"),
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
     if args.action == "helper-arm":
         # Arm only when Gate A ready — no force on money-path CLI (helpers stay gated).
         out = desk_roi_plan.staff_set_helper_autonomy(
@@ -3721,6 +3793,14 @@ def main() -> int:
             "edge08": desk_roi_plan.btc_edge08_shadow_status(root),
             "helper_gate_a": desk_roi_plan.helper_promote_status(root),
             "exit_quality": desk_roi_plan.exit_quality_observe(root, bots=None),
+            "phase3_exits": desk_roi_plan.phase3_exit_gate(root, bots=None),
+            "phase4_calib": desk_roi_plan.phase4_calib_gate(root, bots=None),
+            "phase5_throughput": desk_roi_plan.phase5_throughput_gate(root, bots=None),
+            "phase6_graduation": desk_roi_plan.phase6_graduation_gate(root, bots=None),
+            "phase7_portfolio": desk_roi_plan.phase7_portfolio_gate(root, bots=None),
+            "phase8_helpers": desk_roi_plan.phase8_helpers_gate(root, bots=None),
+            "phase10_ruin": desk_roi_plan.phase10_ruin_gate(root, bots=None),
+            "phase11_hillclimb": desk_roi_plan.phase11_hillclimb_gate(root, bots=None),
             "selective_throughput": desk_roi_plan.selective_throughput_observe(root),
             "promote_distance": desk_roi_plan.promote_distance_observe(root),
             "firm_health": desk_roi_plan.firm_health_observe(root),
@@ -3745,7 +3825,7 @@ def main() -> int:
             "capital_os": desk_roi_plan.capital_os_status(root),
             "note": (
                 "Money-path pulse — observe only (firm-queue / completions / "
-                "feature densify / exit-quality / selective after M1 / "
+                "feature densify / exit-quality / phase3-gate / phase4-gate / phase5-gate / phase6-gate / phase7-gate / phase8-gate / phase10-gate / phase11-gate / selective after M1 / "
                 "promote-distance / firm-health / ops / dual-control-observe / "
                 "guardrails / review / calib-clv / baseline-fee / fee_ledger / "
                 "graduation / observation-clock / "
@@ -3766,6 +3846,26 @@ def main() -> int:
                 cfg = None
             if isinstance(bots, list):
                 out["exit_quality"] = desk_roi_plan.exit_quality_observe(root, bots=bots)
+                out["phase3_exits"] = desk_roi_plan.phase3_exit_gate(root, bots=bots)
+                out["phase4_calib"] = desk_roi_plan.phase4_calib_gate(root, bots=bots)
+                out["phase5_throughput"] = desk_roi_plan.phase5_throughput_gate(
+                    root, bots=bots,
+                )
+                out["phase6_graduation"] = desk_roi_plan.phase6_graduation_gate(
+                    root, bots=bots,
+                )
+                out["phase7_portfolio"] = desk_roi_plan.phase7_portfolio_gate(
+                    root, bots=bots, cfg=cfg,
+                )
+                out["phase8_helpers"] = desk_roi_plan.phase8_helpers_gate(
+                    root, bots=bots,
+                )
+                out["phase10_ruin"] = desk_roi_plan.phase10_ruin_gate(
+                    root, bots=bots,
+                )
+                out["phase11_hillclimb"] = desk_roi_plan.phase11_hillclimb_gate(
+                    root, bots=bots,
+                )
                 out["selective_throughput"] = desk_roi_plan.selective_throughput_observe(
                     root, bots=bots,
                 )
@@ -3808,6 +3908,115 @@ def main() -> int:
         out = desk_roi_plan.exit_quality_observe(root, bots=bots)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
+    if args.action == "phase3-gate":
+        bots: list = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.phase3_exit_gate(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("pass") else 2
+    if args.action == "phase4-gate":
+        bots: list = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.phase4_calib_gate(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("pass") else 2
+    if args.action == "phase5-gate":
+        bots: list = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.phase5_throughput_gate(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("pass") else 2
+    if args.action == "phase6-gate":
+        bots: list = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.phase6_graduation_gate(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("pass") else 2
+    if args.action == "phase7-gate":
+        bots: list = []
+        cfg = None
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+            try:
+                cfg = pimp_desk.load_settings(root)
+            except Exception:
+                cfg = None
+        except Exception:
+            bots = []
+        out = desk_roi_plan.phase7_portfolio_gate(root, bots=bots, cfg=cfg)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("pass") else 2
+    if args.action == "phase8-gate":
+        bots: list = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.phase8_helpers_gate(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("pass") else 2
+    if args.action == "phase10-gate":
+        bots: list = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.phase10_ruin_gate(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("pass") else 2
+    if args.action == "phase11-gate":
+        bots: list = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.phase11_hillclimb_gate(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("pass") else 2
     if args.action == "promote-distance":
         bots = []
         try:
@@ -4308,6 +4517,185 @@ def main() -> int:
         )
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("baseline", {}).get("has_baseline") else 2
+    if args.action == "half-kelly-crb":
+        bots = []
+        cfg = None
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+            try:
+                cfg = pimp_desk.load_settings(root)
+            except Exception:
+                cfg = None
+        except Exception:
+            bots = []
+        out = desk_roi_plan.half_kelly_crb_observe(root, bots=bots, cfg=cfg)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "fee-sim":
+        out = desk_roi_plan.fee_sim_observe(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "dutch-book":
+        out = desk_roi_plan.dutch_book_observe(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "sharp-lag-harvest":
+        # Opt-in live ESPN fair + Kalshi ask → sports-sharp-lag sharp_quotes.json.
+        tower = os.path.join(root, "sports-sharp-lag-paper")
+        bot_path = os.path.join(tower, "bot.py")
+        if not os.path.isfile(bot_path):
+            print(json.dumps({
+                "ok": False,
+                "paper_only": True,
+                "reason": "sports-sharp-lag tower missing",
+            }, indent=2))
+            return 2
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("sports_sharp_lag_bot", bot_path)
+        mod = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(mod)
+        out = mod.harvest_live(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "fed-watch-harvest":
+        # Opt-in: local fedwatch_bins.json → fedwatch_quotes.json. No invent.
+        tower = os.path.join(root, "fed-watch-paper")
+        bot_path = os.path.join(tower, "bot.py")
+        if not os.path.isfile(bot_path):
+            print(json.dumps({
+                "ok": False,
+                "paper_only": True,
+                "idea_bank_only": True,
+                "reason": "fed-watch tower missing",
+            }, indent=2))
+            return 2
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("fed_watch_bot", bot_path)
+        mod = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(mod)
+        out = mod.harvest_live(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "poly-arb":
+        out = desk_roi_plan.cross_venue_arb_observe(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "cpi-nowcast":
+        out = desk_roi_plan.cpi_nowcast_observe(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "vol-curve":
+        out = desk_roi_plan.vol_curve_observe(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "vol-curve-harvest":
+        out = desk_roi_plan.vol_curve_harvest(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "funding-twins":
+        out = desk_roi_plan.funding_carry_twins_observe(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "macro-harvest":
+        out = desk_roi_plan.macro_kalshi_harvest(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "poly-arb-harvest":
+        out = desk_roi_plan.poly_kalshi_ask_harvest(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "line-shopper":
+        from helpers import line_shopper
+        out = line_shopper.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "btc-basis-scout":
+        from helpers import btc_basis_scout
+        out = btc_basis_scout.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "nhl-poisson-audit":
+        from helpers import nhl_poisson_audit
+        out = nhl_poisson_audit.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "dvol-regime":
+        from helpers import dvol_regime
+        out = dvol_regime.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "multi-ex-disagree":
+        from helpers import multi_ex_disagree
+        out = multi_ex_disagree.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "funding-scout":
+        from helpers import funding_scout
+        out = funding_scout.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "metals-heat":
+        from helpers import metals_heat
+        out = metals_heat.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "energy-heat":
+        from helpers import energy_heat
+        out = energy_heat.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "inx-band-occupancy":
+        from helpers import inx_band_occupancy
+        out = inx_band_occupancy.write_digest_from_desk(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "e8-digest-pack":
+        from helpers import e8_digest_pack
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = {
+            name: e8_digest_pack.write_digest_from_desk(name, root, bots=bots)
+            for name in e8_digest_pack.HELPER_NAMES
+        }
+        print(json.dumps({
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "may_place_alone": False,
+            "n": len(out),
+            "helpers": sorted(out.keys()),
+            "digests": out,
+        }, indent=2, sort_keys=True, default=str))
+        return 0
+    # Individual E8 pack kebab → snake helper modules.
+    _e8_kebab = str(args.action or "").replace("-", "_")
+    if _e8_kebab in getattr(__import__("helpers.e8_digest_pack", fromlist=["HELPER_NAMES"]), "HELPER_NAMES", ()):
+        import importlib
+        mod = importlib.import_module(f"helpers.{_e8_kebab}")
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = mod.write_digest_from_desk(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
     if args.action == "fee-ledger":
         bots = []
         try:
@@ -4377,6 +4765,80 @@ def main() -> int:
         out = desk_roi_plan.staff_hillclimb_pick_journal(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
+    if args.action == "hillclimb-sunday-review":
+        out = desk_roi_plan.staff_mark_sunday_packet_reviewed(
+            root,
+            who=str(getattr(args, "who", None) or "staff-cli"),
+            note=str(getattr(args, "note", None) or "sunday packet reviewed"),
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "hillclimb-dry-run":
+        lever = str(getattr(args, "soft", None) or getattr(args, "note", None) or "")
+        # Prefer explicit lever via leftover note field when empty → all levers.
+        out = desk_roi_plan.hillclimb_dry_run_board(lever or None)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "hillclimb-evidence":
+        out = desk_roi_plan.hillclimb_lever_evidence_templates()
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "hillclimb-e9-week":
+        out = desk_roi_plan.hillclimb_e9_week_board(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "chaos-drills":
+        import desk_roi_e9_chaos
+        out = desk_roi_e9_chaos.run_chaos_drill_pack(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "doctrine-distance":
+        import desk_roi_e9_doctrine
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_e9_doctrine.doctrine_distance_board(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "hillclimb-daily":
+        out = desk_roi_plan.hillclimb_lever_daily_check(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "hillclimb-broadcast":
+        out = desk_roi_plan.hillclimb_lever_masters_broadcast(root)
+        if args.discord:
+            print(out.get("discord") or out.get("soft_copy") or "")
+        else:
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "hillclimb-discipline":
+        out = desk_roi_plan.hillclimb_one_lever_discipline(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "hillclimb-kill-postmortem":
+        out = desk_roi_plan.staff_hillclimb_kill_postmortem(
+            root,
+            who=str(getattr(args, "who", None) or "staff-cli"),
+            note=str(getattr(args, "note", None) or "kill postmortem"),
+            demote=True,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "hillclimb-lock-win":
+        out = desk_roi_plan.staff_hillclimb_lock_win(
+            root,
+            who=str(getattr(args, "who", None) or "staff-cli"),
+            note=str(getattr(args, "note", None) or "lock win"),
+            lever=str(getattr(args, "soft", None) or ""),
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
     if args.action == "promote-ready-pack":
         bots = []
         try:

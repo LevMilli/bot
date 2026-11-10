@@ -26036,11 +26036,17 @@ DASH_LOGO_SVG = (
     '<g fill="#EADFFB"><rect x="227.5" y="329" width="5" height="16" rx="2.5"/><rect x="253.5" y="329" width="5" '
     'height="16" rx="2.5"/><rect x="279.5" y="329" width="5" height="16" rx="2.5"/></g>'
     '<circle cx="168" cy="337" r="8" fill="url(#pbG)"/><circle cx="344" cy="337" r="8" fill="url(#pbG)"/></svg>')
-DASH_FAVICON = "data:image/svg+xml," + _dash_quote(DASH_LOGO_SVG)
+APP_MARK_V = "6"
+DASH_FAVICON = "/icon-192.png?v=" + APP_MARK_V
+DASH_LOGO_HTML = (
+    '<img src="/icon-192.png?v=' + APP_MARK_V + '" alt="" width="60" height="60">'
+)
 PWA_HEAD = (
     '<link rel="manifest" href="/manifest.webmanifest">'
-    '<link rel="apple-touch-icon" href="/apple-touch-icon.png">'
-    '<link rel="apple-touch-startup-image" href="/apple-touch-icon.png">'
+    '<link rel="apple-touch-icon" sizes="180x180" href="/pimp-mark-180.png">'
+    '<link rel="apple-touch-icon" sizes="192x192" href="/pimp-mark-192.png">'
+    '<link rel="apple-touch-icon" sizes="512x512" href="/pimp-mark-512.png">'
+    '<link rel="apple-touch-startup-image" href="/img/app-splash.jpg?v=' + APP_MARK_V + '">'
     '<meta name="apple-mobile-web-app-capable" content="yes">'
     '<meta name="mobile-web-app-capable" content="yes">'
     '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">'
@@ -26533,14 +26539,14 @@ content="width=device-width,initial-scale=1"><meta name="referrer" content="no-r
 :root{{color-scheme:dark light}}body{{margin:0;min-height:100vh;display:grid;place-items:center;background:#0e0b16;
 color:#f4f1fb;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:16px}}
 @media (prefers-color-scheme:light){{body{{background:#f6f3fc;color:#1d1530}}p{{color:#5d5475!important}}}}
-main{{max-width:380px;text-align:center}}svg{{width:96px;height:96px}}h1{{font-size:22px;margin:12px 0 4px}}
+main{{max-width:380px;text-align:center}}svg,main img{{width:96px;height:96px;border-radius:14px;object-fit:cover}}h1{{font-size:22px;margin:12px 0 4px}}
 p{{color:#a9a1bf;margin:0 0 18px}}a{{color:#a27bff;font-weight:600;text-decoration:none}}</style></head>
 <body><main>{logo}<h1>{title}</h1><p>{msg}</p><a href="/">Go to the dashboard</a></main></body></html>"""
 
 
 def dash_page(web, status: int, title: str, msg: str):
     import html as _h
-    body = _DASH_PAGE.format(icon=DASH_FAVICON, logo=DASH_LOGO_SVG, title=_h.escape(title), msg=_h.escape(msg))
+    body = _DASH_PAGE.format(icon=DASH_FAVICON, logo=DASH_LOGO_HTML, title=_h.escape(title), msg=_h.escape(msg))
     resp = web.Response(text=body, status=status, content_type="text/html")
     resp.headers["Content-Security-Policy"] = dash_csp(body)
     return resp
@@ -35083,22 +35089,64 @@ async def dash_health(request):
     return web.Response(text="ok", content_type="text/plain")
 
 
+def _dash_brand_path(name: str) -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "dash-brand", name)
+
+
+def _poster_square(size: int):
+    """The full Pimps Dashboard poster, squared. This is the page logo."""
+    from PIL import Image
+    size = max(16, min(1024, int(size)))
+    src = Image.open(_dash_brand_path("splash.jpg")).convert("RGB")
+    side = min(src.size)
+    left = (src.width - side) // 2
+    top = (src.height - side) // 2
+    return src.crop((left, top, left + side, top + side)).resize((size, size), Image.LANCZOS)
+
+
+def app_icon_png(size: int) -> bytes:
+    """Home-screen / tab mark: the Pimps Dashboard poster."""
+    img = _poster_square(size)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def app_splash_jpeg() -> bytes:
+    with open(_dash_brand_path("splash.jpg"), "rb") as fh:
+        return fh.read()
+
+
+def dash_mark_data_uri(size: int = 240) -> str:
+    """The poster inside the page, so the header does not wait on a second request."""
+    import base64
+    buf = io.BytesIO()
+    _poster_square(size).save(buf, format="JPEG", quality=76, optimize=True)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+# Header and tab icon are the poster. Home Screen icons stay on /icon-*.png.
+DASH_FAVICON = dash_mark_data_uri(240)
+DASH_LOGO_HTML = '<img src="' + DASH_FAVICON + '" alt="" width="88" height="88">'
+
+
 async def dash_favicon(request):
     from aiohttp import web
-    return web.Response(text=DASH_LOGO_SVG, content_type="image/svg+xml",
-                        headers={"Cache-Control": "private, max-age=86400"})
+    return web.Response(body=app_icon_png(64), content_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
 
 
 def dash_manifest_body() -> str:
+    v = APP_MARK_V
     return json.dumps({
         "name": "Pimp's Dashboard", "short_name": "PIMP-BOT",
         "description": "The group's sports picks.",
         "start_url": "/", "scope": "/", "display": "standalone",
         "background_color": "#14003A", "theme_color": "#1a0f33",
         "icons": [
-            {"src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png"},
-            {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
-            {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"},
+            {"src": "/pimp-mark-180.png", "sizes": "180x180", "type": "image/png", "purpose": "any"},
+            {"src": "/pimp-mark-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": "/pimp-mark-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
         ],
     }, separators=(",", ":"))
 
@@ -35106,15 +35154,16 @@ def dash_manifest_body() -> str:
 async def dash_manifest(request):
     from aiohttp import web
     return web.Response(text=dash_manifest_body(), content_type="application/manifest+json",
-                        headers={"Cache-Control": "private, max-age=3600"})
+                        headers={"Cache-Control": "no-cache"})
 
 
 SW_JS = (
-    "const CACHE='pb-shell-151';"
+    "const CACHE='pb-shell-156';"
     "self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(['/manifest.webmanifest'])).then(()=>self.skipWaiting()))});"
     "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});"
     "self.addEventListener('fetch',e=>{const req=e.request;if(req.method!=='GET')return;"
-    "const u=new URL(req.url);if(u.origin!==location.origin)return;if(u.pathname.startsWith('/api/')||u.pathname.startsWith('/img/'))return;"
+    "const u=new URL(req.url);if(u.origin!==location.origin)return;"
+    "if(u.pathname.startsWith('/api/')||u.pathname.startsWith('/img/')||u.pathname.indexOf('icon')>=0||u.pathname.indexOf('favicon')>=0||u.pathname.indexOf('apple-touch')>=0||u.pathname.indexOf('pimp-mark')>=0)return;"
     "e.respondWith(fetch(req).then(r=>{try{const copy=r.clone();caches.open(CACHE).then(c=>c.put(req,copy))}catch(x){}"
     "return r}).catch(()=>caches.match(req)))});"
 )
@@ -35129,15 +35178,22 @@ async def dash_sw(request):
 async def dash_touch_icon(request):
     from aiohttp import web
     path = request.path or ""
-    size = 180 if "apple" in path else 192 if "192" in path else 512
+    size = 512 if "512" in path else 192 if "192" in path else 180
     try:
-        img = brand_logo(size)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        raw = buf.getvalue()
+        raw = app_icon_png(size)
     except Exception:
         return dash_error(web, request, 404)
     return web.Response(body=raw, content_type="image/png",
+                        headers={"Cache-Control": "no-cache"})
+
+
+async def dash_app_splash(request):
+    from aiohttp import web
+    try:
+        raw = app_splash_jpeg()
+    except Exception:
+        return dash_error(web, request, 404)
+    return web.Response(body=raw, content_type="image/jpeg",
                         headers={"Cache-Control": "public, max-age=86400"})
 
 
@@ -35215,7 +35271,8 @@ def dash_app(web):
                     web.get("/people", dash_index), web.get("/posters", dash_index), web.get("/more", dash_index),
                     web.get("/api/data", dash_api_data), web.get("/api/player.json", dash_api_player),
                     web.get(r"/api/player/{league:[a-z0-9-]{2,28}}/{aid:[0-9]{1,12}}.json", dash_api_player_one),
-                    web.get("/health", dash_health), web.get("/img/intro-collage.jpg", dash_intro_collage),
+                    web.get("/health", dash_health), web.get("/img/app-splash.jpg", dash_app_splash),
+                    web.get("/img/intro-collage.jpg", dash_intro_collage),
                     web.get(r"/img/look/{name:[a-z]+}.svg", dash_look_img),
                     web.get(r"/img/head/{league:[a-z0-9-]+}/{aid:[0-9]{1,12}}.png", dash_head_img),
                     web.get(r"/img/face/{league:[a-z0-9-]+}/{aid:[0-9]{1,12}}.png", dash_head_img),
@@ -35230,8 +35287,12 @@ def dash_app(web):
                     web.get("/favicon.svg", dash_favicon),
                     web.get("/manifest.webmanifest", dash_manifest),
                     web.get("/apple-touch-icon.png", dash_touch_icon),
+                    web.get("/apple-touch-icon-precomposed.png", dash_touch_icon),
                     web.get("/icon-192.png", dash_touch_icon),
                     web.get("/icon-512.png", dash_touch_icon),
+                    web.get("/pimp-mark-180.png", dash_touch_icon),
+                    web.get("/pimp-mark-192.png", dash_touch_icon),
+                    web.get("/pimp-mark-512.png", dash_touch_icon),
                     web.get("/sw.js", dash_sw),
                     web.post("/api/log.json", dash_api_log),
                     web.get("/logout", dash_logout),
@@ -35288,8 +35349,8 @@ header{background:var(--head);position:relative;overflow:hidden}
 header:before{content:"";position:absolute;inset:-40% -10% auto auto;width:520px;height:520px;border-radius:50%;
  background:radial-gradient(closest-side,#7B3FE455,transparent);pointer-events:none}
 .top{max-width:1180px;margin:auto;padding:18px 20px 14px;display:flex;align-items:center;gap:14px;position:relative}
-.logo{width:60px;height:60px;flex:none;filter:drop-shadow(0 6px 14px #7B3FE466);animation:bob 5s ease-in-out infinite}
-.logo svg{width:100%;height:100%}
+.logo{width:88px;height:88px;flex:none;filter:drop-shadow(0 6px 14px #7B3FE466);animation:bob 5s ease-in-out infinite}
+.logo svg,.logo img{width:100%;height:100%;display:block;border-radius:14px;object-fit:cover}
 @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 .brand{min-width:0}.brand h1{margin:0;font-size:24px;font-weight:850;letter-spacing:.06em;line-height:1.1}
 .brand h1 b{color:var(--gold)}.brand .meta{font-size:13px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:3px}
@@ -35568,7 +35629,7 @@ footer{max-width:1180px;margin:0 auto;padding:0 20px 30px;color:var(--faint);fon
 footer a{color:var(--faint)}
 @media (max-width:900px){.s4,.s5,.s6,.s7,.s8{grid-column:span 12}.kpi{grid-column:span 6}.pgrid{grid-template-columns:1fr}}
 @media (max-width:640px){
- .top{padding:14px 16px 12px}.logo{width:48px;height:48px}.brand h1{font-size:20px}
+ .top{padding:14px 16px 12px}.logo{width:72px;height:72px}.brand h1{font-size:20px}
  main{padding:12px 12px calc(84px + env(safe-area-inset-bottom))}.tab{gap:12px}.card{padding:14px;border-radius:18px}
  .ticker{padding:0 12px;margin-top:10px}
  nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:15;padding:6px 6px calc(6px + env(safe-area-inset-bottom));
@@ -36308,7 +36369,7 @@ function renderMore(el,d){
    h('p',{class:'muted',style:'margin:8px 0 0',text:'Last clean start: '+(d.booted||'')+'.'}),
    h('p',{class:'muted',style:'margin:8px 0 0'},'The first number is this file. The second is the idea list it is filling. Times are Central. This page refreshes itself every minute while it’s open. Hidden picks stay hidden until they’re revealed. Nothing on this map cuts a live feature.'),
    (window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)?h('p',{class:'muted',style:'margin:8px 0 0',text:'Reduced motion is on. The intro stays off.'}):null,
-   h('img',{class:'abouticon',width:'180',height:'180',alt:'Home screen icon',src:'/apple-touch-icon.png'})))}
+   h('img',{class:'abouticon',width:'180',height:'180',alt:'Home screen icon',src:'/pimp-mark-180.png'})))}
 const TABS={overview:renderOverview,live:renderLive,news:renderNews,people:renderPeople,posters:renderPosters,more:renderMore};
 function render(){if(!S.data)return;const el=$('#tab-'+S.tab);TABS[S.tab](el,S.data)}
 function show(t){if(!TABS[t])t='overview';S.tab=t;try{localStorage.setItem('pb-tab',t)}catch(e){}
@@ -36778,7 +36839,7 @@ setInterval(()=>{if(document.visibilityState!=='visible')return;if(S.tab==='live
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&Date.now()-S.loadedAt>60000)load()});
 try{const t=localStorage.getItem('pb-tab');if(TABS[t])S.tab=t}catch(e){}
 skeletonAll();show(S.tab);load();route();
-</script></body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG).replace(
+</script></body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_HTML).replace(
     "{{COURT_D}}", dash_court("#ffffff", 0.05)).replace("{{COURT_L}}", dash_court("#7B3FE4", 0.09))
 
 
@@ -36827,10 +36888,10 @@ html[data-bg=carbon] body,body[data-bg=carbon]{background:linear-gradient(180deg
 html[data-bg=gold] body,body[data-bg=gold]{background:radial-gradient(920px 520px at 50% -12%,#F5C54277,transparent),#160e04!important}
 html[data-bg=ice] body,body[data-bg=ice]{background:radial-gradient(920px 520px at 28% 0,#50a8ff66,transparent),#071018!important}
 html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 520px at 70% 0,#ff6a2066,transparent),#180808!important}
-#intro{position:fixed;inset:0;z-index:90;background:#140e0a url('/img/intro-collage.jpg?v=149') center/cover no-repeat;
+#intro{position:fixed;inset:0;z-index:90;background:#14003a url('/img/app-splash.jpg?v=6') center/cover no-repeat;
  display:grid;place-items:center;transition:opacity 1.2s ease}
 #intro:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
- background:radial-gradient(ellipse 62% 48% at 50% 46%, rgba(16,8,18,.62), rgba(16,8,12,.18) 52%, rgba(8,6,4,.55))}
+ background:radial-gradient(ellipse 70% 58% at 50% 46%, rgba(12,6,28,.22), rgba(8,4,18,.42))}
 #intro.go{opacity:0;pointer-events:none}#intro.skip{display:none}
 #smokecan{position:absolute;inset:0;width:100%;height:100%;z-index:1}
 #introbrand{position:relative;z-index:2;display:grid;justify-items:center;gap:18px;transform:translateY(28px);
@@ -36841,7 +36902,7 @@ html[data-bg=heater] body,body[data-bg=heater]{background:radial-gradient(920px 
  letter-spacing:.03em;color:#07070a;text-align:center;
  text-shadow:0 0 6px #e4d4ff,0 0 16px #7B3FE4,0 0 34px #7B3FE4,0 0 58px #6d28d9,0 0 92px #7B3FE4cc;
  filter:drop-shadow(0 0 14px #7B3FE4) drop-shadow(0 0 36px #6d28d9)}
-a.logo{display:block;color:inherit;flex:none;text-decoration:none}a.logo svg{width:100%;height:100%}
+a.logo{display:block;color:inherit;flex:none;text-decoration:none}a.logo svg,a.logo img{width:100%;height:100%;display:block;border-radius:14px;object-fit:cover}
 .lookbtn.icon{width:38px;height:38px;border-radius:12px;border:1px solid var(--line);background:var(--card);display:grid;
  place-items:center;cursor:pointer;flex:none;color:var(--gold)}
 .looksheet{position:fixed;inset:0;z-index:80;display:none;overflow-y:auto;-webkit-overflow-scrolling:touch;
@@ -37224,7 +37285,7 @@ body.v4 .nlist{margin:0;padding:0 0 0 18px}body.v4 .nlist li{margin:7px 0;line-h
 @media (max-width:720px){body.v4 .kpis{grid-template-columns:repeat(2,minmax(0,1fr));padding:0 12px 12px}
  body.v4 header{background:#0b0714f2;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);overflow-anchor:none}
  body.v4 .top{padding:8px 12px 8px;gap:10px 8px;align-items:center}
- body.v4 .logo{width:44px;height:44px}
+ body.v4 .logo{width:80px;height:80px}
  body.v4 .spacer{display:none}body.v4 .brand{flex:1 1 auto;min-width:0}
  body.v4 .brand h1{font-size:17px;letter-spacing:.08em;white-space:nowrap}
  body.v4 .brand h1 a{display:inline-flex;align-items:center;min-height:44px}
@@ -37235,7 +37296,7 @@ body.v4 .nlist{margin:0;padding:0 0 0 18px}body.v4 .nlist li{margin:7px 0;line-h
  body.v4 .findwrap{order:3;max-width:none;width:100%;flex:none;padding:0 12px 10px}
  body.v4.findaway .findwrap,body.v4.findaway .brand .meta{display:none}
  body.v4.findaway header{background:#0b0714}
- body.v4.findaway .logo{width:36px;height:36px}
+ body.v4.findaway .logo{width:64px;height:64px}
  body.v4.findaway .top{padding-top:2px;padding-bottom:0}
  body.v4 nav.tabs button.on{color:var(--gold);background:color-mix(in srgb,var(--gold) 18%,transparent)}
  body.v4 nav.tabs button.on:after{display:block;height:3px;background:var(--gold)}
@@ -37368,7 +37429,7 @@ function phoneHomeHint(){watchFind();const stand=matchMedia('(display-mode:stand
  const ios=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
  if(!ios)return;const head=$('header');if(!head)return;
  const bar=h('div',{class:'homehint',id:'homehint'},
-  h('p',{text:'Put PIMP-BOT on your Home Screen. Tap Share (the square with the arrow) → Add to Home Screen. It opens as its own app — no Safari bar.'}),
+  h('p',{text:'Put PIMP-BOT on your Home Screen. Tap Share (the square with the arrow) → Add to Home Screen. It opens as its own app — no Safari bar. If the icon is still the old robot, delete that shortcut and add it again. The phone keeps the picture it saved the first time.'}),
   h('button',{type:'button',onclick:()=>{try{localStorage.setItem('pb-home','1')}catch(e){}const n=$('#homehint');if(n)n.remove()}},'Got it'));
  head.after(bar)}
 function defaultLine(vals){if(!vals.length)return 0.5;const avg=vals.reduce((a,b)=>a+b,0)/vals.length;return Math.max(0.5,Math.floor(avg)+0.5)}
@@ -38042,7 +38103,6 @@ addEventListener('load',smokeIntro);
         '<button type="button" id="resetphone">Reset this phone</button>'
         '<button type="button" id="lookdone">Done</button></div></div></div>'
         '<div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introbrand">'
-        '<img src="' + DASH_FAVICON + '" alt="" width="120" height="120">'
         '<div id="introtitle">Pimp\'s Dashboard</div></div></div>'
         '<noscript><p style="text-align:center">The dashboard needs JavaScript switched on.</p></noscript>',
         1)
@@ -38082,7 +38142,7 @@ body{margin:0;background:radial-gradient(1200px 700px at 8% -12%,#7B3FE466,trans
 a{color:#c4a6ff;text-decoration:none}a:hover{color:#fff}
 .wrap{max-width:1080px;margin:0 auto;padding:0 22px}
 header{display:flex;align-items:center;gap:14px;padding:18px 0 8px;border-bottom:1px solid #F5C54222}
-.logo{width:52px;height:52px;flex:none;filter:drop-shadow(0 8px 16px #7B3FE466)}.logo svg{width:100%;height:100%}
+.logo{width:88px;height:88px;flex:none;filter:drop-shadow(0 8px 16px #7B3FE466)}.logo svg,.logo img{width:100%;height:100%;display:block;border-radius:14px;object-fit:cover}
 .brand{font-weight:850;letter-spacing:.14em;font-size:15px}.brand b{color:var(--gold)}
 nav{margin-left:auto;display:flex;gap:18px;align-items:center;font-weight:650;font-size:14px;color:var(--muted)}
 nav a.btn{background:linear-gradient(90deg,var(--brand),#5a22c8);color:#fff;padding:8px 14px;border-radius:999px;box-shadow:0 8px 20px -10px #7B3FE4}
@@ -38153,7 +38213,7 @@ document.querySelectorAll('a[href="#signin"]').forEach(a=>a.addEventListener('cl
  if(p){p.scrollIntoView({block:'center'});p.classList.add('pulse');setTimeout(()=>p.classList.remove('pulse'),1200)}
  if(k)k.focus()}));
 </script>
-</body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
+</body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_HTML)
 SITE_HTML = SITE_HTML.replace("</style>", SITE_LOOK_CSS + "</style>", 1)
 SITE_HTML = dash_pwa_html(SITE_HTML)
 if "/api/data" in SITE_HTML or "{{" in SITE_HTML:
@@ -40265,7 +40325,7 @@ STAFF_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
  padding:calc(10px + env(safe-area-inset-top)) 16px 10px;border-bottom:1px solid #F5C54222;
  background:#0b0714f2;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
 .homebar{display:flex;align-items:center;gap:10px;min-height:48px;min-width:0;flex:1 1 auto}
-.logo{width:44px;height:44px;flex:none;display:block}.brand{font-weight:850;letter-spacing:.14em;color:inherit;text-decoration:none;
+.logo{width:88px;height:88px;flex:none;display:block}.brand{font-weight:850;letter-spacing:.14em;color:inherit;text-decoration:none;
  display:flex;align-items:center;min-height:44px}.brand b{color:var(--gold)}
 .pill{background:linear-gradient(90deg,var(--gold),var(--brand));color:#14003A;font-weight:850;
  font-size:11px;letter-spacing:.12em;text-transform:uppercase;padding:7px 11px;border-radius:999px}
@@ -40590,7 +40650,7 @@ details.idle>summary{cursor:pointer;color:var(--muted)}
 <p class="lookhint" style="margin-top:14px">Accent</p><div class="lookaccents" id="lookaccents"></div>
 <div class="lookrow"><button type="button" id="lookdone">Done</button></div></div></div>
 <div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introbrand">
-<img src="{{FAVICON}}" alt="" width="120" height="120"><div id="introtitle">Pimp's Dashboard</div></div></div>
+<div id="introtitle">Pimp's Dashboard</div></div></div>
 <script>
 'use strict';
 const $=s=>document.querySelector(s);
@@ -41523,7 +41583,7 @@ let pimpStart=panelName();
 try{ if(pimpStart==='hq' && localStorage.getItem('pb-staff-panel')==='pimp') pimpStart='pimp'; }catch(e){}
 showPanel(pimpStart, pimpStart!==panelName());smokeIntro();
 </script>
-</body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
+</body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_HTML)
 STAFF_HTML = STAFF_HTML.replace("</style>", SITE_LOOK_CSS + "</style>", 1)
 STAFF_HTML = dash_pwa_html(STAFF_HTML)
 if "innerHTML" in STAFF_HTML:
@@ -42025,7 +42085,7 @@ ACCOUNT_HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
  padding:calc(10px + env(safe-area-inset-top)) 16px 10px;border-bottom:1px solid #F5C54222;
  background:#0b0714f2;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
 .homebar{display:flex;align-items:center;gap:10px;min-height:48px;min-width:0;flex:1 1 auto}
-.logo{width:44px;height:44px;flex:none;display:block}.brand{font-weight:850;letter-spacing:.14em;color:inherit;text-decoration:none;
+.logo{width:88px;height:88px;flex:none;display:block}.brand{font-weight:850;letter-spacing:.14em;color:inherit;text-decoration:none;
  display:flex;align-items:center;min-height:44px}.brand b{color:var(--gold)}
 .nav{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
 .navchip{display:inline-flex;align-items:center;height:44px;padding:0 12px;border-radius:12px;border:1px solid var(--line);
@@ -42053,7 +42113,7 @@ a.dlink:hover{color:#fff}
 <div class="nav"><a class="navchip" href="/">Dashboard</a><a class="navchip" href="/logout">Sign out</a></div></div>
 <div class="wrap" id="box"></div>
 <div id="intro" aria-hidden="true"><canvas id="smokecan"></canvas><div id="introbrand">
-<img src="{{FAVICON}}" alt="" width="120" height="120"><div id="introtitle">Pimp's Dashboard</div></div></div>
+<div id="introtitle">Pimp's Dashboard</div></div></div>
 <script>
 'use strict';
 const $=s=>document.querySelector(s);
@@ -42104,7 +42164,7 @@ function smokeIntro(){const o=$('#intro');if(o)o.remove()}
 addEventListener('pageshow',()=>{try{if(sessionStorage.getItem('pb-intro')){const o=$('#intro');if(o)o.remove()}}catch(e){}});
 paint();smokeIntro();
 </script>
-</body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_SVG)
+</body></html>""".replace("{{FAVICON}}", DASH_FAVICON).replace("{{LOGO}}", DASH_LOGO_HTML)
 ACCOUNT_HTML = ACCOUNT_HTML.replace("</style>", SITE_LOOK_CSS + "</style>", 1)
 ACCOUNT_HTML = dash_pwa_html(ACCOUNT_HTML)
 if "innerHTML" in ACCOUNT_HTML:
@@ -52403,6 +52463,51 @@ HELP_EXTRA.append(("👋 Wake phrases", (
     "In the call, say the same phrase out loud and he answers there too.")))
 
 
+async def push_discord_mark(client) -> None:
+    """Set the Discord bot avatar and the application icon to the dashboard mark. Once per art hash."""
+    import base64
+    try:
+        raw = app_icon_png(256)
+    except Exception:
+        log.exception("App icon file missing")
+        return
+    digest = hashlib.sha256(raw).hexdigest()[:16]
+    try:
+        if get_setting(0, "app_icon_hash") == digest:
+            return
+    except Exception:
+        pass
+    uri = "data:image/png;base64," + base64.b64encode(raw).decode()
+    ok = False
+    try:
+        await client.user.edit(avatar=raw)
+        ok = True
+    except Exception:
+        log.exception("Could not set the bot avatar")
+    if TOKEN:
+        try:
+            import aiohttp
+            timeout = aiohttp.ClientTimeout(total=20)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.patch(
+                    "https://discord.com/api/v10/applications/@me",
+                    headers={"Authorization": "Bot " + TOKEN},
+                    json={"icon": uri},
+                ) as resp:
+                    if resp.status < 300:
+                        ok = True
+                    else:
+                        body = await resp.text()
+                        log.warning("Application icon HTTP %s %s", resp.status, body[:180])
+        except Exception:
+            log.exception("Could not set the application icon")
+    if ok:
+        try:
+            set_setting(0, "app_icon_hash", digest)
+        except Exception:
+            log.exception("Could not remember the app icon hash")
+
+
 class PicksBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
@@ -52467,6 +52572,7 @@ class PicksBot(discord.Client):
         if reason:
             self._recovery_reason = None
             asyncio.create_task(send_owner_recovery(self, reason))
+        asyncio.create_task(push_discord_mark(self))
         if not getattr(self, "_boot_said", False):
             try:
                 landed = await announce_boot(self)

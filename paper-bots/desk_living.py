@@ -35,6 +35,35 @@ INSIGHT_HELPER_DIGESTS = (
     "clv_closer_digest.json",
     "injury_wire_digest.json",
     "eia_scout_digest.json",
+    "line_shopper_digest.json",
+    "btc_basis_scout_digest.json",
+    "nhl_poisson_audit_digest.json",
+    "dvol_regime_digest.json",
+    "multi_ex_disagree_digest.json",
+    "funding_scout_digest.json",
+    "metals_heat_digest.json",
+    "energy_heat_digest.json",
+    "inx_band_occupancy_digest.json",
+    # E8 remaining pack (#829–880 leftovers) — observe-only wrappers.
+    "inx_dual_ev_lab_digest.json",
+    "meme_rug_auditor_digest.json",
+    "meme_liq_cliff_digest.json",
+    "opp_cost_clock_digest.json",
+    "fee_ledger_nag_digest.json",
+    "masters_canary_digest.json",
+    "hillclimb_watchdog_digest.json",
+    "stale_skew_watchdog_digest.json",
+    "misplaced_publisher_digest.json",
+    "selective_eligibility_digest.json",
+    "green_boost_readiness_digest.json",
+    "daily_r_clerk_digest.json",
+    "profit_lock_clerk_digest.json",
+    "barbell_clerk_digest.json",
+    "corr_clerk_digest.json",
+    "incubation_registrar_digest.json",
+    "shadow_edge08_clerk_digest.json",
+    "skip_regret_clerk_digest.json",
+    "ruin_drill_proctor_digest.json",
     "calib_nag_digest.json",
     "hard_stop_clerk_digest.json",
     "near_miss_clerk_digest.json",
@@ -72,19 +101,43 @@ def honor_desk_entry_gate(root: str | None = None) -> str:
     """CLI/standalone bots: if desk entry_gate would block, set DESK_BLOCK_ENTRIES=1.
 
     Returns the block reason (empty if entries allowed). Exits still run when blocked.
+    Prefer-1: when ENTRIES is already on but REASON is empty (timer manage-when-gated
+    path), re-query entry_gate so Learning densifies ruin/daily-loss — never bland
+    DESK_BLOCK_ENTRIES=1 invent.
     """
-    if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
-        return os.environ.get("DESK_BLOCK_REASON") or "DESK_BLOCK_ENTRIES=1"
+    already = os.environ.get("DESK_BLOCK_ENTRIES") == "1"
+    existing = str(os.environ.get("DESK_BLOCK_REASON") or "").strip()
+    if already and existing:
+        return existing
     try:
         import pimp_desk
         reason = pimp_desk.entry_gate(root or _root())
     except Exception as exc:
-        return ""  # fail-open on desk import only — timer path still authoritative
+        # fail-open on desk import only — timer path still authoritative
+        if already:
+            return existing or "DESK_BLOCK_ENTRIES=1"
+        return ""
     if reason:
         os.environ["DESK_BLOCK_ENTRIES"] = "1"
         os.environ["DESK_BLOCK_REASON"] = str(reason)[:240]
         return str(reason)
+    if already:
+        return existing or "DESK_BLOCK_ENTRIES=1"
     return ""
+
+
+def desk_block_entries_reason(
+    fallback: str = "Desk entry_gate blocked a new paper buy. Settles still run.",
+) -> str:
+    """Prefer-1: when DESK_BLOCK_ENTRIES is on, surface DESK_BLOCK_REASON.
+
+    Honor stores the real daily-loss / max-open / open-risk line. Bots must not
+    invent a bland entry_gate skip while that reason is available.
+    """
+    if os.environ.get("DESK_BLOCK_ENTRIES") != "1":
+        return ""
+    why = str(os.environ.get("DESK_BLOCK_REASON") or "").strip()
+    return why or str(fallback or "").strip()
 
 
 def feature_store_path(root: str | None = None) -> str:
@@ -950,7 +1003,7 @@ def living_compact_card(
         green = green_day_board(root, bots=bots)
         bleed = bleed_chip(root, bots=bots)
         quiet = feature_store_quiet_alert(root)
-        expand = betting_expand_gate(root)
+        expand = betting_expand_gate(root, bots=bots)
         src = {
             "insight_swarm": swarm,
             "timer_heartbeat": timer,
@@ -1552,10 +1605,10 @@ def living_compact_card(
     }
 
 
-def ritual_observe_chip(root: str | None = None) -> dict:
+def ritual_observe_chip(root: str | None = None, bots: list | None = None) -> dict:
     """Observe-only weekly ritual readiness (never records doctor / never auto-posts)."""
     floors = fee_floors_assert(root)
-    expand = betting_expand_gate(root)
+    expand = betting_expand_gate(root, bots=bots)
     age = doctor_age_chip(root)
     floors_ok = bool(floors.get("all_ok"))
     expand_ok = not bool(expand.get("blocked"))
@@ -2097,6 +2150,326 @@ def eia_scout_chip(root: str | None = None) -> dict:
     }
 
 
+def line_shopper_chip(root: str | None = None) -> dict:
+    """Sharp→Kalshi line shopper + CLV honesty chip (observe-only)."""
+    digest: dict = {}
+    try:
+        from helpers import line_shopper
+        path = line_shopper.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = line_shopper.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "n": digest.get("n"),
+        "clear_n": digest.get("clear_n"),
+        "best_edge": digest.get("best_edge"),
+        "clv_pass_n": digest.get("clv_pass_n"),
+        "label": (
+            f"line shopper n={digest.get('n')} clear={digest.get('clear_n')} "
+            f"best={digest.get('best_edge')} clv_pass={digest.get('clv_pass_n')}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only sharp lag + CLV — never softens sports 0.06."
+        ),
+    }
+
+
+def btc_basis_scout_chip(root: str | None = None) -> dict:
+    """BTC funding/basis scout chip — ETH observe / SOL reject; no desk cash."""
+    digest: dict = {}
+    try:
+        from helpers import btc_basis_scout
+        path = btc_basis_scout.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("helper") is None:
+            digest = btc_basis_scout.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "opens_desk_cash": False,
+        "btc_open_n": digest.get("btc_open_n"),
+        "funding_pnl": digest.get("funding_pnl"),
+        "basis_pnl": digest.get("basis_pnl"),
+        "eth_stance": digest.get("eth_stance"),
+        "sol_stance": digest.get("sol_stance"),
+        "label": (
+            f"basis scout btc_open={digest.get('btc_open_n')} "
+            f"fund={digest.get('funding_pnl')} basis={digest.get('basis_pnl')} "
+            f"eth={digest.get('eth_stance')} sol={digest.get('sol_stance')}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only BTC basis scout — never LIVE."
+        ),
+    }
+
+
+def nhl_poisson_audit_chip(root: str | None = None) -> dict:
+    """NHL pickcenter vs Poisson model audit chip (observe-only)."""
+    digest: dict = {}
+    try:
+        from helpers import nhl_poisson_audit
+        path = nhl_poisson_audit.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("n") is None:
+            digest = nhl_poisson_audit.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "n": digest.get("n"),
+        "wipe_01_n": digest.get("wipe_01_n"),
+        "avg_abs_gap": digest.get("avg_abs_gap"),
+        "label": (
+            f"nhl poisson n={digest.get('n')} wipe={digest.get('wipe_01_n')} "
+            f"avg_abs_gap={digest.get('avg_abs_gap')}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only NHL Poisson audit — never softens sports 0.06."
+        ),
+    }
+
+
+def dvol_regime_chip(root: str | None = None) -> dict:
+    """BTC DVOL regime chip (low/mid/high observe bands)."""
+    digest: dict = {}
+    try:
+        from helpers import dvol_regime
+        path = dvol_regime.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("helper") is None:
+            digest = dvol_regime.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "dvol": digest.get("dvol"),
+        "regime": digest.get("regime"),
+        "waiting": digest.get("waiting"),
+        "source": digest.get("source"),
+        "label": (
+            f"dvol regime={digest.get('regime')} dvol={digest.get('dvol')} "
+            f"src={digest.get('source') or ('wait' if digest.get('waiting') else '')}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only DVOL regime — never invent missing IV."
+        ),
+    }
+
+
+def multi_ex_disagree_chip(root: str | None = None) -> dict:
+    """BTC multi-exchange spot disagree chip (observe-only)."""
+    digest: dict = {}
+    try:
+        from helpers import multi_ex_disagree
+        path = multi_ex_disagree.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("helper") is None:
+            digest = multi_ex_disagree.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "present_n": digest.get("present_n"),
+        "range_bps": digest.get("range_bps"),
+        "alert": digest.get("alert"),
+        "label": (
+            f"multi-ex n={digest.get('present_n')} range_bps={digest.get('range_bps')} "
+            f"alert={bool(digest.get('alert'))}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only BTC multi-ex disagree — never invent missing venues."
+        ),
+    }
+
+
+def funding_scout_chip(root: str | None = None) -> dict:
+    """BTC perpetual funding scout chip — observe only; no desk cash."""
+    digest: dict = {}
+    try:
+        from helpers import funding_scout
+        path = funding_scout.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("helper") is None:
+            digest = funding_scout.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "opens_desk_cash": False,
+        "funding_8h": digest.get("funding_8h"),
+        "current_funding": digest.get("current_funding"),
+        "hot": digest.get("hot"),
+        "label": (
+            f"funding scout 8h={digest.get('funding_8h')} "
+            f"cur={digest.get('current_funding')} hot={bool(digest.get('hot'))}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only funding scout — never LIVE."
+        ),
+    }
+
+
+def metals_heat_chip(root: str | None = None) -> dict:
+    """Metals 15m heat chip (vol prior + |z|)."""
+    digest: dict = {}
+    try:
+        from helpers import metals_heat
+        path = metals_heat.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("helper") is None:
+            digest = metals_heat.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "hottest": digest.get("hottest"),
+        "hottest_heat": digest.get("hottest_heat"),
+        "n": digest.get("n"),
+        "label": (
+            f"metals heat hottest={digest.get('hottest')} "
+            f"score={digest.get('hottest_heat')} n={digest.get('n')}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only metals heat — never softens commodity 0.05."
+        ),
+    }
+
+
+def energy_heat_chip(root: str | None = None) -> dict:
+    """Energy 15m heat chip (vol prior + |z| + EIA/roll)."""
+    digest: dict = {}
+    try:
+        from helpers import energy_heat
+        path = energy_heat.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("helper") is None:
+            digest = energy_heat.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "hottest": digest.get("hottest"),
+        "hottest_heat": digest.get("hottest_heat"),
+        "n": digest.get("n"),
+        "label": (
+            f"energy heat hottest={digest.get('hottest')} "
+            f"score={digest.get('hottest_heat')} n={digest.get('n')}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only energy heat — never softens commodity 0.05."
+        ),
+    }
+
+
+def inx_band_occupancy_chip(root: str | None = None) -> dict:
+    """INX 80–92¢ band occupancy chip — observe only."""
+    digest: dict = {}
+    try:
+        from helpers import inx_band_occupancy
+        path = inx_band_occupancy.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("helper") is None:
+            digest = inx_band_occupancy.write_digest_from_desk(root)
+    except Exception:
+        digest = {}
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+        "occupancy": digest.get("occupancy"),
+        "pre_noon_occupancy": digest.get("pre_noon_occupancy"),
+        "live_occupancy": digest.get("live_occupancy"),
+        "occupied": digest.get("occupied"),
+        "thin": digest.get("thin"),
+        "label": (
+            f"inx band occ={digest.get('occupancy')} "
+            f"pre_noon={digest.get('pre_noon_occupancy')} "
+            f"live={digest.get('live_occupancy')} "
+            f"occupied={bool(digest.get('occupied'))}"
+        ),
+        "note": digest.get("note") or (
+            "Observe-only INX band occupancy — never softens kalshi_inx 0.02."
+        ),
+    }
+
+
+def e8_pack_helper_names() -> tuple[str, ...]:
+    try:
+        from helpers import e8_digest_pack
+        return tuple(e8_digest_pack.HELPER_NAMES)
+    except Exception:
+        return ()
+
+
+def e8_pack_chip(helper: str, root: str | None = None, *, bots: list | None = None) -> dict:
+    """Generic chip for E8 remaining pack digests."""
+    digest: dict = {}
+    try:
+        from helpers import e8_digest_pack
+        import importlib
+        mod = importlib.import_module(f"helpers.{helper}")
+        path = mod.digest_path(root)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                digest = json.load(handle)
+        if not isinstance(digest, dict) or digest.get("helper") is None:
+            digest = mod.write_digest_from_desk(root, bots=bots)
+        return e8_digest_pack.chip_from_digest(helper, digest)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "may_place_alone": False,
+            "helper": helper,
+            "error": type(exc).__name__,
+            "label": f"{helper} error={type(exc).__name__}",
+            "note": f"Observe-only {helper} — never LIVE.",
+        }
+
+
+def e8_pack_chips(root: str | None = None, *, bots: list | None = None) -> dict:
+    """All E8 remaining pack chips keyed by helper name."""
+    return {name: e8_pack_chip(name, root, bots=bots) for name in e8_pack_helper_names()}
+
+
 def tip_radar_chip(root: str | None = None) -> dict:
     """T-5 / T-15 / T-180 tip windows chip from tip_radar digest / quote cache."""
     digest = {}
@@ -2612,6 +2985,16 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "calib_nag": calib_nag_chip(root, bots=bots),
         "injury_wire": injury_wire_chip(root),
         "eia_scout": eia_scout_chip(root),
+        "line_shopper": line_shopper_chip(root),
+        "btc_basis_scout": btc_basis_scout_chip(root),
+        "nhl_poisson_audit": nhl_poisson_audit_chip(root),
+        "dvol_regime": dvol_regime_chip(root),
+        "multi_ex_disagree": multi_ex_disagree_chip(root),
+        "funding_scout": funding_scout_chip(root),
+        "metals_heat": metals_heat_chip(root),
+        "energy_heat": energy_heat_chip(root),
+        "inx_band_occupancy": inx_band_occupancy_chip(root),
+        **e8_pack_chips(root, bots=bots),
         "skip_historian": skip_historian_chip(root),
         "distance_clerk": distance_clerk_chip(root),
         "quant_clerk": quant_clerk_chip(root),
@@ -2645,9 +3028,9 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "feature_coverage": feature_coverage_chip(root),
         "phase2_pulse": phase2_pulse_chip(root),
         "ruin_drill_page": ruin_drill_page(root),
-        "betting_expand_gate": betting_expand_gate(root),
+        "betting_expand_gate": betting_expand_gate(root, bots=bots),
         "doctor_age": doctor_age_chip(root),
-        "ritual_observe": ritual_observe_chip(root),
+        "ritual_observe": ritual_observe_chip(root, bots=bots),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
@@ -2972,7 +3355,12 @@ def living_board_export(root: str | None = None, bots: list | None = None) -> di
         "sunday_packet", "reporter", "ritual_observe", "feature_store", "skip_historian",
         # clerks / helpers / gates (surface export; already on board — no new chips)
         "living_ai", "skip_taxonomy", "empty_card", "helper_gate_a", "skip_regret",
-        "tip_radar", "calib_nag", "injury_wire", "eia_scout", "distance_clerk",
+        "tip_radar", "calib_nag", "injury_wire", "eia_scout",
+        "line_shopper", "btc_basis_scout", "nhl_poisson_audit", "dvol_regime",
+        "multi_ex_disagree", "funding_scout", "metals_heat", "energy_heat",
+        "inx_band_occupancy",
+        *e8_pack_helper_names(),
+        "distance_clerk",
         "quant_clerk", "bookkeeper", "empty_card_bee", "near_miss", "near_miss_clerk",
         "hard_stop", "hard_stop_clerk", "skip_twin_clerk", "timer_digest",
         "calendar_scanner", "eia_blackout", "clerk_pulse", "dual_control_chip",
@@ -4668,10 +5056,15 @@ def doctor_age_chip(root: str | None = None) -> dict:
     }
 
 
-def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
+def living_doctor(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+    record: bool = True,
+) -> dict:
     """One-shot staff doctor: floors + expand + selfcheck + quiet/timer."""
     floors = fee_floors_assert(root)
-    expand = betting_expand_gate(root)
+    expand = betting_expand_gate(root, bots=bots)
     health = living_self_check(root)
     quiet = feature_store_quiet_alert(root)
     timer = timer_heartbeat_chip(root)
@@ -4831,31 +5224,104 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
     return doc
 
 
-def betting_expand_gate(root: str | None = None, *, remember: bool = False) -> dict:
-    """Insight-first hire blocker: refuse betting expand while swarm < 3:1."""
+def betting_expand_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+    remember: bool = False,
+) -> dict:
+    """Insight-first hire blocker (#881–887).
+
+    Refuse new betting expand until:
+      • insight:betting swarm ≥ 3:1 (+ digest inventory)
+      • firm taxed M1 ≥ 0 with n≥10
+      • ≥1 fee-clear tower Master (sports/btc/commodity) with n≥10 M1≥0
+    Never softens floors. Never LIVE. Staff/paper only even when allowed.
+    """
     swarm = insight_swarm_ratio(root)
     inv = digest_inventory(root)
-    ok = bool(swarm.get("pass")) and bool(inv.get("pass") or swarm.get("pass"))
-    reason = (
-        "insight swarm meets ≥3:1 — betting expand still staff/paper only"
-        if ok
-        else (
-            f"BLOCK betting expand: insight swarm "
-            f"{swarm.get('insight_n')}:{swarm.get('betting_n')} "
-            f"(need ≥{swarm.get('min_ratio') or INSIGHT_BETTING_MIN_RATIO}:1). "
-            "Hire observe clerks / seed digests first."
+    swarm_ok = bool(swarm.get("pass")) and bool(inv.get("pass") or swarm.get("pass"))
+
+    # Never call pimp_desk.snapshot here — snapshot embeds betting_expand_gate
+    # and that recursion hangs the desk. Callers (snapshot / living board)
+    # must pass bots when M1/Master gates matter; missing bots ⇒ M1 fail-closed.
+    bots_list = bots if isinstance(bots, list) else []
+
+    m1_ok = False
+    m1_n = 0
+    m1_exp = None
+    fee_clear_master = False
+    fee_clear_masters: list[str] = []
+    meme_retire_recommend = False
+    try:
+        import desk_roi_plan
+        m1 = desk_roi_plan.firm_taxed_m1(bots_list) or {}
+        m1_n = int(m1.get("n") or 0)
+        m1_exp = m1.get("expectancy_taxed")
+        try:
+            m1_exp_f = float(m1_exp) if m1_exp is not None else None
+        except (TypeError, ValueError):
+            m1_exp_f = None
+        m1_ok = bool(
+            m1_n >= 10
+            and m1_exp_f is not None
+            and m1_exp_f + 1e-12 >= 0.0
         )
-    )
-    label = (
-        "betting expand allowed (paper)"
-        if ok
-        else "betting expand BLOCKED — insight swarm thin"
-    )
-    soft_copy = (
-        f"{label} — {reason}"
-        if not ok
-        else f"{label} — {reason}"
-    )
+        for row in m1.get("by_tower") or []:
+            if not isinstance(row, dict):
+                continue
+            bid = str(row.get("bot") or "")
+            if bid not in ("sports-gap", "btc15m", "commodity-15m"):
+                continue
+            tn = int(row.get("n") or 0)
+            te = row.get("expectancy_taxed")
+            try:
+                te_f = float(te) if te is not None else None
+            except (TypeError, ValueError):
+                te_f = None
+            if tn >= 10 and te_f is not None and te_f + 1e-12 >= 0.0:
+                fee_clear_master = True
+                fee_clear_masters.append(bid)
+        meme_bot = next(
+            (
+                b for b in bots_list
+                if isinstance(b, dict) and str(b.get("id") or "") == "memecoin"
+            ),
+            None,
+        )
+        if meme_bot is not None:
+            retire = desk_roi_plan.meme_retirement_clock(meme_bot) or {}
+            meme_retire_recommend = bool(retire.get("recommend_pause"))
+    except Exception:
+        pass
+
+    blocks: list[str] = []
+    if not swarm_ok:
+        blocks.append(
+            f"insight swarm {swarm.get('insight_n')}:{swarm.get('betting_n')} "
+            f"(need ≥{swarm.get('min_ratio') or INSIGHT_BETTING_MIN_RATIO}:1)"
+        )
+    if not m1_ok:
+        blocks.append(f"firm M1 n={m1_n} ev={m1_exp} (need n≥10 and ev≥0)")
+    if not fee_clear_master:
+        blocks.append("no fee-clear Master (sports/btc/commodity n≥10 M1≥0)")
+
+    ok = bool(swarm_ok and m1_ok and fee_clear_master)
+    if ok:
+        reason = (
+            "swarm≥3:1 + firm M1≥0 + fee-clear Master — "
+            "betting expand still staff/paper only"
+            + (
+                "; meme retirement recommended — refuse new meme sleeves"
+                if meme_retire_recommend
+                else ""
+            )
+        )
+        label = "betting expand allowed (paper)"
+    else:
+        reason = "BLOCK betting expand: " + "; ".join(blocks)
+        label = "betting expand BLOCKED — money/swarm gates"
+    soft_copy = f"{label} — {reason}"
     if remember and not ok:
         try:
             import teller_memory
@@ -4878,10 +5344,21 @@ def betting_expand_gate(root: str | None = None, *, remember: bool = False) -> d
         "swarm_ratio": swarm.get("ratio"),
         "min_ratio": swarm.get("min_ratio") or INSIGHT_BETTING_MIN_RATIO,
         "digest_pass": inv.get("pass"),
+        "m1_pass": m1_ok,
+        "m1_n": m1_n,
+        "m1": m1_exp,
+        "fee_clear_master": fee_clear_master,
+        "fee_clear_masters": fee_clear_masters,
+        "meme_retire_recommend": meme_retire_recommend,
+        "refuse_new_meme_sleeve": bool(meme_retire_recommend),
+        "blocks": blocks,
         "reason": reason,
         "soft_copy": soft_copy,
         "label": label,
-        "note": "Insight-first living hire order. Never softens venue floors.",
+        "note": (
+            "Insight-first living hire order (#881–887): swarm≥3:1 + firm M1≥0 "
+            "+ ≥1 fee-clear Master. Never softens venue floors. Never LIVE."
+        ),
     }
 
 

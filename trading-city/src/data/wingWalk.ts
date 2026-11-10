@@ -10,8 +10,8 @@ import { activeWingRooms, type WingRoom } from './officeWingLayout'
 
 export const WING_HALL = {
   xMin: -1.2,
-  /** Extends to the boss doorway (boss center 35.2 − room depth 4). */
-  xMax: 31.4,
+  /** Extends to the boss doorway (boss center 43.2 − room depth 4). */
+  xMax: 39.2,
   zMin: -1.55,
   zMax: 1.55,
   wallH: 3.35,

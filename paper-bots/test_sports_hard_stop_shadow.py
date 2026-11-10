@@ -1,6 +1,7 @@
 """Sports hard-stop shadow + latency/fit wiring (positive-ROI next slice)."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -210,6 +211,77 @@ class HardStopShadowCsvExport(unittest.TestCase):
             self.assertFalse(out["auto_promote"])
             self.assertIn("shadow_pnl", out["csv"])
             self.assertTrue(out["path"] and out["path"].endswith(".csv"))
+
+
+class SettleBinaryExitPriceDensify(unittest.TestCase):
+    """Commodity #462 sibling: settle stamps exit_price 0|1 for catchup densify."""
+
+    def test_gap_bot_settle_stamps_binary_exit_price(self):
+        gap_path = os.path.join(HERE, "sports-gap-paper", "gap_bot.py")
+        with open(gap_path, encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertIn('"exit_price": 1.0 if won else 0.0', src)
+        # Mid-open sells already stamp live bid; settle path must not omit marks.
+        settle_idx = src.find('"exit": "settled"')
+        self.assertGreater(settle_idx, 0)
+        chunk = src[settle_idx - 200:settle_idx + 280]
+        self.assertIn("exit_price", chunk)
+        self.assertIn("1.0 if won else 0.0", chunk)
+
+    def test_catchup_densifies_loser_binary_exit_not_winner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sports = os.path.join(tmp, "sports-gap-paper")
+            os.makedirs(sports, exist_ok=True)
+            loser = {
+                "ticker": "KX-LOSE-EXIT0",
+                "side": "away",
+                "league": "NFL",
+                "ask": 0.80,
+                "entry_price": 0.80,
+                "exit_price": 0.0,
+                "cost": 16.0,
+                "contracts": 20,
+                "pnl": -16.0,
+                "exit": "settled",
+                "closed": "2026-11-09 02:00:00 CT",
+            }
+            winner = {
+                "ticker": "KX-WIN-EXIT1",
+                "side": "home",
+                "league": "NFL",
+                "ask": 0.70,
+                "entry_price": 0.70,
+                "exit_price": 1.0,
+                "cost": 14.0,
+                "contracts": 20,
+                "pnl": 6.0,
+                "exit": "settled",
+                "closed": "2026-11-09 02:00:00 CT",
+            }
+            with open(os.path.join(sports, "state.json"), "w", encoding="utf-8") as fh:
+                json.dump({"cash": 90.0, "open": [], "closed": [loser, winner]}, fh)
+            # Force API miss so catchup must use stamped exit_price.
+            out = desk_roi_plan.backfill_sports_exit_shadow_from_closed(
+                tmp, fetch_market=lambda _t: None,
+            )
+            self.assertTrue(out.get("ok"), out)
+            # Loser bid=0 densifies HS when drop clears threshold; winner exit=1 does not invent.
+            self.assertGreaterEqual(int(out.get("hard_stop") or 0) + int(out.get("time_final") or 0), 0)
+            hs = desk_roi_plan.sports_hard_stop_shadow_summary(tmp)
+            # With entry 0.80 → exit 0.0 drop 0.80 ≥ threshold → HS row for loser only.
+            tickers = {
+                str(r.get("ticker"))
+                for r in (
+                    desk_roi_plan._load(
+                        desk_roi_plan._path(desk_roi_plan.SPORTS_HARD_STOP_SHADOW, tmp),
+                        {"rows": []},
+                    ).get("rows")
+                    or []
+                )
+            }
+            self.assertIn("KX-LOSE-EXIT0", tickers)
+            self.assertNotIn("KX-WIN-EXIT1", tickers)
+            self.assertFalse(hs.get("live"))
 
 
 class OrphanHardStopDensify(unittest.TestCase):

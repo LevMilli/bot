@@ -117,6 +117,104 @@ class DeskMoreTests(unittest.TestCase):
             summary = desk_brain.brain_summary(tmp)
             self.assertIn("skip_leaderboard", summary)
 
+    def test_anti_revenge_sticky_firm_classify_not_data_invent(self):
+        """Prefer-2: gate locks must not invent DATA via other→DATA (#524 leftover)."""
+        revenge = "anti-revenge: sports-gap blocked on KXNBA ~8m after hard-stop"
+        sticky = (
+            "sticky-open SLA: 1 open(s) past settle window "
+            "(oldest 2.5h) — exits first before new speculative buys"
+        )
+        firm = "firm-queue deferred rank=2: sports-gap scores higher"
+        self.assertEqual(desk_more.classify_skip(revenge), "learning")
+        self.assertEqual(desk_more.stable_skip_code("learning"), "LEARN")
+        self.assertEqual(desk_more.classify_skip(sticky), "open_risk")
+        self.assertEqual(
+            desk_more.stable_skip_code(desk_more.classify_skip(sticky)),
+            "BUDGET",
+        )
+        self.assertEqual(desk_more.classify_skip(firm), "budget")
+        self.assertEqual(
+            desk_more.stable_skip_code(desk_more.classify_skip(firm)),
+            "BUDGET",
+        )
+        # Capacity invent stays OTHER→DATA so real gates stay distinct.
+        self.assertEqual(desk_more.classify_skip("max buys this check (0)"), "other")
+
+    def test_learn_v2_portfolio_corr_classify_not_data_invent(self):
+        """Prefer-2: learning_skip + portfolio-corr must not invent DATA (#526 leftover)."""
+        learn_v2 = (
+            "Skipping BTC YES hour=14 CT in 0.8-0.9. "
+            "Fine paper bucket has 2/8 hits under 40% (learn v2)."
+        )
+        learn_coarse = (
+            "Skipping BTC in the 0.8-0.9 probability bucket. "
+            "That paper bucket has 3 hits out of 8 settles, which is under 40%. "
+            "This is only a count of paper settles."
+        )
+        portfolio = (
+            "No commodity paper buy. portfolio corr: already open a energy series "
+            "(max 1 energy + 1 metal)."
+        )
+        self.assertEqual(desk_more.classify_skip(learn_v2), "learning")
+        self.assertEqual(desk_more.classify_skip(learn_coarse), "learning")
+        self.assertEqual(
+            desk_more.stable_skip_code(desk_more.classify_skip(learn_v2)),
+            "LEARN",
+        )
+        self.assertEqual(desk_more.classify_skip(portfolio), "correlation")
+        self.assertEqual(
+            desk_more.stable_skip_code(desk_more.classify_skip(portfolio)),
+            "CORR",
+        )
+
+    def test_volatile_speed_already_open_classify_not_data_invent(self):
+        """Prefer-2: volatile/speed/already-open must not invent DATA (#527 leftover)."""
+        volatile = "volatile — holding for ≤5m parlay window"
+        eth_vol = "ETH volatile — hold for ≤5m parlay"
+        speed = "speed lane off on red sports book (red $-5.00)"
+        speed_meme = "speed lane blocked on red day (today $-3.00)"
+        already = "No commodity paper buy. already open."
+        self.assertEqual(desk_more.classify_skip(volatile), "vol_safe")
+        self.assertEqual(desk_more.classify_skip(eth_vol), "vol_safe")
+        self.assertEqual(
+            desk_more.stable_skip_code(desk_more.classify_skip(volatile)),
+            "BUDGET",
+        )
+        self.assertEqual(desk_more.classify_skip(speed), "budget")
+        self.assertEqual(desk_more.classify_skip(speed_meme), "budget")
+        self.assertEqual(desk_more.classify_skip(already), "already_holding")
+        # portfolio-corr still wins over bare "already open a … series" wording.
+        portfolio = (
+            "No commodity paper buy. portfolio corr: already open a energy series "
+            "(max 1 energy + 1 metal)."
+        )
+        self.assertEqual(desk_more.classify_skip(portfolio), "correlation")
+
+    def test_feed_idle_starve_classify_not_other_invent(self):
+        """Prefer-2: feed-down / correct-idle / starve must not invent OTHER (#529 leftover)."""
+        idle = "No open KXBTC15M window right now — still tracking ETH/ladder history."
+        tip = "CARD: No live or tip-soon games, so this check bought nothing."
+        feed = "orderbook failed for KXCL"
+        incomplete = "Kalshi list incomplete for energy series"
+        starve = "expectancy starve factor 0.15"
+        selective = "Selective +1 KILLED (5 green-day EV worsen) — base max_buys only"
+        self.assertEqual(desk_more.classify_skip(idle), "calendar")
+        self.assertEqual(desk_more.classify_skip(tip), "calendar")
+        self.assertEqual(
+            desk_more.stable_skip_code(desk_more.classify_skip(idle)),
+            "CALENDAR",
+        )
+        self.assertEqual(desk_more.classify_skip(feed), "data")
+        self.assertEqual(desk_more.classify_skip(incomplete), "data")
+        self.assertEqual(desk_more.classify_skip(starve), "budget")
+        self.assertEqual(desk_more.classify_skip(selective), "budget")
+        self.assertEqual(desk_more.classify_skip("too late to enter"), "calendar")
+        self.assertEqual(desk_more.classify_skip("min left 4.2 < 10"), "calendar")
+        self.assertEqual(
+            desk_more.classify_skip("ruin drill active — entries off"),
+            "entry_gate",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -40,6 +40,7 @@ export const FLOORS: FloorDef[] = [
       { officeId: 'commodity-15m', botId: 'commodity-15m', label: 'Commodity 15m' },
       { officeId: 'memecoin', botId: 'memecoin', label: 'Memecoin' },
       { officeId: 'coinbase-spot', botId: 'coinbase-spot', label: 'Coinbase spot' },
+      { officeId: 'btc-carry', botId: 'btc-carry', label: 'BTC carry' },
       { officeId: 'wall-street', botId: 'wall-street', label: 'Wall Street' },
       { officeId: 'boss', botId: 'kalshi-sized', label: 'Boss · Sized Kalshi', boss: true },
     ],
@@ -51,6 +52,7 @@ export const FLOORS: FloorDef[] = [
     offices: [
       { officeId: 'btc15m', botId: 'btc15m', label: 'BTC 15m' },
       { officeId: 'coinbase-spot', botId: 'coinbase-spot', label: 'Coinbase spot' },
+      { officeId: 'btc-carry', botId: 'btc-carry', label: 'BTC carry' },
       { officeId: 'commodity-15m', botId: 'commodity-15m', label: 'Commodity 15m' },
     ],
   },
@@ -67,6 +69,8 @@ export const FLOORS: FloorDef[] = [
     offices: [
       { officeId: 'calendar-helper', botId: null, label: 'Calendar cache', helper: true },
       { officeId: 'tape-helper', botId: null, label: 'Tape scout', helper: true },
+      { officeId: 'sports-sharp-lag', botId: 'sports-sharp-lag', label: 'Sports sharp lag' },
+      { officeId: 'fed-watch', botId: 'fed-watch', label: 'Fed Watch' },
     ],
   },
   {

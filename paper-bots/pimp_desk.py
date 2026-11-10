@@ -102,6 +102,10 @@ DEFAULTS = {
         "solana_dex": 0.02,
         # Excess return after Coinbase round-trip. Locked. Shadow tower only.
         "coinbase_spot": 0.05,
+        # Registry lock for the held BTC carry. Does not change kalshi_btc15m.
+        "binance_btc_carry": 0.02,
+        # Fed / econ binaries (FedWatch shadow). Locked. Idea-bank for main AUTO.
+        "kalshi_econ": 0.05,
     },
     "fill_adverse_tax": 0.01,
     "gate_a_min_n": 20,
@@ -146,6 +150,9 @@ ACCOUNT_FILES = {
     "memecoin": "positions.json",
     "kalshi-sized": "paper_state.json",
     "coinbase-spot": "paper_account.json",
+    "btc-carry": "paper_account.json",
+    "sports-sharp-lag": "paper_account.json",
+    "fed-watch": "paper_account.json",
     "wall-street": "paper_account.json",
 }
 
@@ -186,6 +193,9 @@ SETTLEMENT_FILES = (
     "desk_fee_ledger.json",
     "btc15m-signal/shadow_edge08_account.json",
     "coinbase-spot-paper/paper_account.json",
+    "btc-carry-paper/paper_account.json",
+    "sports-sharp-lag-paper/paper_account.json",
+    "fed-watch-paper/paper_account.json",
     "wall-street-paper/paper_account.json",
     "pimp-learning.json",
     "pimp-good.json",
@@ -223,6 +233,18 @@ ACTIONS = {
         # Shadow sleeve. Public candles only. Entry gate still blocks new buys.
         "run": {"argv": ("bot.py",), "entry": True, "timeout": 45, "label": "Run one check"},
     },
+    "btc-carry": {
+        # Shadow sleeve. Public funding archive only. Entry gate blocks a new open.
+        "run": {"argv": ("bot.py",), "entry": True, "timeout": 60, "label": "Run one check"},
+    },
+    "sports-sharp-lag": {
+        # Shadow sleeve. Sharp fair vs Kalshi ask. Sports floor 0.06 locked.
+        "run": {"argv": ("bot.py",), "entry": True, "timeout": 45, "label": "Run one check"},
+    },
+    "fed-watch": {
+        # Shadow sleeve. CME FedWatch fair vs Kalshi ask. Econ floor 0.05. Idea-bank.
+        "run": {"argv": ("bot.py",), "entry": True, "timeout": 45, "label": "Run one check"},
+    },
     "wall-street": {
         # Display floor. The script skips. It is not on the timer.
         "run": {"argv": ("bot.py",), "entry": False, "timeout": 15, "label": "Show the floor"},
@@ -230,13 +252,13 @@ ACTIONS = {
 }
 
 # One automatic pass. Intervals are seconds. Clock times are America/Chicago.
-# Daily slots run once per Chicago day, the first time the process is up inside
-# the window. The Kalshi scan uses the desk's paper scan (no --any-time) and
-# forced INX scans at 12:05 / 13:05 / 14:20 CT (up to 3/day). The morning brief stays
-# the desk's dry run. Settle is the desk's paper settle, once at 4:00 PM CT,
-# after the 3:00 PM contract time, so a closed paper trade can land in the
-# state file. Memecoin manages open exits about every 3 minutes (same script
-# still scans for new tickets; dual accurate/speed lanes; stop-bleed exits).
+# Daily clock slots: INX run windows retry on NO TRADE (see _remember) so fair/band
+# can clear later in-window — max 1 fill/day stays stone in the bots. The Kalshi
+# scan uses the desk's paper scan (no --any-time). Forced S&P scans at
+# 12:05 / 13:05 / 13:40 CT (up to 3/day) — third slot ends by 14:00 so it still
+# clears the stone 60m late-σ entry floor before 15:00 settle (old 14:20 slot was
+# always refuse). Morning brief stays dry run. Settle polls flip/exit; 4 PM lands
+# closed paper. Memecoin manages exits ~3m (still scans; dual lanes; stop-bleed).
 AUTO_RETRY_SEC = 900
 AUTO = (
     # Faster sports polls so tip-soon + dual lanes can land multiple fills.
@@ -248,11 +270,18 @@ AUTO = (
     {"id": "memecoin", "action": "run", "every_sec": 180},
     # Shadow research cadence. Does not spend desk cash. Fee floor stays 0.05.
     {"id": "coinbase-spot", "action": "run", "every_sec": 300},
+    # Held carry. Funding prints every 8h. The check does not flip the month.
+    {"id": "btc-carry", "action": "run", "every_sec": 300},
+    # Sharp→Kalshi lag research. Shadow only. Floor stays sports 0.06.
+    {"id": "sports-sharp-lag", "action": "run", "every_sec": 300},
+    # FedWatch→Kalshi relative value. Shadow + idea-bank. Floor stays econ 0.05.
+    {"id": "fed-watch", "action": "run", "every_sec": 300},
     {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "11:59"},
     # Forced INX scan slots (plan E1 #123) — up to 3 fee-aware scans / Chicago day.
+    # Third window ends ≤14:00 CT so late-σ 60m floor can still clear (15:00 settle).
     {"id": "kalshi-sp", "action": "run", "at_ct": "12:05", "until_ct": "12:25"},
     {"id": "kalshi-sp", "action": "run", "at_ct": "13:05", "until_ct": "13:25"},
-    {"id": "kalshi-sp", "action": "run", "at_ct": "14:20", "until_ct": "14:40"},
+    {"id": "kalshi-sp", "action": "run", "at_ct": "13:40", "until_ct": "14:00"},
     # Model-flip / settle polls before 15:00 CT binary settle (mirror sized).
     {"id": "kalshi-sp", "action": "settle", "at_ct": "13:00", "until_ct": "15:55"},
     {"id": "kalshi-sp", "action": "settle", "at_ct": "16:00", "until_ct": "23:30"},
@@ -341,6 +370,54 @@ BOTS = (
         ),
         "state": "paper_account.json",
         "kind": "spot",
+        "log": "",
+        "empty": "No paper account yet. A check writes paper_account.json.",
+        "shadow_only": True,
+    },
+    {
+        "id": "btc-carry",
+        "name": "BTC carry",
+        "folder": "btc-carry-paper",
+        "script": "bot.py",
+        "blurb": (
+            "Shadow BTC spot-long / perpetual-short carry. Public archive only. "
+            "Unlevered and held. A red month is a mark, not a flip. "
+            "Spends no desk cash."
+        ),
+        "state": "paper_account.json",
+        "kind": "carry",
+        "log": "",
+        "empty": "No paper account yet. A check writes paper_account.json.",
+        "shadow_only": True,
+    },
+    {
+        "id": "sports-sharp-lag",
+        "name": "Sports Sharp Lag",
+        "folder": "sports-sharp-lag-paper",
+        "script": "bot.py",
+        "blurb": (
+            "Shadow sharp-book fair vs Kalshi ask lag. "
+            "Buys only when lag edge after fee clears sports floor 0.06. "
+            "Spends no desk cash."
+        ),
+        "state": "paper_account.json",
+        "kind": "sports",
+        "log": "",
+        "empty": "No paper account yet. A check writes paper_account.json.",
+        "shadow_only": True,
+    },
+    {
+        "id": "fed-watch",
+        "name": "Fed Watch",
+        "folder": "fed-watch-paper",
+        "script": "bot.py",
+        "blurb": (
+            "Shadow CME FedWatch fair vs Kalshi Fed ask. "
+            "Buys only when edge after fee clears econ floor 0.05. "
+            "Idea-bank for main AUTO. Spends no desk cash."
+        ),
+        "state": "paper_account.json",
+        "kind": "macro",
         "log": "",
         "empty": "No paper account yet. A check writes paper_account.json.",
         "shadow_only": True,
@@ -502,7 +579,7 @@ BOT_PLANS = {
     },
     "kalshi-sized": {
         "buy": [
-            "KXINXU 3 PM CT; forced scans 12:05 / 13:05 / 14:20 CT",
+            "KXINXU 3 PM CT; S&P forced scans 12:05 / 13:05 / 13:40 CT; sized window retries on NO TRADE",
             "Ask band 80–92¢; order-book confirm",
             "Desk Kelly-lite stake (not fixed $25); venue kalshi_inx edge",
             "Anti-double vs kalshi-sp same ticker; residual edge ≥ venue + 1¢",
@@ -569,6 +646,77 @@ BOT_PLANS = {
         "exit_quality": "partial",
         "entry_gated": True,
         "stake": "none",
+    },
+    "sports-sharp-lag": {
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "Sharp-book fair vs Kalshi ask (sharp_quotes.json fixture or injected quotes)",
+            "Edge = sharp_fair − ask − Kalshi fee; buy only if edge ≥ locked sports 0.06",
+            "Fixed $25 from the shadow $500 sleeve; max 1 open",
+            "Empty quotes wait on sharp book — never invent fills",
+        ],
+        "sell": [
+            "Model-flip when sharp fair collapses through the ask",
+            "Settle / staff close is the backstop",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys",
+            "Sports floor 0.06 cannot be lowered",
+            "Incubation: 50 fee-aware settles before any staff graduate; no auto-promote",
+            "No tower_risk_budgets share while shadow_only",
+        ],
+        "exit_quality": "partial",
+        "entry_gated": True,
+        "stake": "fixed-25",
+    },
+    "fed-watch": {
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "CME FedWatch fair vs Kalshi ask (fedwatch_quotes.json fixture or injected bins)",
+            "Edge = fedwatch_fair − ask − Kalshi fee; buy only if edge ≥ locked econ 0.05",
+            "Fixed $25 from the shadow $500 sleeve; max 1 open",
+            "Empty quotes wait on FedWatch — never invent fills",
+            "Idea-bank: KXFED/rates refuse main AUTO graduation",
+        ],
+        "sell": [
+            "Model-flip when FedWatch fair collapses through the ask",
+            "Settle / staff close is the backstop",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys",
+            "Econ floor 0.05 cannot be lowered",
+            "Incubation idea-bank only — staff graduate to main AUTO refused",
+            "No tower_risk_budgets share while shadow_only",
+        ],
+        "exit_quality": "partial",
+        "entry_gated": True,
+        "stake": "fixed-25",
+    },
+    "btc-carry": {
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "Long BTC spot and short the BTC perpetual, same notional, leverage 1",
+            "Public Binance archive funding and 8h premium index; no key",
+            "Spot taker 0.10% and perp taker 0.05%. Round trip 0.30%, paid once to open",
+            "Open only when both marks exist. Then hold. Do not flip the month",
+        ],
+        "sell": [
+            "A red funding month is marked and is not a close",
+            "Flipping every month is refused. That path pays the 0.30% round trip every month",
+            "The sleeve does not add a second leg after a red month",
+            "Staff close is the backstop. Nothing here auto-promotes",
+        ],
+        "failsafes": [
+            "Desk entry gate blocks a new open. An open hold still marks",
+            "Spot taker stays 0.10% and perp taker stays 0.05%. The Coinbase 0.90% taker is not used",
+            "kalshi_btc15m 0.05 is not this book and is not lowered",
+            "Leverage above 1 is put back to 1. Notional stays the $500 sleeve",
+            "Pass bar: after-fee monthly median stays positive. A monthly flip is a reject",
+            "Pause file. A Binance key in the environment refuses the check",
+        ],
+        "exit_quality": "partial",
+        "entry_gated": True,
+        "stake": "sleeve-500",
     },
 }
 
@@ -697,6 +845,9 @@ ROI_POLICY = {
         "btc15m": [],
         "memecoin": ["fixed_ticket_25"],
         "coinbase-spot": ["fixed_ticket_25", "shadow_only"],
+        "btc-carry": ["shadow_only"],
+        "sports-sharp-lag": ["fixed_ticket_25", "shadow_only"],
+        "fed-watch": ["fixed_ticket_25", "shadow_only"],
         "wall-street": ["shadow_only"],
     },
     "target_exit_quality": {
@@ -706,6 +857,9 @@ ROI_POLICY = {
         "memecoin": "strong",
         "kalshi-sized": "partial",
         "coinbase-spot": "partial",
+        "btc-carry": "partial",
+        "sports-sharp-lag": "partial",
+        "fed-watch": "partial",
         "wall-street": "partial",
     },
 }
@@ -1412,16 +1566,26 @@ def _save_run(root: str, bot_id: str, row: dict) -> None:
 
 
 # Combined manage+buy scripts still run when the desk gate hits, with entries off.
-_MANAGE_WHEN_GATED = frozenset({"sports-gap", "memecoin", "btc15m"})
+_MANAGE_WHEN_GATED = frozenset({"sports-gap", "memecoin", "btc15m", "btc-carry"})
 
 
-def _child_env(block_entries: bool = False, shadow: dict | None = None) -> dict:
+def _child_env(
+    block_entries: bool = False,
+    shadow: dict | None = None,
+    *,
+    block_reason: str = "",
+) -> dict:
     env = {key: os.environ[key] for key in _ENV_KEEP if os.environ.get(key)}
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PAPER_ONLY"] = "1"
     if block_entries:
         env["DESK_BLOCK_ENTRIES"] = "1"
+        # Prefer-1: pass the real entry_gate line so manage-when-gated children
+        # densify ruin / daily-loss / max-open — never bland DESK_BLOCK_ENTRIES=1.
+        why = str(block_reason or os.environ.get("DESK_BLOCK_REASON") or "").strip()
+        if why:
+            env["DESK_BLOCK_REASON"] = why[:240]
     if shadow:
         env["DESK_SHADOW"] = "1"
         env["DESK_SHADOW_ID"] = str(shadow.get("id") or "")
@@ -1478,15 +1642,76 @@ def _kalshi_skip_run_body(summary: str) -> str:
     return ""
 
 
-def _kalshi_skip(root: str, state: dict | None, summary: str = "") -> str:
+def _kalshi_tower_folder(bot_id: str | None = None, folder: str | None = None) -> str:
+    """Resolve INX paper folder — sized must not inherit S&P staff-clear truth."""
+    if folder:
+        return folder
+    if bot_id == "kalshi-sized":
+        return "kalshi-sized-paper"
+    return "kalshi-sp500-paper"
+
+
+def _kalshi_drawdown_halt_line(
+    root: str,
+    state: dict | None,
+    *,
+    bot_id: str | None = None,
+    folder: str | None = None,
+) -> str:
+    """Entry-block truth when bankroll ≤ drawdown_halt (halted flag stays kill-only)."""
+    if not state or state.get("halted"):
+        return ""
+    bankroll = _num(state.get("bankroll"))
+    tower = _kalshi_tower_folder(bot_id, folder)
+    cfg = _read_json(_under(root, tower, "config.json")) or {}
+    dd_halt = _num(cfg.get("drawdown_halt_bankroll"))
+    start = _num(cfg.get("starting_bankroll")) or 500.0
+    under_dd = (
+        bankroll is not None
+        and dd_halt is not None
+        and float(bankroll) <= float(dd_halt) + 1e-9
+    )
+    if not under_dd:
+        return ""
+    # Staff waived soft DD for buys — still densify so $444 idle ≠ healthy empty settle.
+    if bool(cfg.get("staff_clear_drawdown_halt")):
+        return (
+            f"Staff cleared soft drawdown halt: bankroll ${float(bankroll):.2f} ≤ "
+            f"${float(dd_halt):.2f} (start ${float(start):.0f}). "
+            "Paper buys may resume; kill $400 + fee/band/max-1/day stay stone."
+        )
+    return (
+        f"Tower drawdown halt: bankroll ${float(bankroll):.2f} ≤ "
+        f"${float(dd_halt):.2f} (start ${float(start):.0f}). New buys off; exits still run."
+    )
+
+
+def _kalshi_skip(
+    root: str,
+    state: dict | None,
+    summary: str = "",
+    *,
+    bot_id: str | None = None,
+    folder: str | None = None,
+) -> str:
+    # Drawdown / kill beat bland settle CARD ("No open paper positions") so $444
+    # idle is not read as a healthy empty book.
+    tower = _kalshi_tower_folder(bot_id, folder)
+    dd = _kalshi_drawdown_halt_line(root, state, bot_id=bot_id, folder=tower)
+    if dd:
+        return dd
     run_skip = _kalshi_skip_run_body(summary)
     if run_skip:
-        return run_skip
+        low = run_skip.lower()
+        if "no open paper" in low or low in ("no paper buy.", "paper buy."):
+            pass  # fall through to calendar / kill densify
+        else:
+            return run_skip
     day = _today()
     reasons = []
     if day.weekday() >= 5:
         reasons.append("WEEKEND")
-    cal = _read_json(_under(root, "kalshi-sp500-paper", "calendar.json")) or {}
+    cal = _read_json(_under(root, tower, "calendar.json")) or {}
     key = day.isoformat()
     for name, days in cal.items():
         if str(name).startswith("_") or not isinstance(days, list):
@@ -1545,6 +1770,47 @@ def next_inx_scan_line(bot_id: str, now: dt.datetime | None = None) -> str:
     return f"Next {label} tomorrow {s['at_ct']} CT."
 
 
+def inx_in_run_window(bot_id: str, now: dt.datetime | None = None) -> bool:
+    """True when an INX tower's AUTO run/scan window is open (CT)."""
+    now = now or dt.datetime.now(CT)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=CT)
+    else:
+        now = now.astimezone(CT)
+    return any(
+        isinstance(slot, dict)
+        and str(slot.get("id") or "") == bot_id
+        and str(slot.get("action") or "") == "run"
+        and "at_ct" in slot
+        and _window_open(now, slot)
+        for slot in AUTO
+    )
+
+
+def _inx_bland_settle_summary(summary: str) -> bool:
+    """Empty-book settle output — must not wipe a densified in-window scan tip."""
+    text = str(summary or "").strip()
+    if not text:
+        return True
+    low = text.lower()
+    if "no trade" in low or low.startswith("card:"):
+        return False
+    # Sole / leading empty settle lines from bot.py settle with nothing open.
+    first = text.splitlines()[0].strip().lower().rstrip(".")
+    return first in ("no open paper positions", "no open paper position")
+
+
+def _inx_densified_scan_summary(summary: str) -> bool:
+    """Prior scan tip worth keeping over overlapping empty settle."""
+    low = str(summary or "").lower()
+    return (
+        "no trade" in low
+        or "card:" in low
+        or "inx fair" in low
+        or "staff cleared soft drawdown" in low
+        or "drawdown halt" in low
+    )
+
 def _btc_skip_card_body(summary: str) -> str:
     """Prefer densified evaluate CARD (#397) over generic no-buy boilerplate."""
     for line in str(summary or "").splitlines():
@@ -1581,6 +1847,14 @@ def _btc_skip(summary: str) -> str:
     card_skip = _btc_skip_card_body(summary)
     if card_skip:
         return card_skip[:400]
+    # No-window / ladder-only lines beat bland CARD + "did not include a skip
+    # line" lie (#499 sports twin).
+    for line in lines:
+        low = line.lower()
+        if "no open" in low and "window" in low:
+            return line[:400]
+        if "no open windows" in low:
+            return line[:400]
     return "The last run did not include a skip line."
 
 
@@ -1601,8 +1875,8 @@ def _sports_skip(summary: str) -> str:
             continue
         if low.startswith("no paper buy") or low.startswith("paper buy"):
             continue
-        if "no live or tip-soon" in low:
-            continue
+        # "No live or tip-soon games…" IS the skip reason — never lie as
+        # "did not include a skip line" (#498 INX tip twin).
         return body[:400]
     return "The last run did not include a skip line."
 
@@ -1910,7 +2184,7 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
         line = f"{view['traders']} traders on six desks. One book. It does not trade."
         view["why"] = card_copy(summary) or line
         return _finish_bot(view, spec, root)
-    if spec["kind"] in ("btc", "spot"):
+    if spec["kind"] in ("btc", "spot", "carry"):
         summary = str(run.get("summary") or "")
         view["skip"] = _btc_skip(summary)
         if spec["kind"] == "btc":
@@ -1971,7 +2245,9 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
         view["empty"] = spec["empty"]
         view["warning"] = _calendar_warning(root, spec["id"])
         if spec["kind"] == "kalshi":
-            view["skip"] = _kalshi_skip(root, None)
+            view["skip"] = _kalshi_skip(
+                root, None, bot_id=spec["id"], folder=spec.get("folder"),
+            )
         view["why"] = plain_reason(view["skip"]) if view["skip"] else ""
         return _finish_bot(view, spec, root)
     view["has_state"] = True
@@ -1985,7 +2261,10 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
         positions, trades, realized, today, risk, count, history = _kalshi_positions(state, day)
         view["cash"] = _num(state.get("bankroll"))
         # Prefer densified CARD/NO TRADE from last scan over calendar-only (#414 sibling).
-        view["skip"] = _kalshi_skip(root, state, summary=summary)
+        # Sized reads its own config — never inherit S&P staff-clear tip (#501 twin).
+        view["skip"] = _kalshi_skip(
+            root, state, summary=summary, bot_id=spec["id"], folder=spec.get("folder"),
+        )
     else:
         trades_path = _under(root, spec["folder"], "trades.csv")
         cap_log(trades_path)
@@ -2004,6 +2283,20 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
     # Sports: why already densifies CARD; skip stayed "" forever (#400 sibling).
     if spec["kind"] == "sports" and not view.get("skip"):
         view["skip"] = _sports_skip(summary)
+    # Kalshi: prefer drawdown/kill/staff-clear densify over settle boilerplate why.
+    if spec["kind"] == "kalshi":
+        skip = str(view.get("skip") or "")
+        why_low = str(view.get("why") or "").lower()
+        skip_low = skip.lower()
+        if skip and (
+            "drawdown halt" in skip_low
+            or "staff cleared soft drawdown" in skip_low
+            or "kill switch" in skip_low
+            or not why_low.strip()
+            or "no open paper" in why_low
+            or "no paper buy" in why_low
+        ):
+            view["why"] = plain_reason(skip)
     view["outside"] = _outside(root, spec["id"], stamp)
     _save_good_bot(root, spec["id"], view)
     return _finish_bot(view, spec, root)
@@ -2844,14 +3137,70 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         import desk_living
         iw = desk_living.injury_wire_chip(root)
         es = desk_living.eia_scout_chip(root)
+        ls = desk_living.line_shopper_chip(root)
+        bs = desk_living.btc_basis_scout_chip(root)
+        nhl = desk_living.nhl_poisson_audit_chip(root)
+        dv = desk_living.dvol_regime_chip(root)
+        mx = desk_living.multi_ex_disagree_chip(root)
+        fs = desk_living.funding_scout_chip(root)
+        mh = desk_living.metals_heat_chip(root)
+        eh = desk_living.energy_heat_chip(root)
+        ib = desk_living.inx_band_occupancy_chip(root)
+        e8 = desk_living.e8_pack_chips(root)
         desk_row["injury_wire"] = iw
         desk_row["eia_scout"] = es
+        desk_row["line_shopper"] = ls
+        desk_row["btc_basis_scout"] = bs
+        desk_row["nhl_poisson_audit"] = nhl
+        desk_row["dvol_regime"] = dv
+        desk_row["multi_ex_disagree"] = mx
+        desk_row["funding_scout"] = fs
+        desk_row["metals_heat"] = mh
+        desk_row["energy_heat"] = eh
+        desk_row["inx_band_occupancy"] = ib
+        desk_row.update(e8)
         if isinstance(desk_row.get("master"), dict):
             desk_row["master"]["injury_wire"] = desk_row["master"].get("injury_wire") or iw
             desk_row["master"]["eia_scout"] = desk_row["master"].get("eia_scout") or es
+            desk_row["master"]["line_shopper"] = desk_row["master"].get("line_shopper") or ls
+            desk_row["master"]["btc_basis_scout"] = (
+                desk_row["master"].get("btc_basis_scout") or bs
+            )
+            desk_row["master"]["nhl_poisson_audit"] = (
+                desk_row["master"].get("nhl_poisson_audit") or nhl
+            )
+            desk_row["master"]["dvol_regime"] = desk_row["master"].get("dvol_regime") or dv
+            desk_row["master"]["multi_ex_disagree"] = (
+                desk_row["master"].get("multi_ex_disagree") or mx
+            )
+            desk_row["master"]["funding_scout"] = (
+                desk_row["master"].get("funding_scout") or fs
+            )
+            desk_row["master"]["metals_heat"] = desk_row["master"].get("metals_heat") or mh
+            desk_row["master"]["energy_heat"] = desk_row["master"].get("energy_heat") or eh
+            desk_row["master"]["inx_band_occupancy"] = (
+                desk_row["master"].get("inx_band_occupancy") or ib
+            )
+            for name, chip in e8.items():
+                desk_row["master"][name] = desk_row["master"].get(name) or chip
     except Exception as exc:  # noqa: BLE001
         desk_row["injury_wire"] = {"paper_only": True, "error": type(exc).__name__}
         desk_row["eia_scout"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["line_shopper"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["btc_basis_scout"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["nhl_poisson_audit"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["dvol_regime"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["multi_ex_disagree"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["funding_scout"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["metals_heat"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["energy_heat"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row["inx_band_occupancy"] = {"paper_only": True, "error": type(exc).__name__}
+        try:
+            from helpers import e8_digest_pack
+            for name in e8_digest_pack.HELPER_NAMES:
+                desk_row[name] = {"paper_only": True, "error": type(exc).__name__}
+        except Exception:
+            pass
     try:
         import desk_living
         sh = desk_living.skip_historian_chip(root)
@@ -3008,7 +3357,7 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["living_memory_line"] = tl.get("memory_line")
         desk_row["fee_floors_assert"] = desk_living.fee_floors_assert(root)
         desk_row["betting_expand_gate"] = desk_living.betting_expand_gate(
-            root, remember=True,
+            root, bots=bots, remember=True,
         )
         # Snapshot path observes doctor without rewriting the weekly marker.
         desk_row["living_doctor"] = desk_living.living_doctor(root, record=False)
@@ -3255,6 +3604,8 @@ def _paper_ok(root: str, bot_id: str) -> str:
         return "Memecoin PAPER is not True. This desk will not start it."
     if bot_id == "coinbase-spot" and not _coinbase_paper(root):
         return "Coinbase spot config is not paper-only. This desk will not start it."
+    if bot_id == "btc-carry" and not _btc_carry_paper(root):
+        return "BTC carry config is not paper-only. This desk will not start it."
     if bot_id == "wall-street" and not _wall_street_paper(root):
         return "Wall Street config is not paper-only. This desk will not start it."
     return ""
@@ -3267,6 +3618,11 @@ def _wall_street_paper(root: str) -> bool:
 
 def _coinbase_paper(root: str) -> bool:
     cfg = _read_json(_under(root, "coinbase-spot-paper", "config.json")) or {}
+    return cfg.get("paper_only") is True and cfg.get("live_orders") is not True
+
+
+def _btc_carry_paper(root: str) -> bool:
+    cfg = _read_json(_under(root, "btc-carry-paper", "config.json")) or {}
     return cfg.get("paper_only") is True and cfg.get("live_orders") is not True
 
 
@@ -3335,7 +3691,11 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
             proc = subprocess.Popen(
                 [sys.executable, script, *spec["argv"][1:]],
                 cwd=cwd,
-                env=_child_env(block_entries=block_entries, shadow=shadow_env),
+                env=_child_env(
+                    block_entries=block_entries,
+                    shadow=shadow_env,
+                    block_reason=gate_note,
+                ),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -3358,8 +3718,27 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
                 f"Desk entry_gate blocked new paper buys; exits still ran.\n{gate_note}\n{summary}"
             )
         ok = (not timed_out) and proc.returncode == 0
+        # INX settle overlaps the sized/S&P scan window. Empty settle must not
+        # clobber densified NO TRADE / late-σ CARD tip (#497 twin densify).
+        kept_scan_tip = False
+        if (
+            ok
+            and action == "settle"
+            and bot_id in ("kalshi-sp", "kalshi-sized")
+            and _inx_bland_settle_summary(summary)
+            and inx_in_run_window(bot_id)
+        ):
+            prev_row = _load_runs(root).get(bot_id)
+            prev = prev_row if isinstance(prev_row, dict) else {}
+            prev_sum = str(prev.get("summary") or "")
+            if _inx_densified_scan_summary(prev_sum):
+                summary = prev_sum
+                kept_scan_tip = True
         row = {"at": _now(), "ok": ok, "summary": summary, "exit": proc.returncode, "action": action,
                "warning": warning, "entries_blocked": bool(block_entries)}
+        if kept_scan_tip:
+            row["kept_scan_tip"] = True
+            row["action"] = "run"  # tip stays scan-truth while settle found nothing open
         _save_run(root, bot_id, row)
         if not summary:
             summary = "The script finished with no output."
@@ -3372,6 +3751,7 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
         return {
             "ok": ok, "error": error, "summary": summary, "exit": proc.returncode,
             "warning": warning, "entries_blocked": bool(block_entries),
+            "kept_scan_tip": kept_scan_tip,
         }
     finally:
         lock.release()
@@ -3386,9 +3766,10 @@ def timer_text() -> str:
         "and syncs the Kalshi public trade tape for desk series. "
         "Commodity 15m about every 90 seconds. "
         "Kalshi morning brief once at 8:00 AM, dry run. "
-        "Kalshi paper scans forced at 12:05, 13:05, and 14:20 CT (up to 3/day). "
+        "Kalshi paper scans forced at 12:05, 13:05, and 13:40 CT (up to 3/day). "
         "Kalshi paper settle once at 4:00 PM. "
         "Coinbase spot shadow about every 5 minutes (public candles, no desk cash). "
+        "BTC carry shadow about every 5 minutes (public funding archive, no desk cash). "
         "Memecoin about every 3 minutes (manage exits, then scan; dual lanes; stop-bleed); "
         "about every 2 minutes when open paper needs manage. "
         "Commodity about every 90 seconds; about every 60 seconds when ≥2 series are open. "
@@ -3472,6 +3853,28 @@ def due_slots(now: dt.datetime, root: str) -> list:
     return due
 
 
+def _inx_run_should_retry(result: dict) -> bool:
+    """NO TRADE / empty scan inside an INX window — retry; do not burn the day stamp.
+
+    Max 1 fill/day stays stone in the tower risk_manager. Late-σ refuse ends
+    retries for that slot (no legal entry left before 15:00 settle).
+    """
+    if result.get("blocked"):
+        return True
+    if not result.get("ok"):
+        return False
+    summary = str(result.get("summary") or "").lower()
+    if "refuse late" in summary and "entry floor" in summary:
+        return False
+    if "no trade" in summary:
+        return True
+    if "no paper buy" in summary:
+        return True
+    if "no candidate cleared" in summary:
+        return True
+    return False
+
+
 def _remember(saved: dict, slot: dict, now: dt.datetime, result: dict) -> None:
     if result.get("error") == _BUSY:
         return
@@ -3482,7 +3885,17 @@ def _remember(saved: dict, slot: dict, now: dt.datetime, result: dict) -> None:
     if result.get("blocked"):
         saved[key + ":retry"] = _iso(now)
         return
-    # A finished check, or a hard failure, waits for the next clock slot.
+    # INX run windows: NO TRADE must not consume the daily stamp — fair/band can
+    # clear later in-window (stone late-σ / fee / max-1 stay locked).
+    if (
+        slot.get("id") in ("kalshi-sp", "kalshi-sized")
+        and slot.get("action") == "run"
+        and _inx_run_should_retry(result)
+    ):
+        saved[key + ":retry"] = _iso(now)
+        saved.pop(key, None)
+        return
+    # A finished check (fill / late-σ / hard fail) waits for the next clock slot.
     saved[key] = now.astimezone(CT).date().isoformat()
     saved.pop(key + ":retry", None)
 
@@ -3745,12 +4158,13 @@ def run_shadow_tick(
     *,
     run_bots: bool = True,
 ) -> dict:
-    """One-shot paper shadow smoke — densify edge08 + sports + commodity + INX + heartbeat.
+    """One-shot paper shadow smoke — densify edge08 + sports + commodity + carry + coinbase + meme + INX.
 
     Forces a DESK_SHADOW edge08 pass (bypasses 5m cadence), smokes sports-gap,
-    commodity-15m, and INX paper settles (hard-stop / t-final / t-stop / near-miss densify),
-    touches heartbeat, best-effort history settle. Never sets LIVE_ORDERS.
-    Floors stay locked. Writes tick+catchup markers so doctor isn't false-stale.
+    commodity-15m, btc-carry, coinbase-spot, memecoin, and INX paper settles
+    (hard-stop / t-final / t-stop / near-miss densify), touches heartbeat,
+    best-effort history settle. Never sets LIVE_ORDERS. Floors stay locked.
+    Writes tick+catchup markers so doctor isn't false-stale.
     """
     root = _root(root)
     if now is None:
@@ -3831,16 +4245,78 @@ def run_shadow_tick(
             "paper_only": True,
             "live_orders_enabled": False,
         })
-        # INX paper settle smoke — densify fee ledger + band history without noon scan.
-        # settle only (not mid-day scan invent); never LIVE.
+        # BTC carry shadow sleeve — densify hold/flat CARD without waiting for 300s slot.
+        # Shadow-only; spends no desk cash; never LIVE.
+        try:
+            carry = run_bot("btc-carry", "run", root)
+        except Exception as exc:  # noqa: BLE001
+            carry = {"ok": False, "error": type(exc).__name__, "blocked": False, "summary": ""}
+        shadow_rows.append({
+            "bot": "btc-carry",
+            "action": "shadow-smoke",
+            "shadow_id": None,
+            "ok": bool(carry.get("ok")),
+            "blocked": bool(carry.get("blocked")),
+            "error": carry.get("error") or "",
+            "summary": carry.get("summary") or "",
+            "paper_only": True,
+            "live_orders_enabled": False,
+        })
+        # Coinbase spot shadow sleeve — densify long-only / min_z CARD (300s twin of carry).
+        # Shadow-only; spends no desk cash; never LIVE; fee floor 0.05 stays locked.
+        try:
+            coinbase = run_bot("coinbase-spot", "run", root)
+        except Exception as exc:  # noqa: BLE001
+            coinbase = {"ok": False, "error": type(exc).__name__, "blocked": False, "summary": ""}
+        shadow_rows.append({
+            "bot": "coinbase-spot",
+            "action": "shadow-smoke",
+            "shadow_id": None,
+            "ok": bool(coinbase.get("ok")),
+            "blocked": bool(coinbase.get("blocked")),
+            "error": coinbase.get("error") or "",
+            "summary": coinbase.get("summary") or "",
+            "paper_only": True,
+            "live_orders_enabled": False,
+        })
+        # Memecoin paper smoke — densify tip CARD between 180s AUTO slots so why
+        # is not blank while the tower is armed (sports/coinbase twin). Main
+        # paper account; no DESK_SHADOW env; never LIVE; fee floor 0.05 locked.
+        try:
+            meme = run_bot("memecoin", "run", root)
+        except Exception as exc:  # noqa: BLE001
+            meme = {"ok": False, "error": type(exc).__name__, "blocked": False, "summary": ""}
+        shadow_rows.append({
+            "bot": "memecoin",
+            "action": "shadow-smoke",
+            "shadow_id": None,
+            "ok": bool(meme.get("ok")),
+            "blocked": bool(meme.get("blocked")),
+            "error": meme.get("error") or "",
+            "summary": meme.get("summary") or "",
+            "paper_only": True,
+            "live_orders_enabled": False,
+        })
+        # INX paper smoke — settle outside scan windows; during AUTO run windows
+        # smoke the real paper scan so tip why is not settle "No open paper"
+        # while the tower is in-window (#496 firm-queue twin). Never LIVE.
+        now_ct = dt.datetime.now(CT)
         for inx_bot in ("kalshi-sp", "kalshi-sized"):
+            in_run = any(
+                isinstance(slot, dict)
+                and str(slot.get("id") or "") == inx_bot
+                and str(slot.get("action") or "") == "run"
+                and _window_open(now_ct, slot)
+                for slot in AUTO
+            )
+            action = "run" if in_run else "settle"
             try:
-                inx = run_bot(inx_bot, "settle", root)
+                inx = run_bot(inx_bot, action, root)
             except Exception as exc:  # noqa: BLE001
                 inx = {"ok": False, "error": type(exc).__name__, "blocked": False, "summary": ""}
             shadow_rows.append({
                 "bot": inx_bot,
-                "action": "settle-smoke",
+                "action": "scan-smoke" if in_run else "settle-smoke",
                 "shadow_id": None,
                 "ok": bool(inx.get("ok")),
                 "blocked": bool(inx.get("blocked")),
@@ -3889,6 +4365,9 @@ def run_shadow_tick(
         "shadow_rows": shadow_rows,
         "sports_smoked": any(r.get("bot") == "sports-gap" for r in shadow_rows),
         "commodity_smoked": any(r.get("bot") == "commodity-15m" for r in shadow_rows),
+        "btc_carry_smoked": any(r.get("bot") == "btc-carry" for r in shadow_rows),
+        "coinbase_smoked": any(r.get("bot") == "coinbase-spot" for r in shadow_rows),
+        "memecoin_smoked": any(r.get("bot") == "memecoin" for r in shadow_rows),
         "inx_sp_smoked": any(r.get("bot") == "kalshi-sp" for r in shadow_rows),
         "inx_sized_smoked": any(r.get("bot") == "kalshi-sized" for r in shadow_rows),
         "catchup": catchup,
@@ -3898,8 +4377,9 @@ def run_shadow_tick(
         "repaired": catchup.get("repaired"),
         "note": (
             "Shadow tick — paper DESK_SHADOW edge08 + sports-gap + commodity-15m "
-            "+ INX settle smoke + catch-up densify. Never LIVE_ORDERS; never tip invent; "
-            "Discord never auto-posts."
+            "+ btc-carry + coinbase-spot + memecoin + INX scan-or-settle smoke "
+            "+ catch-up densify. Never LIVE_ORDERS; never tip invent; Discord "
+            "never auto-posts."
         ),
     }
 
@@ -4151,6 +4631,9 @@ TOWER_STARTER_CASH = {
     "kalshi-sp": 500.0,
     "kalshi-sized": 500.0,
     "coinbase-spot": 500.0,
+    "btc-carry": 500.0,
+    "sports-sharp-lag": 500.0,
+    "fed-watch": 500.0,
     "wall-street": 0.0,
 }
 TOWER_MIN_AMMO = {
@@ -4161,6 +4644,9 @@ TOWER_MIN_AMMO = {
     "kalshi-sp": 20.0,
     "kalshi-sized": 20.0,
     "coinbase-spot": 25.0,
+    "btc-carry": 500.0,
+    "sports-sharp-lag": 25.0,
+    "fed-watch": 25.0,
     "wall-street": 0.0,
 }
 
@@ -4446,6 +4932,16 @@ def _account_body(bot_id: str) -> dict:
             "paper_only": True,
             "shadow_only": True,
             "live_orders": False,
+        }
+    if bot_id == "btc-carry":
+        return {
+            "cash": 500.0,
+            "open": [],
+            "closed": [],
+            "paper_only": True,
+            "shadow_only": True,
+            "live_orders": False,
+            "entry_fees": 0,
         }
     if bot_id == "wall-street":
         return {
@@ -5526,6 +6022,8 @@ def _next_for(bot_id: str, root: str, now: dt.datetime) -> str:
     if bot_paused(root, bot_id):
         return "Paused"
     now_ct = now.astimezone(CT)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=dt.timezone.utc)
     saved = _load_auto(root)
     best = None
     for slot in AUTO:
@@ -5544,12 +6042,31 @@ def _next_for(bot_id: str, root: str, now: dt.datetime) -> str:
             if when < now:
                 when = now
         else:
+            # Clock window: never advertise a past start while the window is still
+            # open (sized/S&P HUD showed "1:00 PM" at 2:39 CT — settle start).
             start = dt.datetime.combine(now_ct.date(), _hhmm(slot["at_ct"]), CT)
             end = dt.datetime.combine(now_ct.date(), _hhmm(slot["until_ct"]), CT)
             key = _slot_key(slot)
-            if now_ct > end or saved.get(key) == now_ct.date().isoformat():
-                start = start + dt.timedelta(days=1)
-            when = start
+            day = now_ct.date().isoformat()
+            if saved.get(key) == day or now_ct > end:
+                when = start + dt.timedelta(days=1)
+            elif now_ct < start:
+                when = start
+            else:
+                # Inside an open, not-yet-finished window → due now (or after retry).
+                retry = _parsed(saved.get(key + ":retry") or "")
+                if retry is not None:
+                    when = retry + dt.timedelta(seconds=float(AUTO_RETRY_SEC))
+                    if when.tzinfo is None:
+                        when = when.replace(tzinfo=dt.timezone.utc)
+                    when_ct = when.astimezone(CT)
+                    if when_ct < now_ct:
+                        when = now
+                        when_ct = now_ct
+                    if when_ct > end:
+                        when = start + dt.timedelta(days=1)
+                else:
+                    when = now
         if best is None or when < best:
             best = when
     return central_text(best) if best is not None else ""
@@ -5603,6 +6120,7 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
     now = dt.datetime.now(dt.timezone.utc)
     view["book_id"] = {
         "sports": "sports", "kalshi": "kalshi", "btc": "bitcoin", "meme": "meme", "spot": "coinbase",
+        "carry": "btc-carry",
         "floor": "wallstreet",
     }.get(spec.get("kind"), "kalshi")
     view["shadow_only"] = bool(spec.get("shadow_only"))
@@ -5663,25 +6181,67 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
                 view["idle_copy"] = f"{view['idle_copy']} {heartbeat}"
             why = str(view.get("why") or "")
             if why and "Next scan" not in why and "In scan window" not in why and "Next " not in why:
-                # Keep CARD why; append schedule only when it looks like a no-buy finish.
-                if "no paper buy" in why.lower() or "check finished" in why.lower() or not why.strip():
-                    view["why"] = f"{why} {heartbeat}".strip()
+                # Keep CARD why; densify schedule on no-buy / empty-settle / staff-clear DD.
+                # Empty settle must not lead the why outside/inside scan (#497 twin) —
+                # lead with next-scan heartbeat so HUD is not a false empty-book miss.
+                why_low = why.lower()
+                # In an open scan window, empty settle must not lead the tip —
+                # sized/S&P HUD was reading as "In scan window… Settle…" while
+                # the real skip was late-σ / fair-p NO TRADE (#497 twin).
+                in_scan = heartbeat.lower().startswith("in scan window")
+                if "no open paper" in why_low:
+                    if in_scan and str(view.get("skip") or "").strip():
+                        view["why"] = plain_reason(view.get("skip") or "")
+                    elif in_scan:
+                        view["why"] = f"{heartbeat} Waiting on scan tip."
+                    else:
+                        view["why"] = f"{heartbeat} Settle smoke: empty book."
+                elif (
+                    "no paper buy" in why_low
+                    or "check finished" in why_low
+                    or "staff cleared soft drawdown" in why_low
+                    or not why.strip()
+                ):
+                    # Outside the entry window, schedule is why the book is idle.
+                    # Soft-DD staff-clear is resume truth — not a "we're down so we
+                    # don't trade" lead (HUD sibling after #506 tip densify).
+                    if "staff cleared soft drawdown" in why_low and not in_scan:
+                        view["why"] = f"{heartbeat} {why}".strip()
+                    else:
+                        view["why"] = f"{why} {heartbeat}".strip()
             elif not why:
                 view["why"] = heartbeat
     if not view.get("why") and view.get("skip"):
         view["why"] = plain_reason(view.get("skip") or "")
     summary = str(run.get("summary") or "")
     # Full book / desk gate: prefer a clear "waiting on exits" line over a dead BLOCKED look.
-    if int(view.get("open_count") or 0) > 0 and (
+    open_n = int(view.get("open_count") or 0)
+    why_low = str(view.get("why") or "").lower()
+    entry_skip_look = any(
+        token in why_low
+        for token in (
+            "speed floor",
+            "ask+fee",
+            "ask+fee+buf",
+            "no paper buy",
+            " < ",  # p/z gate fragments like "p 0.619 < …" / "z 0.30 < …"
+            "checked all open",
+        )
+    )
+    if open_n > 0 and (
         run.get("entries_blocked")
         or "max open" in summary.lower()
         or "open risk" in summary.lower()
         or "max_open" in (view.get("skip") or "").lower()
+        # Holding inventory: never let entry-gate CARD steal the why (BTC HUD sibling).
+        or entry_skip_look
+        or not why_low.strip()
     ):
-        view["why"] = (
-            f"Holding {int(view.get('open_count') or 0)} open paper position(s); "
-            "new buys stay off until an exit frees risk. Sell plan still runs each check."
-        )
+        if "holding" not in why_low and "sell plan" not in why_low:
+            view["why"] = (
+                f"Holding {open_n} open paper position(s); "
+                "sell plan still runs each check. Entry skips stay observe-only while risk is open."
+            )
         if run.get("ok") and not view.get("paused") and not view.get("read_error"):
             view["status"] = "running"
     if not view.get("warning") and spec.get("id") == "btc15m":

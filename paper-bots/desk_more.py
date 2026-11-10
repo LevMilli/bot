@@ -295,19 +295,79 @@ def classify_skip(reason: str | None, *, weekday: int | None = None) -> str:
             return "WEEKEND"
     if "weekend" in text:
         return "WEEKEND"
-    if "correlation" in text or "correlated" in text:
+    if (
+        "correlation" in text
+        or "correlated" in text
+        or "portfolio corr" in text
+    ):
+        # Prefer-2: commodity family portfolio-corr must not invent DATA via other.
         return "correlation"
-    if "entry_gate" in text or "daily loss" in text or "max open risk is reached" in text:
+    if (
+        "entry_gate" in text
+        or "daily loss" in text
+        or "max open risk is reached" in text
+        or "ruin drill" in text
+        or "desk_block_entries" in text
+    ):
         return "entry_gate"
-    if "learning" in text or ("bucket" in text and "cool" in text):
+    if (
+        "learning" in text
+        or "adverse cool" in text
+        or "anti-revenge" in text
+        or "anti revenge" in text
+        or "learn v2" in text
+        or ("paper bucket" in text and "under 40%" in text)
+        or ("probability bucket" in text and "under 40%" in text)
+        or ("bucket" in text and "cool" in text)
+    ):
+        # Prefer-2: learning_skip / learn-v2 / anti-revenge / adverse-cool are LEARN
+        # lockouts — must not invent DATA via other→DATA while CARD names them.
         return "learning"
     if "news" in text or "blackout" in text or "fomc" in text or "cpi" in text:
         return "news"
-    if "calendar" in text or "forexfactory" in text or "ff event" in text:
+    if (
+        "calendar" in text
+        or "forexfactory" in text
+        or "ff event" in text
+        # Prefer-2: correct idle (no window / no tip / lanes clear) is CALENDAR,
+        # not other→DATA invent that looks like a broken feed.
+        or "no open" in text and "window" in text
+        or "no tip window" in text
+        or "no live or tip-soon" in text
+        or "lanes clear" in text
+        or "too late" in text
+        or "min left" in text
+    ):
         return "calendar"
-    if "data" in text and ("error" in text or "missing" in text or "unavailable" in text):
+    # Stale-world / clock-skew / feed-down are freshness — DATA, not capacity invent.
+    if (
+        "stale-world" in text
+        or "clock-skew" in text
+        or ("data" in text and ("error" in text or "missing" in text or "unavailable" in text))
+        or "orderbook failed" in text
+        or "markets failed" in text
+        or "spot failed" in text
+        or "list incomplete" in text
+        or "list failed" in text
+    ):
         return "data"
-    if "tower budget" in text or "budget full" in text or "budget" in text and "left" in text:
+    # Daily-R settle-only is a budget lock (fee-clear profit target) — not DATA/other.
+    # Keeps zero-buy / skip_board BUDGET taxonomy honest beside CARD densify.
+    # Firm-queue deferral is desk risk-rank allocation (BUDGET), not DATA invent.
+    # Speed-lane off on red day is risk posture (BUDGET), not DATA invent.
+    # Selective +1 kill / expectancy starve are BUDGET posture locks.
+    if (
+        "settle-only" in text
+        or "daily r budget" in text
+        or "tower budget" in text
+        or "budget full" in text
+        or ("budget" in text and "left" in text)
+        or "firm-queue" in text
+        or "firm queue" in text
+        or ("speed lane" in text and ("red" in text or "blocked" in text or "off" in text))
+        or "selective +1 killed" in text
+        or "expectancy starve" in text
+    ):
         return "budget"
     if "cushion" in text:
         return "cushion"
@@ -315,7 +375,13 @@ def classify_skip(reason: str | None, *, weekday: int | None = None) -> str:
         return "z"
     if "depth" in text or "contracts at/below" in text:
         return "depth"
-    if "vol" in text and ("safe" in text or "high" in text or "extreme" in text):
+    if (
+        ("vol" in text and ("safe" in text or "high" in text or "extreme" in text))
+        or "volatile" in text
+        or "parlay window" in text
+        or "parlay candidate" in text
+    ):
+        # Prefer-2: volatile→≤5m parlay hold must not invent DATA via other.
         return "vol_safe"
     if "fair" in text and ("<" in text or "floor" in text or "safer" in text):
         return "fair"
@@ -323,11 +389,19 @@ def classify_skip(reason: str | None, *, weekday: int | None = None) -> str:
         return "close_game"
     if "ask" in text and ("band" in text or "outside" in text or "range" in text):
         return "ask_band"
-    if "already holding" in text:
+    if (
+        "already holding" in text
+        or "already open" in text
+        or text.rstrip(".").endswith("already open")
+    ):
+        # Prefer-2: paper_buy "already open" must not invent DATA via other.
         return "already_holding"
     if "cash" in text or "broke" in text:
         return "cash"
     if "max open risk" in text or "open-risk" in text or "open risk" in text:
+        return "open_risk"
+    # Sticky-open SLA: exits-first on red day — open-risk posture, not DATA invent.
+    if "sticky-open" in text or "sticky open" in text:
         return "open_risk"
     if "max open position" in text:
         return "max_open"
@@ -1539,6 +1613,49 @@ def self_check() -> None:
     assert stable_skip_code("fair") == "P"
     assert classify_skip("forexfactory calendar closed", weekday=2) == "calendar"
     assert classify_skip("tower budget left $0", weekday=2) == "budget"
+    assert classify_skip(
+        "anti-revenge: btc15m blocked on KXTEST ~12m after hard-stop", weekday=1
+    ) == "learning"
+    assert stable_skip_code("learning") == "LEARN"
+    assert classify_skip(
+        "Skipping BTC YES hour=14 CT in 0.8-0.9. "
+        "Fine paper bucket has 2/8 hits under 40% (learn v2).",
+        weekday=1,
+    ) == "learning"
+    assert classify_skip(
+        "Skipping BTC in the 0.8-0.9 probability bucket. "
+        "That paper bucket has 3 hits out of 8 settles, which is under 40%.",
+        weekday=1,
+    ) == "learning"
+    assert classify_skip(
+        "No commodity paper buy. portfolio corr: already open a energy series.",
+        weekday=1,
+    ) == "correlation"
+    assert classify_skip(
+        "sticky-open SLA: 2 open(s) past settle window — exits first", weekday=1
+    ) == "open_risk"
+    assert classify_skip("firm-queue deferred rank=3: lower score", weekday=1) == "budget"
+    assert classify_skip(
+        "speed lane off on red sports book (red $-5.00)", weekday=1
+    ) == "budget"
+    assert classify_skip(
+        "volatile — holding for ≤5m parlay window", weekday=1
+    ) == "vol_safe"
+    assert classify_skip(
+        "No commodity paper buy. already open.", weekday=1
+    ) == "already_holding"
+    assert classify_skip(
+        "No open KXBTC15M window right now — still tracking ETH/ladder history.",
+        weekday=1,
+    ) == "calendar"
+    assert classify_skip("orderbook failed for KXCL", weekday=1) == "data"
+    assert classify_skip(
+        "Selective +1 KILLED (5 green-day EV worsen) — base max_buys only",
+        weekday=1,
+    ) == "budget"
+    assert classify_skip("too late to enter", weekday=1) == "calendar"
+    assert classify_skip("min left 4.2 < 10", weekday=1) == "calendar"
+    assert classify_skip("ruin drill active — entries off", weekday=1) == "entry_gate"
     assert depth_adjusted_edge(0.10, 5, need=10) == round(0.05, 6)
     assert depth_adjusted_edge(0.10, 20, need=10) == round(0.10, 6)
     assert opportunity_score_v2(0.10, 0.8, 5, need=10) < opportunity_score_v2(0.10, 0.8, 20, need=10)

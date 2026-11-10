@@ -8,6 +8,7 @@ M3/M4 read desk_roi_plan fit + latency journals (no longer stubs).
 """
 from __future__ import annotations
 
+import json
 import math
 import os
 from typing import Any
@@ -305,7 +306,40 @@ def meme_stopbleed_measure(bot: dict | None = None, *, red_lock_usd: float = 5.0
     }
 
 
-def firm_roi_rescue(bots: list | None = None, *, cfg: dict | None = None) -> dict:
+def _inx_staff_clear_soft_dd(root: str | None, bot_id: str, cfg: dict | None = None) -> bool:
+    """True when staff waived soft $460 DD for that INX tower (kill $400 stays stone)."""
+    cfg = cfg or {}
+    # Explicit desk cfg wins; else read tower config.json.
+    # Sized accepts twin key staff_clear_sized_drawdown_halt OR shared staff_clear_drawdown_halt
+    # (risk_manager + config.json use the shared key).
+    if bot_id == "kalshi-sp" and "staff_clear_drawdown_halt" in cfg:
+        return bool(cfg.get("staff_clear_drawdown_halt"))
+    if bot_id == "kalshi-sized":
+        if "staff_clear_sized_drawdown_halt" in cfg:
+            return bool(cfg.get("staff_clear_sized_drawdown_halt"))
+        if "staff_clear_drawdown_halt" in cfg:
+            return bool(cfg.get("staff_clear_drawdown_halt"))
+    folder = {
+        "kalshi-sp": "kalshi-sp500-paper",
+        "kalshi-sized": "kalshi-sized-paper",
+    }.get(bot_id)
+    if not folder:
+        return False
+    try:
+        path = os.path.join(root or os.path.dirname(__file__), folder, "config.json")
+        with open(path, encoding="utf-8") as handle:
+            tower_cfg = json.load(handle)
+        return bool(tower_cfg.get("staff_clear_drawdown_halt"))
+    except Exception:
+        return False
+
+
+def firm_roi_rescue(
+    bots: list | None = None,
+    *,
+    cfg: dict | None = None,
+    root: str | None = None,
+) -> dict:
     """Overnight ROI rescue flags — which towers should refuse new entries."""
     cfg = cfg or {}
     flags = []
@@ -323,11 +357,21 @@ def firm_roi_rescue(bots: list | None = None, *, cfg: dict | None = None) -> dic
                 "why": f"meme red-day lock (today ${today:.2f} ≤ −$5)",
             })
         if bot_id in ("kalshi-sp", "kalshi-sized") and cash is not None and cash <= 460:
-            flags.append({
-                "bot": bot_id,
-                "action": "entries_off",
-                "why": f"INX drawdown halt (cash ${cash:.2f} ≤ $460)",
-            })
+            if _inx_staff_clear_soft_dd(root, bot_id, cfg):
+                flags.append({
+                    "bot": bot_id,
+                    "action": "staff_cleared_soft_dd",
+                    "why": (
+                        f"Staff cleared soft DD (cash ${cash:.2f} ≤ $460); "
+                        "paper buys may resume — kill $400 + fee/band/max-1/day stay stone"
+                    ),
+                })
+            else:
+                flags.append({
+                    "bot": bot_id,
+                    "action": "entries_off",
+                    "why": f"INX drawdown halt (cash ${cash:.2f} ≤ $460)",
+                })
         if bot_id == "sports-gap":
             red = None
             if today is not None and realized is not None:
@@ -379,7 +423,7 @@ def master_summary(
     m1_ready = sum(1 for r in rows if (r.get("passing") or {}).get("M1"))
     meme = next((b for b in (bots or []) if isinstance(b, dict) and b.get("id") == "memecoin"), None)
     stopbleed = meme_stopbleed_measure(meme)
-    rescue = firm_roi_rescue(bots, cfg=cfg)
+    rescue = firm_roi_rescue(bots, cfg=cfg, root=root)
     bleed = None
     misplaced = None
     plan = None
@@ -406,19 +450,17 @@ def master_summary(
         graduation = None
         retirement = None
         try:
-            # Refresh Chicago-day scorecard once per day for hillclimb reviews.
+            # Prefer live bots whenever provided — same-day stale scorecard m1
+            # must not lag Masters / hillclimb (#493 sports-calib twin).
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest = desk_roi_plan.latest_weekly_scorecard(root)
-            if root and bots and (
-                not isinstance(latest, dict) or str(latest.get("label") or "") != today
-            ):
+            if root and bots:
                 weekly = desk_roi_plan.capture_weekly_scorecard(
                     root, bots=bots, cfg=cfg, label=today,
                 )
             else:
-                weekly = latest
+                weekly = desk_roi_plan.latest_weekly_scorecard(root)
         except Exception:
             weekly = None
         try:
@@ -437,9 +479,9 @@ def master_summary(
                 from datetime import datetime
                 from zoneinfo import ZoneInfo
                 today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-                latest_hc = desk_roi_plan.hillclimb_kill_status(root).get("latest")
-                if not isinstance(latest_hc, dict) or str(latest_hc.get("label") or "") != today:
-                    desk_roi_plan.capture_hillclimb_week(root, bots=bots, label=today)
+                # Prefer live bots whenever provided — same-day stale hillclimb
+                # card must not lag Masters M1 (#488 profit_lock twin).
+                desk_roi_plan.capture_hillclimb_week(root, bots=bots, label=today)
             hillclimb = desk_roi_plan.hillclimb_kill_status(root)
         except Exception:
             hillclimb = None
@@ -449,10 +491,13 @@ def master_summary(
                 from datetime import datetime
                 from zoneinfo import ZoneInfo
                 today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-                latest_pl = desk_roi_plan.profit_lock_status(root).get("latest")
-                if not isinstance(latest_pl, dict) or str(latest_pl.get("label") or "") != today:
-                    desk_roi_plan.capture_profit_lock(root, bots=bots, label=today)
-            profit_lock = desk_roi_plan.profit_lock_status(root)
+                # Prefer live bots whenever provided — same-day stale week_pnl must
+                # not lag bleed_week / cold_harvest (#487 twin).
+                profit_lock = desk_roi_plan.capture_profit_lock(
+                    root, bots=bots, label=today,
+                )
+            else:
+                profit_lock = desk_roi_plan.profit_lock_status(root)
         except Exception:
             profit_lock = None
         living = None
@@ -499,16 +544,14 @@ def master_summary(
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_sr = desk_roi_plan.latest_skip_regret_weekly(root)
-            if root and (
-                not isinstance(latest_sr, dict)
-                or str(latest_sr.get("label") or "") != today
-            ):
+            # Prefer live journal whenever root is present — same-day stale
+            # skip-regret card must not lag new labels (#494 weekly twin).
+            if root:
                 plan["skip_regret_weekly"] = desk_roi_plan.skip_regret_weekly_card(
                     root, label=today,
                 )
             else:
-                plan["skip_regret_weekly"] = latest_sr
+                plan["skip_regret_weekly"] = desk_roi_plan.latest_skip_regret_weekly(root)
         except Exception:
             plan["skip_regret_weekly"] = None
         try:
@@ -523,16 +566,14 @@ def master_summary(
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_r = desk_roi_plan.latest_daily_r_board(root)
-            if root and bots and (
-                not isinstance(latest_r, dict)
-                or str(latest_r.get("label") or "") != today
-            ):
+            # Prefer live bots.today whenever provided — same-day stale
+            # settle_only=[] must not hide 1.5R profit-lock (#484 twin).
+            if root and bots:
                 plan["daily_r"] = desk_roi_plan.capture_daily_r_board(
                     root, bots, label=today,
                 )
             else:
-                plan["daily_r"] = latest_r
+                plan["daily_r"] = desk_roi_plan.latest_daily_r_board(root)
         except Exception:
             plan["daily_r"] = None
         try:
@@ -568,11 +609,9 @@ def master_summary(
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_ch = desk_roi_plan.cold_harvest_status(root).get("latest")
-            if root and bots and (
-                not isinstance(latest_ch, dict)
-                or str(latest_ch.get("label") or "") != today
-            ):
+            # Prefer live bots whenever provided — same-day stale week_pnl must
+            # not lag bleed_week / profit_lock (#486 twin).
+            if root and bots:
                 plan["cold_harvest"] = desk_roi_plan.capture_cold_harvest(
                     root, bots=bots, label=today,
                 )
@@ -585,6 +624,28 @@ def master_summary(
         except Exception:
             plan["hillclimb_lever"] = None
         try:
+            plan["hillclimb_e9_week"] = desk_roi_plan.hillclimb_e9_week_board(
+                root, bots=bots,
+            )
+            plan["hillclimb_broadcast"] = desk_roi_plan.hillclimb_lever_masters_broadcast(
+                root,
+            )
+        except Exception:
+            plan["hillclimb_e9_week"] = None
+            plan["hillclimb_broadcast"] = None
+        try:
+            import desk_roi_e9_chaos
+            plan["chaos_drills"] = desk_roi_e9_chaos.chaos_drill_board(root)
+        except Exception:
+            plan["chaos_drills"] = None
+        try:
+            import desk_roi_e9_doctrine
+            plan["doctrine_distance"] = desk_roi_e9_doctrine.doctrine_distance_board(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["doctrine_distance"] = None
+        try:
             plan["dual_control"] = desk_roi_plan.dual_control_status(root)
         except Exception:
             plan["dual_control"] = None
@@ -596,17 +657,17 @@ def master_summary(
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_os = desk_roi_plan.latest_capital_os(root)
-            if root and bots and (
-                not isinstance(latest_os, dict)
-                or str(latest_os.get("label") or "") != today
-            ):
+            # Prefer live bots whenever provided — same-day stale ok=True must
+            # not hide live barbell fail (#485 daily_r twin).
+            if root and bots:
                 plan["capital_os"] = desk_roi_plan.capture_capital_os(
                     root, bots=bots, cfg=cfg, desk_util=desk_util, label=today,
                 )
             else:
-                plan["capital_os"] = latest_os or desk_roi_plan.capital_os_status(
-                    root, bots=bots, cfg=cfg, desk_util=desk_util,
+                plan["capital_os"] = desk_roi_plan.latest_capital_os(root) or (
+                    desk_roi_plan.capital_os_status(
+                        root, bots=bots, cfg=cfg, desk_util=desk_util,
+                    )
                 )
         except Exception:
             plan["capital_os"] = None
@@ -619,19 +680,76 @@ def master_summary(
         except Exception:
             plan["exit_plans"] = None
         try:
+            plan["phase3_exits"] = desk_roi_plan.phase3_exit_gate(root, bots=bots)
+        except Exception:
+            plan["phase3_exits"] = None
+        try:
+            plan["phase4_calib"] = desk_roi_plan.phase4_calib_gate(root, bots=bots)
+        except Exception:
+            plan["phase4_calib"] = None
+        try:
+            plan["phase5_throughput"] = desk_roi_plan.phase5_throughput_gate(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["phase5_throughput"] = None
+        try:
+            plan["phase6_graduation"] = desk_roi_plan.phase6_graduation_gate(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["phase6_graduation"] = None
+        try:
+            plan["phase7_portfolio"] = desk_roi_plan.phase7_portfolio_gate(
+                root, bots=bots, cfg=cfg,
+            )
+        except Exception:
+            plan["phase7_portfolio"] = None
+        try:
+            plan["phase8_helpers"] = desk_roi_plan.phase8_helpers_gate(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["phase8_helpers"] = None
+        try:
+            plan["phase10_ruin"] = desk_roi_plan.phase10_ruin_gate(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["phase10_ruin"] = None
+        try:
+            plan["phase11_hillclimb"] = desk_roi_plan.phase11_hillclimb_gate(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["phase11_hillclimb"] = None
+        try:
+            plan["exit_quality"] = desk_roi_plan.exit_quality_observe(root, bots=bots)
+        except Exception:
+            plan["exit_quality"] = None
+        try:
+            plan["calib_clv"] = desk_roi_plan.calib_clv_observe(root, bots=bots)
+        except Exception:
+            plan["calib_clv"] = None
+        try:
+            plan["selective_throughput"] = desk_roi_plan.selective_throughput_observe(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["selective_throughput"] = None
+        try:
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_bw = desk_roi_plan.latest_bleed_week(root)
-            if root and bots and (
-                not isinstance(latest_bw, dict)
-                or str(latest_bw.get("label") or "") != today
-            ):
+            # Prefer live bots.today (#485 twin) — same-day stale green_usd lag.
+            if root and bots:
                 plan["bleed_week"] = desk_roi_plan.capture_bleed_week(
                     root, bots=bots, label=today,
                 )
             else:
-                plan["bleed_week"] = latest_bw or desk_roi_plan.firm_bleed_ratio(bots)
+                plan["bleed_week"] = desk_roi_plan.latest_bleed_week(root) or (
+                    desk_roi_plan.firm_bleed_ratio(bots)
+                )
         except Exception:
             plan["bleed_week"] = None
         try:
@@ -706,49 +824,50 @@ def master_summary(
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_bc = desk_roi_plan.latest_btc_calibration(root)
-            if root and bots and (
-                not isinstance(latest_bc, dict)
-                or str(latest_bc.get("label") or "") != today
-            ):
+            # Prefer live bots whenever provided — same-day stale calib card must
+            # not lag live BTC history (#490 commodity twin).
+            if root and bots:
                 plan["btc_calibration"] = desk_roi_plan.capture_btc_calibration(
                     root, bots=bots, label=today,
                 )
             else:
-                plan["btc_calibration"] = latest_bc or desk_roi_plan.btc_calibration_report(bots)
+                plan["btc_calibration"] = (
+                    desk_roi_plan.latest_btc_calibration(root)
+                    or desk_roi_plan.btc_calibration_report(bots)
+                )
         except Exception:
             plan["btc_calibration"] = None
         try:
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_ec = desk_roi_plan.latest_eth_calibration(root)
-            if root and bots and (
-                not isinstance(latest_ec, dict)
-                or str(latest_ec.get("label") or "") != today
-            ):
+            # Prefer live bots whenever provided — same-day stale calib card must
+            # not lag live ETH history (#491 btc twin).
+            if root and bots:
                 plan["eth_calibration"] = desk_roi_plan.capture_eth_calibration(
                     root, bots=bots, label=today,
                 )
             else:
-                plan["eth_calibration"] = latest_ec or desk_roi_plan.eth_calibration_report(bots)
+                plan["eth_calibration"] = (
+                    desk_roi_plan.latest_eth_calibration(root)
+                    or desk_roi_plan.eth_calibration_report(bots)
+                )
         except Exception:
             plan["eth_calibration"] = None
         try:
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_sc = desk_roi_plan.latest_sports_calibration(root)
-            if root and bots and (
-                not isinstance(latest_sc, dict)
-                or str(latest_sc.get("label") or "") != today
-            ):
+            # Prefer live bots whenever provided — same-day stale calib card must
+            # not lag live sports history (#492 eth twin).
+            if root and bots:
                 plan["sports_calibration"] = desk_roi_plan.capture_sports_calibration(
                     root, bots=bots, label=today,
                 )
             else:
                 plan["sports_calibration"] = (
-                    latest_sc or desk_roi_plan.sports_calibration_report(bots)
+                    desk_roi_plan.latest_sports_calibration(root)
+                    or desk_roi_plan.sports_calibration_report(bots)
                 )
         except Exception:
             plan["sports_calibration"] = None
@@ -756,28 +875,25 @@ def master_summary(
             from datetime import datetime
             from zoneinfo import ZoneInfo
             today = datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
-            latest_cc = desk_roi_plan.latest_commodity_calibration(root)
-            if root and bots and (
-                not isinstance(latest_cc, dict)
-                or str(latest_cc.get("label") or "") != today
-            ):
+            # Prefer live bots whenever provided — same-day stale calib card must
+            # not lag live commodity history (#489 hillclimb twin).
+            if root and bots:
                 plan["commodity_calibration"] = desk_roi_plan.capture_commodity_calibration(
                     root, bots=bots, label=today,
                 )
             else:
                 plan["commodity_calibration"] = (
-                    latest_cc or desk_roi_plan.commodity_calibration_report(bots)
+                    desk_roi_plan.latest_commodity_calibration(root)
+                    or desk_roi_plan.commodity_calibration_report(bots)
                 )
         except Exception:
             plan["commodity_calibration"] = None
         try:
-            status_fq = desk_roi_plan.firm_queue_status(root)
-            offers_n = int((status_fq or {}).get("offers_n") or 0)
-            latest_fq = (status_fq or {}).get("latest")
-            if root and offers_n > 0 and not isinstance(latest_fq, dict):
+            # Prefer live offer book whenever bots are provided — same-day stale
+            # capture must not keep cleared offers_n (#495 skip-regret twin).
+            if root and bots:
                 desk_roi_plan.capture_firm_queue(root, bots=bots, cfg=cfg)
-                status_fq = desk_roi_plan.firm_queue_status(root)
-            plan["firm_queue"] = status_fq
+            plan["firm_queue"] = desk_roi_plan.firm_queue_status(root)
         except Exception:
             plan["firm_queue"] = None
         try:
@@ -810,6 +926,26 @@ def master_summary(
             plan["gate_a_pilot"] = desk_roi_plan.gate_a_pilot_btc_calendar(root)
         except Exception:
             plan["gate_a_pilot"] = None
+        try:
+            plan["gate_a_pilot_sports_clv"] = desk_roi_plan.gate_a_pilot_sports_clv(root)
+            plan["gate_a_pilots"] = desk_roi_plan.gate_a_pilots_board(root)
+        except Exception:
+            plan["gate_a_pilot_sports_clv"] = None
+            plan["gate_a_pilots"] = None
+        try:
+            plan["helper_advice_log"] = desk_roi_plan.helper_advice_log_board(root)
+        except Exception:
+            plan["helper_advice_log"] = None
+        try:
+            plan["helper_advice_lift"] = desk_roi_plan.helper_advice_lift_board(root)
+        except Exception:
+            plan["helper_advice_lift"] = None
+        try:
+            plan["insight_helpers_execution_lock"] = (
+                desk_roi_plan.insight_helpers_execution_lock(root)
+            )
+        except Exception:
+            plan["insight_helpers_execution_lock"] = None
         try:
             plan["eligible_fill_funnel"] = desk_roi_plan.eligible_fill_funnel(
                 root, bots=bots,
@@ -1044,7 +1180,7 @@ def master_summary(
     if isinstance(expand, dict) and expand.get("blocked"):
         priority.insert(0, str(expand.get("label") or "betting expand BLOCKED")[:120])
     priority = finalize_living_priority(priority)
-    return {
+    out = {
         "paper_only": True,
         "version": MASTER_VERSION,
         "bars": dict(MASTER_BARS),
@@ -1130,6 +1266,16 @@ def master_summary(
         ),
         "ritual_soft_copy": ritual_soft_copy,
         "ritual_discord": ritual_soft_copy,
+        "hillclimb_soft_copy": (
+            ((plan or {}).get("hillclimb_broadcast") or {}).get("soft_copy")
+            if isinstance(plan, dict)
+            else None
+        ),
+        "hillclimb_discord": (
+            ((plan or {}).get("hillclimb_broadcast") or {}).get("discord")
+            if isinstance(plan, dict)
+            else None
+        ),
         "doctor_soft_copy": doctor_soft_copy,
         "doctor_fresh": doctor_fresh,
         "dual_control": dual_control,
@@ -1206,6 +1352,51 @@ def master_summary(
         ),
         "eia_scout": (
             (living or {}).get("eia_scout")
+            if isinstance(living, dict)
+            else None
+        ),
+        "line_shopper": (
+            (living or {}).get("line_shopper")
+            if isinstance(living, dict)
+            else None
+        ),
+        "btc_basis_scout": (
+            (living or {}).get("btc_basis_scout")
+            if isinstance(living, dict)
+            else None
+        ),
+        "nhl_poisson_audit": (
+            (living or {}).get("nhl_poisson_audit")
+            if isinstance(living, dict)
+            else None
+        ),
+        "dvol_regime": (
+            (living or {}).get("dvol_regime")
+            if isinstance(living, dict)
+            else None
+        ),
+        "multi_ex_disagree": (
+            (living or {}).get("multi_ex_disagree")
+            if isinstance(living, dict)
+            else None
+        ),
+        "funding_scout": (
+            (living or {}).get("funding_scout")
+            if isinstance(living, dict)
+            else None
+        ),
+        "metals_heat": (
+            (living or {}).get("metals_heat")
+            if isinstance(living, dict)
+            else None
+        ),
+        "energy_heat": (
+            (living or {}).get("energy_heat")
+            if isinstance(living, dict)
+            else None
+        ),
+        "inx_band_occupancy": (
+            (living or {}).get("inx_band_occupancy")
             if isinstance(living, dict)
             else None
         ),
@@ -1305,6 +1496,13 @@ def master_summary(
             "No profit guarantee. Fee floors unchanged."
         ),
     }
+    try:
+        import desk_living
+        for name in desk_living.e8_pack_helper_names():
+            out[name] = (living or {}).get(name) if isinstance(living, dict) else None
+    except Exception:
+        pass
+    return out
 
 
 def self_check() -> None:

@@ -412,8 +412,60 @@ def paper_sell(state: dict, pos: dict, bid: float, fee: float, reason: str) -> f
     return pnl
 
 
-def manage_model_flips(state: dict, side_now, prob_now, bid, fee, delta, ticker=None) -> list[str]:
-    """Exit open commodity paper when the live model flips against the held side."""
+def listing_bid_for_side(market, side):
+    """Held-contract listing bid from a window/market dict (yes_bid / no_bid)."""
+    if not isinstance(market, dict):
+        return None
+    s = str(side or "").upper()
+    if s == "YES":
+        raw = market.get("yes_bid")
+    elif s == "NO":
+        raw = market.get("no_bid")
+    else:
+        return None
+    if raw in (None, ""):
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def mark_bid_for_held(pos, *, model_side=None, model_bid=None, market=None):
+    """Bid that marks the *held* contract — never the complementary model side.
+
+    On side flips `evaluate` quotes the new model side. Selling YES inventory at
+    the NO bid (or vice versa) invents PnL / drops honest time-stop densify.
+    Prefer same-side model bid, else listing for held. Refuse complementary invent.
+    When model_side is omitted (legacy callers), model_bid is treated as held-side.
+    """
+    held = str((pos or {}).get("side") or "").upper()
+    ms = str(model_side or "").upper()
+    if model_bid is not None and (not ms or (held and held == ms)):
+        try:
+            b = float(model_bid)
+            if b > 0:
+                return b
+        except (TypeError, ValueError):
+            pass
+    if ms and held and held != ms:
+        listing = listing_bid_for_side(market, held)
+        if listing is not None and float(listing) > 0:
+            return float(listing)
+        return None
+    listing = listing_bid_for_side(market, held)
+    if listing is not None and float(listing) > 0:
+        return float(listing)
+    return None
+
+
+def manage_model_flips(
+    state: dict, side_now, prob_now, bid, fee, delta, ticker=None, market=None,
+) -> list[str]:
+    """Exit open commodity paper when the live model flips against the held side.
+
+    Sell mark is always the held-side bid (see mark_bid_for_held) — BTC #456 sibling.
+    """
     still = []
     sold = []
     for pos in list(state.get("open") or []):
@@ -437,11 +489,19 @@ def manage_model_flips(state: dict, side_now, prob_now, bid, fee, delta, ticker=
                     reason = f"model-flip fair Δ≥{delta:g}"
             except Exception:
                 pass
-        if flip and bid is not None and float(bid) > 0:
-            pnl = paper_sell(state, pos, bid, fee, reason)
-            sold.append(f"{pos.get('ticker')} {reason} pnl {pnl:+.2f}")
-        else:
+        if not flip:
             still.append(pos)
+            continue
+        mark = mark_bid_for_held(
+            pos, model_side=side_now, model_bid=bid, market=market,
+        )
+        if mark is None or float(mark) <= 0:
+            still.append(pos)
+            continue
+        # Fee from held mark — never model-side complementary fee invent.
+        mark_fee = kalshi_fee(float(mark))
+        pnl = paper_sell(state, pos, mark, mark_fee, reason)
+        sold.append(f"{pos.get('ticker')} {reason} pnl {pnl:+.2f}")
     state["open"] = still
     return sold
 
@@ -475,11 +535,16 @@ def settle_account(state: dict) -> None:
         payout = float(pos.get("contracts") or 0) * (1.0 if won else 0.0)
         pnl = round(payout - float(pos.get("cost") or 0), 2)
         state["cash"] = round(float(state.get("cash") or 0) + payout, 2)
+        # Honest binary settle mark — catchup densify reads exit_price|exit_bid|mark_bid
+        # only (never entry companion bid). Losers with exit_price=0 can recover
+        # time-stop shadow when settle-retro market bid fields are missing; winners
+        # with exit_price=1 stay non-hits (mark PnL > 0 / wipe invent guard).
         pos.update({
             "closed": now.strftime("%Y-%m-%d %H:%M:%S UTC"),
             "pnl": pnl,
             "payout": round(payout, 2),
             "exit": "settled",
+            "exit_price": 1.0 if won else 0.0,
         })
         state.setdefault("closed", []).append(pos)
         try:
@@ -705,9 +770,21 @@ def paper_buy(state: dict, ev: dict) -> str:
     if any(isinstance(p, dict) and p.get("ticker") == ticker for p in state.get("open") or []):
         return none_msg + " already open."
     if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
-        return "Desk entry_gate blocked a new paper buy."
+        # Prefer-1: honor stored DESK_BLOCK_REASON — do not invent bland entry_gate.
+        try:
+            import desk_living
+            return desk_living.desk_block_entries_reason(
+                "Desk entry_gate blocked a new paper buy."
+            )
+        except Exception:
+            return "Desk entry_gate blocked a new paper buy."
     try:
         import desk_roi_plan
+        # Prefer-1: commodity records adverse cool on deep mark-downs but used to
+        # keep buying — honor cool like BTC/sports before stale/revenge.
+        cool = desk_roi_plan.adverse_cool_blocks(DESK_ROOT, "commodity-15m")
+        if cool:
+            return cool
         stale = desk_roi_plan.stale_world_blocks(DESK_ROOT, "commodity-15m")
         if stale:
             return stale
@@ -1150,7 +1227,12 @@ def main() -> int:
                     continue
                 if pos.get("time_stop_shadowed"):
                     continue
-                bid_ts = ev.get("bid")
+                # Held-side listing bid — never complementary model-side ev["bid"]
+                # (BTC #456 sibling). Flip path clears open[] before all-opens densify.
+                held = str(pos.get("side") or "").upper()
+                bid_ts = listing_bid_for_side(m, held)
+                if bid_ts is None and held == str(ev.get("side") or "").upper():
+                    bid_ts = ev.get("bid")
                 if bid_ts is None:
                     continue
                 hit = desk_roi_plan.commodity_time_stop_hit(
@@ -1218,6 +1300,7 @@ def main() -> int:
                 kalshi_fee(float(ev["bid"])) if ev.get("bid") else 0.0,
                 flip_delta,
                 ticker=ev.get("ticker"),
+                market=m,
             )
             if sold:
                 save_account(account)
@@ -1490,21 +1573,73 @@ def main() -> int:
             f"Selective volume: max buys {max_buys_eff} "
             f"(today ${today_pnl:.2f} ≥ 0, fee floors locked)"
         )
-    # Daily R budget → settle-only after tower hits target (exits stay on).
+    # Buy-loop gate locks (cool / stale / daily-R) — densify CARD+brain and
+    # refuse max-buys(0) invent (#521 sports twin / Prefer-1).
     try:
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_roi_plan
+
+        def _densify_gate_skip(reason: str, *, note: str) -> None:
+            skip_reasons.insert(0, str(reason))
+            _densify_evaluate_skip(reasons=[str(reason)], note=note)
+
+        cool = desk_roi_plan.adverse_cool_blocks(DESK_ROOT, "commodity-15m")
+        if cool:
+            print(f"Adverse cool: {cool}")
+            max_buys_eff = 0
+            _densify_gate_skip(cool, note="commodity adverse-cool densify")
+        stale = desk_roi_plan.stale_world_blocks(DESK_ROOT, "commodity-15m")
+        if stale:
+            print(f"Stale-world: {stale}")
+            max_buys_eff = 0
+            _densify_gate_skip(stale, note="commodity stale-world densify")
+        # Prefer-1: densify real entry_gate reason (not bland invent) when honor locked.
+        if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
+            try:
+                import desk_living
+                gate_why = desk_living.desk_block_entries_reason(
+                    "Desk entry_gate blocked a new paper buy."
+                )
+            except Exception:
+                gate_why = ""
+            if gate_why:
+                print(f"Entry gate: {gate_why}")
+                max_buys_eff = 0
+                _densify_gate_skip(gate_why, note="commodity entry-gate densify")
+        # Daily R budget → settle-only after tower hits target (exits stay on).
+        # Insert last so settle-only stays skips[0] over cool/stale/entry (#521 twin).
         r_block = desk_roi_plan.daily_r_blocks("commodity-15m", today_pnl)
         if r_block:
             print(f"Settle-only: {r_block}")
             max_buys_eff = 0
+            _densify_gate_skip(r_block, note="commodity daily-r densify")
     except Exception:
         pass
     for row in ranked:
         if buys >= max_buys_eff:
             max_note = f"max buys this check ({max_buys_eff})"
-            print(f"  → skip: {max_note}")
+            # Prefer-1: gate (settle-only / cool / stale / entry / ruin) zeroed the cap —
+            # do not invent capacity skip into brain while CARD names the gate.
+            gate_keys = (
+                "settle-only", "adverse cool", "stale-world", "clock-skew",
+                "entry_gate", "ruin drill", "daily loss",
+                "max open risk", "max open positions",
+            )
+            gate_hits = [
+                str(s)
+                for s in skip_reasons
+                if any(k in str(s).lower() for k in gate_keys)
+            ]
+            gate_lock = max_buys_eff == 0 and bool(gate_hits)
+            gate_why = (
+                next((s for s in gate_hits if "settle-only" in s.lower()), gate_hits[0])
+                if gate_lock
+                else max_note
+            )
+            print(f"  → skip: {gate_why}")
+            if gate_lock:
+                break
             skip_reasons.append(max_note)  # CARD densify parity with BTC
             ev_skip = (row.get("_ev") if isinstance(row, dict) else None) or row or {}
             try:

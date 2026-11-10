@@ -26,8 +26,11 @@ TIP_FUNNEL_STAGES = (
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 HELPER_GATE_A_MIN_N = 20
 HELPER_FILLS_NAME = "desk_helper_fills.json"
+HELPER_ADVICE_LOG_NAME = "desk_helper_advice_log.json"
 FILL_TAX_DEFAULT = 0.01
 FIT_JOURNAL = "desk_fit_journal.json"
+MAX_ADVICE_LOG_ROWS = 4000
+ADVICE_DECISIONS = frozenset({"accept", "reject"})
 
 LOCKED_VENUE_FLOORS = {
     "kalshi_sports": 0.06,
@@ -36,6 +39,8 @@ LOCKED_VENUE_FLOORS = {
     "kalshi_inx": 0.02,
     "solana_dex": 0.02,
     "coinbase_spot": 0.05,
+    "binance_btc_carry": 0.02,
+    "kalshi_econ": 0.05,
 }
 
 INCUBATION_IDEA_BANK_ONLY = frozenset({
@@ -444,6 +449,450 @@ def gate_a_pilot_btc_calendar(root: str | None = None) -> dict:
         "note": (
             "Gate A pilot densify on btc15m calendar_scanner tags. "
             "Observe only — never staff-arms autonomy."
+        ),
+    }
+
+
+def gate_a_pilot_sports_clv(root: str | None = None) -> dict:
+    """Second Gate A pilot densify (#892): clv_closer tags on sports-gap.
+
+    Observe only — never staff-arms autonomy. Floors locked.
+    """
+    try:
+        import desk_roi_plan as drp
+        gate = drp.helper_gate_a(root, "clv_closer")
+    except Exception:
+        gate = {"ready": False, "n": 0, "n_to_ready": HELPER_GATE_A_MIN_N}
+    store = _load(_path(HELPER_FILLS_NAME, root), {"paper_only": True, "rows": []})
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    clv_sports = [
+        r for r in rows
+        if str(r.get("helper") or "") in ("clv_closer", "clv", "sports_clv")
+        and str(r.get("bot") or "") in ("sports-gap", "sports")
+    ]
+    taxed = []
+    for r in clv_sports:
+        pt = _finite(r.get("pnl_taxed"))
+        if pt is not None:
+            taxed.append(float(pt))
+            continue
+        pnl = _finite(r.get("pnl"))
+        if pnl is None:
+            continue
+        n_c = _finite(r.get("contracts")) or 1.0
+        taxed.append(float(pnl) - FILL_TAX_DEFAULT * max(1.0, n_c))
+    n = len(taxed)
+    exp = round(sum(taxed) / n, 4) if n else None
+    min_n = int(HELPER_GATE_A_MIN_N)
+    sports_all = [
+        r for r in rows
+        if str(r.get("bot") or "") in ("sports-gap", "sports")
+    ]
+    coverage = round(n / len(sports_all), 4) if sports_all else None
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "places_orders": False,
+        "staff_arm": False,
+        "helper": "clv_closer",
+        "bot": "sports-gap",
+        "n": n,
+        "n_to_ready": max(0, min_n - n),
+        "min_n": min_n,
+        "taxed_ev": exp,
+        "coverage_pct": None if coverage is None else round(coverage * 100.0, 2),
+        "coverage": coverage,
+        "gate_a": gate,
+        "ready": bool(n >= min_n and exp is not None and exp + 1e-12 >= 0.0),
+        "label": (
+            f"gate_a_pilot sports/clv n={n}/{min_n} ev={exp} "
+            f"cov={None if coverage is None else round(coverage * 100.0, 1)}% "
+            "(observe · no staff arm)"
+        ),
+        "note": (
+            "Gate A pilot densify on sports-gap clv_closer tags (#892). "
+            "Observe only — never staff-arms autonomy."
+        ),
+    }
+
+
+def gate_a_pilots_board(root: str | None = None) -> dict:
+    """Combined Gate A pilot board (btc/calendar + sports/clv)."""
+    btc = gate_a_pilot_btc_calendar(root)
+    sports = gate_a_pilot_sports_clv(root)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "staff_arm": False,
+        "btc_calendar": btc,
+        "sports_clv": sports,
+        "any_ready": bool(btc.get("ready") or sports.get("ready")),
+        "label": (
+            f"gate_a_pilots btc_ready={bool(btc.get('ready'))} "
+            f"sports_ready={bool(sports.get('ready'))}"
+        ),
+        "note": "Combined Gate A pilots — observe only; never auto-arm.",
+    }
+
+
+# ---- Helper advice accept/reject log (#897) --------------------------------
+
+def record_helper_advice_decision(
+    root: str | None,
+    *,
+    helper: str,
+    bot: str = "",
+    decision: str,
+    reason: str = "",
+    advice: dict | None = None,
+    ticker: str = "",
+) -> dict:
+    """Append one accept/reject of helper advice on a main (observe journal).
+
+    Rejects soften-floor advice via validate_helper_advice. Never places fills.
+    """
+    dec = str(decision or "").strip().lower()
+    if dec not in ADVICE_DECISIONS:
+        return {
+            "ok": False,
+            "reason": "decision must be accept|reject",
+            "paper_only": True,
+            "fee_floors_locked": True,
+        }
+    helper_id = str(helper or "").strip()
+    if not helper_id:
+        return {
+            "ok": False,
+            "reason": "helper required",
+            "paper_only": True,
+            "fee_floors_locked": True,
+        }
+    schema_ok = True
+    schema_reason = ""
+    if isinstance(advice, dict) and advice:
+        try:
+            from helpers.advice_schema import validate_helper_advice
+            schema_ok, schema_reason = validate_helper_advice(advice)
+        except Exception as exc:  # noqa: BLE001
+            schema_ok, schema_reason = False, type(exc).__name__
+        if not schema_ok and dec == "accept":
+            return {
+                "ok": False,
+                "reason": f"refuse accept — advice schema: {schema_reason}",
+                "paper_only": True,
+                "fee_floors_locked": True,
+                "schema_ok": False,
+            }
+    path = _path(HELPER_ADVICE_LOG_NAME, root)
+    store = _load(path, {"paper_only": True, "rows": [], "fee_floors_locked": True})
+    row = {
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "helper": helper_id[:64],
+        "bot": str(bot or "")[:32],
+        "ticker": str(ticker or "")[:64],
+        "decision": dec,
+        "reason": str(reason or "")[:200],
+        "schema_ok": schema_ok,
+        "schema_reason": str(schema_reason or "")[:120],
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+    }
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    rows.append(row)
+    store["rows"] = rows[-MAX_ADVICE_LOG_ROWS:]
+    store["last_at"] = row["at"]
+    store["paper_only"] = True
+    store["fee_floors_locked"] = True
+    tmp = path + ".tmp"
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    import json
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(store, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.replace(tmp, path)
+    return {"ok": True, "row": row, "n": len(store["rows"]), "paper_only": True}
+
+
+def helper_advice_log_board(root: str | None = None) -> dict:
+    """Observe board for helper advice accept/reject journal (#897)."""
+    store = _load(
+        _path(HELPER_ADVICE_LOG_NAME, root),
+        {"paper_only": True, "rows": [], "fee_floors_locked": True},
+    )
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    accepts = sum(1 for r in rows if r.get("decision") == "accept")
+    rejects = sum(1 for r in rows if r.get("decision") == "reject")
+    by_helper: dict[str, dict] = {}
+    for r in rows:
+        h = str(r.get("helper") or "") or "?"
+        bucket = by_helper.setdefault(h, {"helper": h, "accept": 0, "reject": 0})
+        if r.get("decision") == "accept":
+            bucket["accept"] += 1
+        elif r.get("decision") == "reject":
+            bucket["reject"] += 1
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "n": len(rows),
+        "accept_n": accepts,
+        "reject_n": rejects,
+        "accept_rate": round(accepts / len(rows), 4) if rows else None,
+        "by_helper": sorted(by_helper.values(), key=lambda x: -(x["accept"] + x["reject"])),
+        "recent": rows[-12:],
+        "label": f"helper advice log n={len(rows)} accept={accepts} reject={rejects}",
+        "note": (
+            "Mains log accept/reject of helper advice (#897). "
+            "Accept requires floors_locked schema. Never places fills."
+        ),
+    }
+
+
+def _fill_taxed(row: dict) -> float | None:
+    pt = _finite(row.get("pnl_taxed"))
+    if pt is not None:
+        return float(pt)
+    pnl = _finite(row.get("pnl"))
+    if pnl is None:
+        return None
+    n_c = _finite(row.get("contracts")) or 1.0
+    return float(pnl) - FILL_TAX_DEFAULT * max(1.0, n_c)
+
+
+def _last_advice_decision(
+    advice_rows: list[dict],
+    *,
+    helper: str,
+    bot: str,
+    at: str,
+) -> str:
+    """Most recent accept|reject for helper(+bot) at or before fill timestamp."""
+    helper_id = str(helper or "")
+    bot_id = str(bot or "")
+    stamp = str(at or "")
+    last = ""
+    for row in advice_rows:
+        if str(row.get("helper") or "") != helper_id:
+            continue
+        row_bot = str(row.get("bot") or "")
+        if bot_id and row_bot and row_bot != bot_id:
+            continue
+        row_at = str(row.get("at") or "")
+        if stamp and row_at and row_at > stamp:
+            continue
+        dec = str(row.get("decision") or "").strip().lower()
+        if dec in ADVICE_DECISIONS:
+            last = dec
+    return last
+
+
+def helper_advice_lift_board(root: str | None = None) -> dict:
+    """Measure insight advice lift on taxed EV along the Gate A path (#898).
+
+    Join advice accept/reject journal with helper-attributed fills. Observe only —
+    never places fills, never staff-arms, never softens floors.
+    """
+    advice_store = _load(
+        _path(HELPER_ADVICE_LOG_NAME, root),
+        {"paper_only": True, "rows": [], "fee_floors_locked": True},
+    )
+    fill_store = _load(
+        _path(HELPER_FILLS_NAME, root),
+        {"paper_only": True, "rows": []},
+    )
+    advice_rows = sorted(
+        [r for r in (advice_store.get("rows") or []) if isinstance(r, dict)],
+        key=lambda r: str(r.get("at") or ""),
+    )
+    fill_rows = [r for r in (fill_store.get("rows") or []) if isinstance(r, dict)]
+
+    buckets: dict[str, list[float]] = {"accept": [], "reject": [], "none": []}
+    by_helper: dict[str, dict] = {}
+    linked = 0
+    for fill in fill_rows:
+        taxed = _fill_taxed(fill)
+        if taxed is None:
+            continue
+        helper = str(fill.get("helper") or "")
+        bot = str(fill.get("bot") or "")
+        state = _last_advice_decision(
+            advice_rows, helper=helper, bot=bot, at=str(fill.get("at") or ""),
+        ) or "none"
+        if state not in buckets:
+            state = "none"
+        buckets[state].append(float(taxed))
+        if state in ADVICE_DECISIONS:
+            linked += 1
+        h = helper or "?"
+        slot = by_helper.setdefault(
+            h,
+            {
+                "helper": h,
+                "accept_n": 0,
+                "reject_n": 0,
+                "none_n": 0,
+                "accept_ev": None,
+                "reject_ev": None,
+                "lift": None,
+                "_accept": [],
+                "_reject": [],
+            },
+        )
+        if state == "accept":
+            slot["accept_n"] += 1
+            slot["_accept"].append(float(taxed))
+        elif state == "reject":
+            slot["reject_n"] += 1
+            slot["_reject"].append(float(taxed))
+        else:
+            slot["none_n"] += 1
+
+    def _mean(xs: list[float]) -> float | None:
+        return round(sum(xs) / len(xs), 4) if xs else None
+
+    accept_ev = _mean(buckets["accept"])
+    reject_ev = _mean(buckets["reject"])
+    none_ev = _mean(buckets["none"])
+    lift = None
+    if accept_ev is not None and reject_ev is not None:
+        lift = round(accept_ev - reject_ev, 4)
+    elif accept_ev is not None and none_ev is not None:
+        lift = round(accept_ev - none_ev, 4)
+
+    helper_rows = []
+    for slot in by_helper.values():
+        a = slot.pop("_accept")
+        r = slot.pop("_reject")
+        slot["accept_ev"] = _mean(a)
+        slot["reject_ev"] = _mean(r)
+        if slot["accept_ev"] is not None and slot["reject_ev"] is not None:
+            slot["lift"] = round(slot["accept_ev"] - slot["reject_ev"], 4)
+        helper_rows.append(slot)
+    helper_rows.sort(
+        key=lambda x: (
+            -(x["accept_n"] + x["reject_n"] + x["none_n"]),
+            str(x.get("helper") or ""),
+        ),
+    )
+
+    thin = len(buckets["accept"]) < 5 or (
+        len(buckets["reject"]) < 5 and len(buckets["none"]) < 5
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "staff_arm": False,
+        "places_orders": False,
+        "advice_n": len(advice_rows),
+        "fill_n": len(fill_rows),
+        "linked_n": linked,
+        "accept_n": len(buckets["accept"]),
+        "reject_n": len(buckets["reject"]),
+        "none_n": len(buckets["none"]),
+        "accept_ev": accept_ev,
+        "reject_ev": reject_ev,
+        "none_ev": none_ev,
+        "lift": lift,
+        "evidence_thin": thin,
+        "by_helper": helper_rows[:24],
+        "gate_a_path": True,
+        "label": (
+            f"advice_lift lift={lift} accept_n={len(buckets['accept'])} "
+            f"reject_n={len(buckets['reject'])} "
+            f"{'THIN' if thin else 'ok'} (observe · Gate A path)"
+        ),
+        "note": (
+            "Insight advice lift on helper-fill taxed EV (#898). "
+            "Accept vs reject (else vs untagged). Observe only — never arms."
+        ),
+    }
+
+
+# Forbidden execution tokens inside helpers/ (#899–900). Digest writers only.
+INSIGHT_HELPER_EXEC_FORBIDDEN = (
+    "paper_buy(",
+    "paper_sell(",
+    "paper_buy =",
+    "paper_sell =",
+    "def paper_buy",
+    "def paper_sell",
+)
+INSIGHT_HELPER_OPEN_WRITE_FORBIDDEN = (
+    '["opens"].append',
+    "['opens'].append",
+    '.get("opens", []).append',
+    ".get('opens', []).append",
+)
+INSIGHT_HELPER_SCAN_SKIP = frozenset({
+    "__init__.py",
+    "advice_schema.py",  # schema only; no execution
+})
+
+
+def insight_helpers_execution_lock(root: str | None = None) -> dict:
+    """#899/#900: insight helpers must not write opens or call paper_buy/sell.
+
+    Static scan of helpers/*.py. Observe / assert only — never places.
+    """
+    helpers_dir = os.path.join(_root(root), "helpers")
+    violations: list[dict] = []
+    scanned = 0
+    if os.path.isdir(helpers_dir):
+        for name in sorted(os.listdir(helpers_dir)):
+            if not name.endswith(".py") or name in INSIGHT_HELPER_SCAN_SKIP:
+                continue
+            path = os.path.join(helpers_dir, name)
+            if not os.path.isfile(path):
+                continue
+            scanned += 1
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    body = handle.read()
+            except OSError:
+                continue
+            for token in INSIGHT_HELPER_EXEC_FORBIDDEN:
+                if token in body:
+                    violations.append({
+                        "helper": name,
+                        "rule": "no_paper_buy_sell",
+                        "token": token,
+                        "plan": "#900",
+                    })
+            for token in INSIGHT_HELPER_OPEN_WRITE_FORBIDDEN:
+                if token in body:
+                    violations.append({
+                        "helper": name,
+                        "rule": "no_opens_write",
+                        "token": token,
+                        "plan": "#899",
+                    })
+    ok = not violations
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "places_orders": False,
+        "may_place_alone": False,
+        "ok": ok,
+        "pass": ok,
+        "scanned_n": scanned,
+        "violation_n": len(violations),
+        "violations": violations[:40],
+        "label": (
+            f"insight_exec_lock ok={ok} scanned={scanned} "
+            f"violations={len(violations)} (#899/#900)"
+        ),
+        "note": (
+            "Insight helpers must not write paper_state opens (#899) or call "
+            "paper_buy/paper_sell (#900). Digest/observe only."
         ),
     }
 

@@ -9,10 +9,12 @@ export const BEAM_COLORS = [
   '#ff2a6d', // magenta
   '#39ff14', // lime
   '#f9c80e', // amber
-  '#b967ff', // violet
-  '#ff8c42', // coral — 6th tower (Sized Kalshi)
-  '#4d9fff', // sky
-  '#ff4d9a', // hot pink
+  '#5b35ff', // indigo — Memecoin, kept off the pinks
+  '#ff8c42', // coral — Sized Kalshi
+  '#4d9fff', // sky — Coinbase spot
+  '#ff4fd8', // pink — BTC carry
+  '#7cf5c0', // mint — Sports sharp lag (shadow)
+  '#c4a35a', // brass — Fed Watch (shadow / idea-bank)
 ] as const
 
 /** Stable id → color so reordering bots does not reshuffle building colors. */
@@ -21,9 +23,12 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'kalshi-sp': '#ff2a6d',
   btc15m: '#39ff14',
   'commodity-15m': '#f9c80e',
-  memecoin: '#b967ff',
+  memecoin: '#5b35ff',
   'kalshi-sized': '#ff8c42',
   'coinbase-spot': '#4d9fff',
+  'btc-carry': '#ff4fd8',
+  'sports-sharp-lag': '#7cf5c0',
+  'fed-watch': '#c4a35a',
   'wall-street': '#c6a15b',
 }
 

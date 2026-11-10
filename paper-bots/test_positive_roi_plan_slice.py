@@ -183,16 +183,29 @@ class CommodityModelFlip(unittest.TestCase):
             }],
             "closed": [],
         }
+        market = {
+            "ticker": "KXGOLD-T",
+            "yes_bid": 0.40,
+            "yes_ask": 0.45,
+            "no_bid": 0.55,
+            "no_ask": 0.60,
+        }
         sold = commodity.manage_model_flips(
             state, side_now="NO", prob_now=0.40, bid=0.55, fee=0.02, delta=0.06,
             ticker="KXGOLD-T",
+            market=market,
         )
         self.assertEqual(len(sold), 1)
         self.assertEqual(len(state["open"]), 0)
         self.assertIn("model-flip", state["closed"][0]["exit"])
+        # Held YES marks yes_bid — never complementary NO model bid.
+        self.assertAlmostEqual(float(state["closed"][0]["exit_price"]), 0.40)
 
     def test_model_flip_adverse_helper_still_locked(self):
         self.assertTrue(desk_profit.model_flip_adverse("YES", 0.85, 0.70, 0.08))
+        # Held-side fair for NO/away — drop flips; rise does not.
+        self.assertTrue(desk_profit.model_flip_adverse("NO", 0.85, 0.70, 0.08))
+        self.assertFalse(desk_profit.model_flip_adverse("away", 0.82, 0.91, 0.06))
 
 
 class FeeFloorsUntouched(unittest.TestCase):

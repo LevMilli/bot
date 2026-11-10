@@ -531,7 +531,14 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
     if skip:
         return skip
     if os.environ.get("DESK_BLOCK_ENTRIES") == "1" and not IS_SHADOW:
-        return "Desk entry_gate blocked a new paper buy. Settles still run."
+        # Prefer-1: honor stored DESK_BLOCK_REASON — do not invent bland entry_gate.
+        try:
+            import desk_living
+            return desk_living.desk_block_entries_reason(
+                "Desk entry_gate blocked a new paper buy. Settles still run."
+            )
+        except Exception:
+            return "Desk entry_gate blocked a new paper buy. Settles still run."
     if not signal_buy:
         return none_msg
     edge_val = edge
@@ -1478,15 +1485,54 @@ def main():
         max_buys_eff = int(MAX_BUYS_PER_CHECK)
     if today_pnl >= 0 and max_buys_eff > MAX_BUYS_PER_CHECK:
         print(f"Selective volume: max buys {max_buys_eff} (today ${today_pnl:.2f} ≥ 0, fee floors locked)")
-    # Daily R budget → settle-only after tower hits target (exits stay on).
+    # Buy-loop gate locks (cool / stale / daily-R) — densify CARD+brain and
+    # refuse max-buys(0) invent (#522 commodity / #521 sports twin).
     try:
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_roi_plan
+
+        def _densify_gate_skip(reason: str, *, note: str) -> None:
+            skip_reasons.insert(0, str(reason))
+            if desk_brain and not IS_SHADOW:
+                try:
+                    desk_brain.record_decision(
+                        DESK_ROOT, bot="btc15m", action="skip",
+                        reasons=[str(reason)], note=note,
+                    )
+                except Exception:
+                    pass
+
+        cool = desk_roi_plan.adverse_cool_blocks(DESK_ROOT, "btc15m")
+        if cool:
+            print(f"Adverse cool: {cool}")
+            max_buys_eff = 0
+            _densify_gate_skip(cool, note="btc adverse-cool densify")
+        stale = desk_roi_plan.stale_world_blocks(DESK_ROOT, "btc15m")
+        if stale:
+            print(f"Stale-world: {stale}")
+            max_buys_eff = 0
+            _densify_gate_skip(stale, note="btc stale-world densify")
+        # Prefer-1: densify real entry_gate reason (not bland invent) when honor locked.
+        if not IS_SHADOW and os.environ.get("DESK_BLOCK_ENTRIES") == "1":
+            try:
+                import desk_living
+                gate_why = desk_living.desk_block_entries_reason(
+                    "Desk entry_gate blocked a new paper buy. Settles still run."
+                )
+            except Exception:
+                gate_why = ""
+            if gate_why:
+                print(f"Entry gate: {gate_why}")
+                max_buys_eff = 0
+                _densify_gate_skip(gate_why, note="btc entry-gate densify")
+        # Daily R budget → settle-only after tower hits target (exits stay on).
+        # Insert last so settle-only stays skips[0] over cool/stale/entry.
         r_block = desk_roi_plan.daily_r_blocks("btc15m", today_pnl)
         if r_block:
             print(f"Settle-only: {r_block}")
             max_buys_eff = 0
+            _densify_gate_skip(r_block, note="btc daily-r densify")
     except Exception:
         pass
 
@@ -1523,6 +1569,26 @@ def main():
         if buys >= max_buys_eff:
             skips += 1
             max_note = f"max buys this check ({max_buys_eff})"
+            # Prefer-1: gate (settle-only / cool / stale / entry / ruin) zeroed the cap —
+            # do not invent capacity skip into brain while CARD names the gate.
+            gate_keys = (
+                "settle-only", "adverse cool", "stale-world", "clock-skew",
+                "entry_gate", "ruin drill", "daily loss",
+                "max open risk", "max open positions",
+            )
+            gate_hits = [
+                str(s)
+                for s in skip_reasons
+                if any(k in str(s).lower() for k in gate_keys)
+            ]
+            gate_lock = max_buys_eff == 0 and bool(gate_hits)
+            if gate_lock:
+                gate_why = next(
+                    (s for s in gate_hits if "settle-only" in s.lower()),
+                    gate_hits[0],
+                )
+                print(f"--- {ev.get('ticker')}  skip: {gate_why}")
+                continue
             skip_reasons.append(max_note)
             print(f"--- {ev.get('ticker')}  skip: {max_note}")
             if not IS_SHADOW:

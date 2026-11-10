@@ -67,9 +67,15 @@ from desk_roi_e4 import (  # noqa: F401
     TIP_FUNNEL_STAGES,
     eligible_fill_funnel,
     gate_a_pilot_btc_calendar,
+    gate_a_pilot_sports_clv,
+    gate_a_pilots_board,
+    helper_advice_lift_board,
+    helper_advice_log_board,
     incubation_blocks_auto,
     incubation_idea_bank_only,
+    insight_helpers_execution_lock,
     note_selective_green_day,
+    record_helper_advice_decision,
     record_selective_attempt,
     record_tip_funnel,
     selective_kill_active,
@@ -160,34 +166,87 @@ MEME_RETIRE_MIN_N = 10
 # Phase 11: hillclimb kill — M3↑ with M1↓ for 2 Chicago weeks → revert lever.
 HILLCLIMB_KILL_WEEKS = 2
 # Phase 11: one lever per Chicago week from allowlist (raise-only on fee floors).
+# E9 #903–922: evidence template fields (success / kill / dry-run) on each lever.
+_HILLCLIMB_SUCCESS = "M1 non-worse vs prior Chicago week; optional eligible fills up"
+_HILLCLIMB_KILL = "M3↑ with M1↓ over 2 Chicago weeks → revert lever"
+_HILLCLIMB_DRY = {
+    "mode": "shadow_paper",
+    "writes_venue_params": False,
+    "applies_live": False,
+    "live_orders_enabled": False,
+    "fee_floors_locked": True,
+}
+
 HILLCLIMB_ALLOWLIST = {
     "VOL_SAFE": {
         "kind": "adapt_threshold",
         "raise_only": False,
         "note": "desk_adapt VOL_SAFE play-safe threshold experiment",
+        "success_metrics": _HILLCLIMB_SUCCESS,
+        "kill_metrics": _HILLCLIMB_KILL,
+        "dry_run": {
+            **_HILLCLIMB_DRY,
+            "target": "desk_adapt.VOL_SAFE",
+            "proposed": {"play_safe": True, "observe_only": True},
+        },
     },
     "HIT_FOR_BIG": {
         "kind": "adapt_threshold",
         "raise_only": False,
         "note": "desk_adapt HIT_FOR_BIG proven-80 threshold experiment",
+        "success_metrics": _HILLCLIMB_SUCCESS,
+        "kill_metrics": _HILLCLIMB_KILL,
+        "dry_run": {
+            **_HILLCLIMB_DRY,
+            "target": "desk_adapt.HIT_FOR_BIG",
+            "proposed": {"proven_80": True, "observe_only": True},
+        },
     },
     "venue_min_edge_btc": {
         "kind": "venue_floor",
         "raise_only": True,
         "venue": "kalshi_btc15m",
         "note": "BTC venue min_edge — raise only, never soften floor",
+        "success_metrics": _HILLCLIMB_SUCCESS,
+        "kill_metrics": _HILLCLIMB_KILL,
+        "dry_run": {
+            **_HILLCLIMB_DRY,
+            "target": "venue_min_edge.kalshi_btc15m",
+            "proposed": {"min_edge": 0.06, "floor_locked": 0.05, "raise_only": True},
+        },
     },
     "min_cushion_btc": {
         "kind": "btc_gate",
         "raise_only": True,
         "note": "BTC min cushion — raise only",
+        "success_metrics": _HILLCLIMB_SUCCESS,
+        "kill_metrics": _HILLCLIMB_KILL,
+        "dry_run": {
+            **_HILLCLIMB_DRY,
+            "target": "btc.min_cushion",
+            "proposed": {"min_cushion": "raise_only", "observe_only": True},
+        },
     },
     "kelly_fraction": {
         "kind": "sizing",
         "raise_only": False,
         "note": "Kelly fraction within desk bounds (0.05–1.0)",
+        "success_metrics": _HILLCLIMB_SUCCESS,
+        "kill_metrics": _HILLCLIMB_KILL,
+        "dry_run": {
+            **_HILLCLIMB_DRY,
+            "target": "sizing.kelly_fraction",
+            "proposed": {"kelly_fraction": 0.25, "bounds": [0.05, 1.0]},
+        },
     },
 }
+
+HILLCLIMB_NONE_LEVER = "NONE"
+HILLCLIMB_RITUAL_NAME = "desk_hillclimb_ritual.json"
+HILLCLIMB_POSTMORTEM_NAME = "desk_hillclimb_postmortem.json"
+HILLCLIMB_WIN_LOCK_NAME = "desk_hillclimb_win_lock.json"
+MAX_HILLCLIMB_POSTMORTEM = 200
+MAX_HILLCLIMB_WIN_LOCK = 200
 
 # Phase 10: profit-lock harvest paper analog — hit weekly target → 0.5× size.
 PROFIT_LOCK_TARGET_USD = 40.0
@@ -198,7 +257,7 @@ DAILY_R_USD = 20.0  # 1R paper unit
 DAILY_R_BUDGET = {
     "sports-gap": 1.5,
     "btc15m": 2.0,
-    "commodity-15m": 1.5,
+    "commodity-15m": 2.0,
     "kalshi-sp": 1.0,
     "kalshi-sized": 1.0,
     "memecoin": 0.5,
@@ -1568,6 +1627,7 @@ def sports_calibration_report(
         "action": action,
         "buckets": buckets,
         "auto_promote": False,
+        "auto_write_phi": False,
         "note": (
             "Sports calibration: high-fair (≥80%) bucket must hit ≥70% once n≥20. "
             "Miscalibration → fix fair/model — never soften 0.06 or size up on fake confidence."
@@ -1681,6 +1741,7 @@ def commodity_calibration_report(
         "action": action,
         "buckets": buckets,
         "auto_promote": False,
+        "auto_write_phi": False,
         "note": (
             "Commodity calibration: high-fair (≥80%) bucket must hit ≥70% once n≥20. "
             "Miscalibration → fix model — never soften 0.05 or size up on fake confidence."
@@ -6208,6 +6269,22 @@ def default_exit_plan(bot: str) -> dict:
             "fee_floors_locked": True,
             "note": "INX sized exits: model-flip when fair drifts; settle backstop; twin+1¢ edge locked.",
         }
+    if b in ("btc-carry", "btc_carry"):
+        return {
+            "kind": "hold+refuse_monthly_flip",
+            "hold": True,
+            "red_month_exit": False,
+            "monthly_flip": False,
+            "staff_close_backstop": True,
+            "shadow_only": True,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+            "unlevered": True,
+            "note": (
+                "Held unlevered BTC carry. A red funding month is a mark, not a flip. "
+                "Staff close is the backstop. No auto-promote."
+            ),
+        }
     if b in ("coinbase-spot", "coinbase"):
         return {
             "kind": "stop+take_profit+model_flip+time",
@@ -6306,6 +6383,1991 @@ def exit_plan_coverage(
         "note": (
             "Every desk open should stamp exit_plan at buy (fee-clear + loser towers). "
             "Missing plans are exit-quality debt — not a reason to soften floors."
+        ),
+    }
+
+
+# Explicit settle-backstop waivers — towers that keep settle/staff-close as the
+# final backstop while intermediate exits already run (Phase 3 exit gate).
+PHASE3_SETTLE_BACKSTOP_WAIVERS = {
+    "sports-gap": "gap_decay+scale_out+hard_stop_shadow+time_final_shadow; settle backstop",
+    "btc15m": "take_profit+model_flip live; settle backstop",
+    "commodity-15m": "model_flip live + time_stop_shadow; settle backstop",
+    "kalshi-sp": "model_flip live; settle backstop; post-macro blackout",
+    "kalshi-sized": "model_flip live; settle backstop; twin+1¢",
+    "memecoin": "−12% stop + mom flip + ladder TP; settle backstop",
+    "btc-carry": "shadow hold sleeve — staff close backstop (no monthly flip invent)",
+    "coinbase-spot": "shadow stop/TP/flip/time — staff promote gated",
+}
+
+
+def _phase3_has_intermediate_exits(plan: dict | None) -> bool:
+    """True when exit plan is not bare settle-only."""
+    if not isinstance(plan, dict):
+        return False
+    kind = str(plan.get("kind") or "").strip().lower()
+    if not kind or kind == "settle":
+        return False
+    flags = (
+        "take_profit", "model_flip", "hard_stop_shadow", "time_final_shadow",
+        "time_stop_shadow", "gap_decay", "scale_out", "ladder_take_profits",
+        "stop_pct", "hold", "red_month_exit",
+    )
+    if any(plan.get(k) for k in flags):
+        return True
+    # kind tokens like "stop+take_profit+…" without boolean flags
+    parts = [p for p in kind.replace(" ", "").split("+") if p]
+    return bool(parts) and parts != ["settle"]
+
+
+def phase3_exit_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Phase 3 exit-quality exit gate (master plan).
+
+    Pass when:
+      1. Every core tower has intermediate exits (not bare settle-only) OR an
+         explicit settle-backstop waiver naming those exits.
+      2. BTC take-profit path is honest (default_exit_plan take_profit=True).
+      3. Commodity model-flip is live in the plan (flip not shadow-only).
+      4. Sports hard-stop + time-final exist as shadow (live stays staff-gated).
+      5. exit_plan_coverage passes when opens exist.
+      6. Floors stay locked; never arms LIVE_ORDERS here.
+
+    Observe / certify only — does not auto-promote shadows.
+    """
+    core = list(FEE_CLEAR) + list(LOSER_IDS)
+    towers = []
+    bare = []
+    for bot_id in core:
+        plan = default_exit_plan(bot_id)
+        intermediate = _phase3_has_intermediate_exits(plan)
+        waiver = PHASE3_SETTLE_BACKSTOP_WAIVERS.get(bot_id) or ""
+        ok = bool(intermediate) and bool(waiver)
+        if not intermediate:
+            bare.append(bot_id)
+        towers.append({
+            "bot": bot_id,
+            "kind": plan.get("kind"),
+            "intermediate_exits": intermediate,
+            "settle_backstop": bool(plan.get("settle_backstop")),
+            "waiver": waiver,
+            "pass": ok,
+        })
+
+    btc_plan = default_exit_plan("btc15m")
+    cmd_plan = default_exit_plan("commodity-15m")
+    sports_plan = default_exit_plan("sports-gap")
+    btc_tp_honest = bool(btc_plan.get("take_profit")) and "take_profit" in str(
+        btc_plan.get("kind") or ""
+    )
+    cmd_flip_live = bool(cmd_plan.get("model_flip"))
+    sports_hs_shadow = bool(sports_plan.get("hard_stop_shadow"))
+    sports_tf_shadow = bool(sports_plan.get("time_final_shadow"))
+
+    coverage = exit_plan_coverage(root, bots=bots)
+    hard = sports_hard_stop_shadow_summary(root)
+    tstop = commodity_time_stop_shadow_summary(root)
+    tfinal = sports_time_final_shadow_summary(root)
+    quality = exit_quality_observe(root, bots=bots)
+
+    shadows = {
+        "sports_hard_stop": {
+            "promote_ready": bool(hard.get("promote_ready")),
+            "live": bool(hard.get("live")),
+            "n_with_pnl": int(hard.get("n_with_pnl") or 0),
+            "n_to_promote": max(
+                0,
+                int(hard.get("promote_min_n") or 30) - int(hard.get("n_with_pnl") or 0),
+            ),
+        },
+        "commodity_time_stop": {
+            "promote_ready": bool(tstop.get("promote_ready")),
+            "live": bool(tstop.get("live")),
+            "n_with_pnl": int(tstop.get("n_with_pnl") or 0),
+            "n_to_promote": int(tstop.get("n_to_promote") or 0),
+        },
+        "sports_time_final": {
+            "promote_ready": bool(tfinal.get("promote_ready")),
+            "live": bool(tfinal.get("live")),
+            "n_with_pnl": int(tfinal.get("n_with_pnl") or 0),
+            "n_to_promote": int(tfinal.get("n_to_promote") or 0),
+        },
+    }
+
+    gate_pass = (
+        not bare
+        and all(t.get("pass") for t in towers)
+        and btc_tp_honest
+        and cmd_flip_live
+        and sports_hs_shadow
+        and sports_tf_shadow
+        and bool(coverage.get("pass"))
+        and bool((fee_floors_locked_check() or {}).get("ok"))
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "phase": "P3",
+        "pass": gate_pass,
+        "towers": towers,
+        "bare_settle_only": bare,
+        "btc_tp_honest": btc_tp_honest,
+        "commodity_flip_live": cmd_flip_live,
+        "sports_hard_stop_shadow": sports_hs_shadow,
+        "sports_time_final_shadow": sports_tf_shadow,
+        "exit_plan_coverage": {
+            "pass": coverage.get("pass"),
+            "n_open": coverage.get("n_open"),
+            "n_with_plan": coverage.get("n_with_plan"),
+            "coverage": coverage.get("coverage"),
+        },
+        "shadows": shadows,
+        "exit_quality": {
+            "label": quality.get("label"),
+            "exit_regret": quality.get("exit_regret"),
+        },
+        "waivers": dict(PHASE3_SETTLE_BACKSTOP_WAIVERS),
+        "label": (
+            f"P3 exit-gate {'PASS' if gate_pass else 'FAIL'} "
+            f"towers={sum(1 for t in towers if t.get('pass'))}/{len(towers)} "
+            f"btc_tp={btc_tp_honest} cmd_flip={cmd_flip_live} "
+            f"cover={coverage.get('n_with_plan')}/{coverage.get('n_open')}"
+        ),
+        "note": (
+            "Phase 3 exit gate — intermediate exits + explicit settle-backstop waivers; "
+            "BTC TP honest; commodity flip live; sports HS/t-final shadow (staff-gated live). "
+            "Never softens floors; never arms LIVE_ORDERS; shadows stay staff-promote."
+        ),
+        "decision": (
+            "phase3_exit_gate_pass" if gate_pass else "phase3_exit_gate_fail"
+        ),
+    }
+
+
+# Phase 4 locked INX band decision — fee-aware research may promote later;
+# intuition never invents a new live band without staff + n≥20 leader.
+PHASE4_INX_BAND_LOCK = {
+    "live_band": INX_LIVE_BAND_DEFAULT,
+    "research_bands": tuple(b["id"] for b in INX_RESEARCH_BANDS),
+    "promote_min_n": INX_BAND_PROMOTE_MIN_N,
+    "note": (
+        "Live INX ask band stays 80–90¢ until fee-aware research leader n≥20 "
+        "and staff promote. Evidence-thin → keep_live_band (never invent)."
+    ),
+}
+
+
+def phase4_calib_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Phase 4 calibration & CLV exit gate (master plan).
+
+    Pass when infrastructure + locked decisions are honest:
+      1. Sports CLV journal complete (completeness pass; bar 52% when n≥20).
+      2. Per-league CLV board wired (NFL…NHL) without softening floors.
+      3. INX band decision locked — live 80–90 + research harness + dual-side
+         pick; evidence-thin keeps live band (no intuition invent).
+      4. BTC calibration report publishable; auto_write_phi stays False.
+      5. ETH calib slice separate from BTC; sports/commodity calib capture ok.
+      6. Learning skip v2 accepts side × hour_ct; adverse cool + depth need=10.
+      7. Floors stay locked; never arms LIVE_ORDERS; never auto-writes Φ.
+
+    Observe / certify only — does not change bands or Φ.
+    """
+    clv = clv_completeness(root)
+    clv_journal_ok = bool(clv.get("pass"))
+
+    leagues = None
+    league_ids = []
+    clv_beat_n = 0
+    clv_beat_rate = None
+    try:
+        import desk_more
+        leagues = desk_more.clv_by_league(root)
+        for row in (leagues.get("leagues") or []):
+            if isinstance(row, dict) and row.get("league"):
+                league_ids.append(str(row["league"]))
+        summary = desk_more.clv_summary(root)
+        clv_beat_n = int(summary.get("n") or 0)
+        clv_beat_rate = _finite(summary.get("beat_close_rate"))
+    except Exception:
+        leagues = None
+    # Economic bar: when enough settles, beat-close must clear 52%. Thin → observe.
+    clv_bar_ok = (
+        clv_beat_n < int(SPORTS_CLV_MIN_N)
+        or (
+            clv_beat_rate is not None
+            and clv_beat_rate + 1e-12 >= float(SPORTS_CLV_BAR)
+        )
+    )
+    expected_leagues = {"NFL", "NCAAF", "NBA", "WNBA", "MLB", "NHL"}
+    leagues_ok = bool(expected_leagues.issubset(set(league_ids)))
+
+    inx = inx_band_promote_status(root) or {}
+    live_band = str(
+        inx.get("live_band")
+        or inx.get("keep_live_band")
+        or INX_LIVE_BAND_DEFAULT
+    )
+    artifact_band = str(inx.get("artifact_band") or inx.get("band") or "")
+    keep_band = str(inx.get("keep_live_band") or live_band)
+    evidence_thin = bool(inx.get("evidence_thin"))
+    staff_approved = bool(inx.get("staff_approved") or inx.get("armed"))
+    # Locked = live default 80_90 AND (staff arm OR thin keep OR artifact matches).
+    inx_locked = (
+        live_band == INX_LIVE_BAND_DEFAULT
+        and keep_band == INX_LIVE_BAND_DEFAULT
+        and (
+            staff_approved
+            or evidence_thin
+            or artifact_band in ("", INX_LIVE_BAND_DEFAULT)
+        )
+        and float(SPORTS_CLV_BAR) == 0.52  # sanity — bar constant intact
+    )
+    dual_side_ok = False
+    try:
+        import desk_inx
+        dual_side_ok = callable(getattr(desk_inx, "dual_side_pick", None))
+    except Exception:
+        dual_side_ok = False
+    research_ok = callable(run_inx_band_research) and callable(staff_promote_inx_band)
+
+    btc = btc_calibration_report(bots)
+    eth = eth_calibration_report(bots)
+    sports = sports_calibration_report(bots)
+    commodity = commodity_calibration_report(bots)
+    btc_pub = (
+        isinstance(btc, dict)
+        and btc.get("auto_write_phi") is False
+        and "buckets" in btc
+        and callable(capture_btc_calibration)
+        and callable(latest_btc_calibration)
+    )
+    eth_ok = (
+        isinstance(eth, dict)
+        and eth.get("auto_write_phi") is False
+        and callable(capture_eth_calibration)
+    )
+    sports_calib_ok = isinstance(sports, dict) and sports.get("auto_write_phi") is False
+    commodity_calib_ok = (
+        isinstance(commodity, dict) and commodity.get("auto_write_phi") is False
+    )
+
+    learn_v2_ok = False
+    try:
+        import inspect
+        import pimp_desk
+        sig = inspect.signature(pimp_desk.learning_skip)
+        params = set(sig.parameters)
+        learn_v2_ok = {"side", "hour_ct"}.issubset(params)
+    except Exception:
+        learn_v2_ok = False
+
+    adverse_ok = callable(adverse_cool_blocks) and callable(record_adverse_fill)
+    depth_ok = False
+    depth_need = None
+    try:
+        import desk_more
+        depth_need = float(desk_more.DEFAULT_DEPTH_NEED)
+        depth_ok = abs(depth_need - 10.0) < 1e-9
+    except Exception:
+        depth_ok = False
+
+    observe = calib_clv_observe(root, bots=bots)
+    floors_ok = bool((fee_floors_locked_check() or {}).get("ok"))
+
+    gate_pass = (
+        clv_journal_ok
+        and clv_bar_ok
+        and leagues_ok
+        and inx_locked
+        and dual_side_ok
+        and research_ok
+        and btc_pub
+        and eth_ok
+        and sports_calib_ok
+        and commodity_calib_ok
+        and learn_v2_ok
+        and adverse_ok
+        and depth_ok
+        and floors_ok
+        # calib_clv_observe.ok may alert on selective_m1_thin (P5) — ignore for P4.
+        and bool(observe.get("auto_write_phi") is False)
+        and bool(observe.get("live_orders_enabled") is False)
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "auto_write_phi": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "phase": "P4",
+        "pass": gate_pass,
+        "clv_journal": {
+            "pass": clv_journal_ok and clv_bar_ok,
+            "completeness_pass": clv_journal_ok,
+            "n": int(clv.get("n") or 0),
+            "settled_n": int(clv.get("settled_n") or 0),
+            "completeness_rate": _finite(clv.get("rate")),
+            "beat_close_n": clv_beat_n,
+            "beat_close_rate": clv_beat_rate,
+            "bar": float(SPORTS_CLV_BAR),
+            "min_n": int(SPORTS_CLV_MIN_N),
+            "bar_ok": clv_bar_ok,
+            "fail_closed": bool(clv.get("fail_closed")),
+        },
+        "clv_leagues": {
+            "pass": leagues_ok,
+            "leagues": league_ids,
+            "expected": sorted(expected_leagues),
+            "beat_bar": float(SPORTS_CLV_BAR),
+        },
+        "inx_band_lock": {
+            "pass": inx_locked and dual_side_ok and research_ok,
+            "live_band": live_band,
+            "keep_live_band": keep_band,
+            "artifact_band": artifact_band or None,
+            "evidence_thin": evidence_thin,
+            "staff_approved": staff_approved,
+            "dual_side_pick": dual_side_ok,
+            "research_harness": research_ok,
+            "lock": dict(PHASE4_INX_BAND_LOCK),
+            "label": inx.get("label"),
+            "decision": inx.get("decision"),
+        },
+        "btc_calibration": {
+            "pass": btc_pub,
+            "n": btc.get("n"),
+            "miscalibrated": bool(btc.get("miscalibrated")),
+            "action": btc.get("action"),
+            "auto_write_phi": False,
+            "published": bool(latest_btc_calibration(root) or btc.get("n") is not None),
+        },
+        "eth_calibration": {
+            "pass": eth_ok,
+            "n": eth.get("n"),
+            "miscalibrated": bool(eth.get("miscalibrated")),
+            "auto_write_phi": False,
+        },
+        "sports_calibration": {
+            "pass": sports_calib_ok,
+            "n": sports.get("n"),
+            "miscalibrated": bool(sports.get("miscalibrated")),
+        },
+        "commodity_calibration": {
+            "pass": commodity_calib_ok,
+            "n": commodity.get("n"),
+            "miscalibrated": bool(commodity.get("miscalibrated")),
+        },
+        "learning_skip_v2": learn_v2_ok,
+        "adverse_cool": adverse_ok,
+        "depth_need": {"pass": depth_ok, "need": depth_need, "expected": 10.0},
+        "calib_clv_observe": {
+            "ok": observe.get("ok"),
+            "alerts": observe.get("alerts"),
+            "auto_write_phi": False,
+        },
+        "label": (
+            f"P4 calib-gate {'PASS' if gate_pass else 'FAIL'} "
+            f"clv={clv_journal_ok} inx_lock={inx_locked} "
+            f"btc_pub={btc_pub} learn_v2={learn_v2_ok} "
+            f"depth={depth_need}"
+        ),
+        "note": (
+            "Phase 4 calib/CLV gate — sports CLV journal + 52% bar when n≥20; "
+            "INX 80–90 locked until fee-aware staff promote; BTC/ETH calib "
+            "publish without auto Φ write; learn v2 + adverse cool + depth=10. "
+            "Never softens floors; never arms LIVE_ORDERS."
+        ),
+        "decision": (
+            "phase4_calib_gate_pass" if gate_pass else "phase4_calib_gate_fail"
+        ),
+    }
+
+
+# Phase 5 selective-throughput locks — more eligible fills only after M1 holds;
+# never invent fills; never auto-promote thin gates; commodity stays 2.0R.
+PHASE5_THROUGHPUT_LOCKS = {
+    "selective_green_only": True,
+    "sports_green_boost_default": 0,
+    "sports_green_boost_weeks": SPORTS_GREEN_BOOST_WEEKS,
+    "sports_clv_bar": SPORTS_CLV_BAR,
+    "near_miss_promote_n": NEAR_MISS_PROMOTE_N,
+    "near_miss_auto_promote": False,
+    "near_miss_code_live": False,
+    "empty_card_bar_sec": EMPTY_CARD_BAR_SEC,
+    "commodity_daily_r": 2.0,
+    "note": (
+        "Selective +1 on fee-clear greens only; sports green_boost stays 0 until "
+        "2 Chicago weeks M1≥0 + CLV≥52% n≥20 (staff arm only); near-miss soft "
+        "promote only n≥30 labeled EV≥0 with auto_promote=False; empty CARD <3s; "
+        "commodity daily R locked at 2.0 ($40)."
+    ),
+}
+
+
+def phase5_throughput_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Phase 5 selective throughput exit gate (master plan).
+
+    Pass when infrastructure + locks are honest:
+      1. Selective +1 only on fee-clear greens (red days never boost).
+      2. Sports green_boost defaults 0 when evidence thin; auto_promote=False.
+      3. Near-miss promote only n≥30 EV≥0 path; code LIVE=False; auto_promote=False.
+      4. Firm queue ranks sports+btc+commodity; tip funnel + skip-regret wired.
+      5. Empty-market CARD bar 3s; opportunity-cost clock present.
+      6. Commodity daily R locked at 2.0; floors locked; M3 not a stub.
+      7. Never arms LIVE_ORDERS; never invents fills; never force-arms here.
+
+    Observe / certify only — does not staff-arm, staff-clear, or invent evidence.
+    """
+    selective = selective_throughput_observe(root, bots=bots)
+    # Prove selective_max_buys refuses red-day boost.
+    red_ok = False
+    green_ok = False
+    try:
+        import desk_more
+        red_ok = int(desk_more.selective_max_buys("btc15m", base=3, today=-1.0, green_boost=1)) == 3
+        green_ok = int(desk_more.selective_max_buys("btc15m", base=3, today=1.0, green_boost=1)) == 4
+        sports_red = int(
+            desk_more.selective_max_buys("sports-gap", base=3, today=-5.0, green_boost=1)
+        ) == 3
+        loser_no = int(
+            desk_more.selective_max_buys("memecoin", base=3, today=5.0, green_boost=1)
+        ) == 3
+        selective_rules_ok = red_ok and green_ok and sports_red and loser_no
+    except Exception:
+        selective_rules_ok = False
+
+    boost = sports_green_boost_status(root, bots=bots)
+    boost_ok = (
+        bool(boost.get("auto_promote") is False)
+        and int(boost.get("weeks_required") or 0) == int(SPORTS_GREEN_BOOST_WEEKS)
+        and abs(float(boost.get("clv_bar") or 0) - float(SPORTS_CLV_BAR)) < 1e-12
+        and (
+            # Thin → boost must stay 0 unless already staff-armed (do not clear).
+            bool(boost.get("ready"))
+            or int(boost.get("green_boost") or 0) == 0
+            or bool(boost.get("staff_armed"))
+        )
+    )
+    # Force-arm while thin is staff ops debt — flag but do not clear.
+    boost_force_thin = (
+        bool(boost.get("evidence_thin"))
+        and bool(boost.get("staff_armed"))
+        and not bool(boost.get("ready"))
+    )
+
+    nm = near_miss_promote_status(root)
+    nm_ok = (
+        bool(nm.get("auto_promote") is False)
+        and bool(NEAR_MISS_LIVE) is False
+        and int(nm.get("promote_min_n") or 0) == int(NEAR_MISS_PROMOTE_N)
+        and int(NEAR_MISS_PROMOTE_N) >= 30
+    )
+    # Promote JSON may record evidence-led arm while ephemeral journal is empty
+    # in a fresh checkout — trust artifact shadow_n/EV; do not staff-clear.
+    nm_promote_art = _load(
+        _path(NEAR_MISS_PROMOTE_NAME, root),
+        {"paper_only": True, "staff_approved": False, "live": False},
+    )
+    art_n = int(nm_promote_art.get("shadow_n") or 0)
+    art_ev = _finite(nm_promote_art.get("shadow_ev"))
+    art_evidence_ok = (
+        art_n >= int(NEAR_MISS_PROMOTE_N)
+        and art_ev is not None
+        and art_ev + 1e-12 >= float(NEAR_MISS_PROMOTE_MIN_EV)
+    )
+    nm_force_thin = (
+        bool(nm.get("live"))
+        and bool(nm.get("evidence_thin"))
+        and not art_evidence_ok
+    )
+
+    firm = firm_queue_status(root) or {}
+    firm_ok = (
+        isinstance(firm, dict)
+        and callable(rebuild_firm_queue)
+        and callable(firm_queue_blocks)
+        and bool(firm.get("paper_only", True))
+    )
+
+    tip = tip_funnel_board(root) or {}
+    tip_ok = isinstance(tip, dict) and callable(record_tip_funnel)
+
+    skip_ok = callable(skip_regret_candidates)
+
+    empty = empty_card_status(root) or {}
+    empty_ok = (
+        isinstance(empty, dict)
+        and abs(float(empty.get("bar_sec") or 0) - float(EMPTY_CARD_BAR_SEC)) < 1e-9
+        and abs(float(EMPTY_CARD_BAR_SEC) - 3.0) < 1e-9
+        and bool(empty.get("pass"))  # n=0 passes; slow CARD fails
+    )
+
+    opp = opp_cost_summary(root) or {}
+    opp_ok = isinstance(opp, dict) and bool(opp.get("paper_only", True))
+
+    commodity_r = _finite((DAILY_R_BUDGET or {}).get("commodity-15m"))
+    r_ok = commodity_r is not None and abs(float(commodity_r) - 2.0) < 1e-9
+
+    # M3 stub gone — fit_buy_rate returns real rate board (not stub note).
+    fit = fit_buy_rate(root) or {}
+    m3_ok = (
+        isinstance(fit, dict)
+        and "stub" not in str(fit.get("note") or "").lower()
+        and "rate" in fit
+    )
+
+    throughput = throughput_vs_m1_board(root, bots=bots) or {}
+    throughput_ok = isinstance(throughput, dict)
+
+    floors_ok = bool((fee_floors_locked_check() or {}).get("ok"))
+
+    gate_pass = (
+        selective_rules_ok
+        and boost_ok
+        and nm_ok
+        and firm_ok
+        and tip_ok
+        and skip_ok
+        and empty_ok
+        and opp_ok
+        and r_ok
+        and m3_ok
+        and throughput_ok
+        and floors_ok
+        and bool(selective.get("paper_only", True))
+        # Force-arm-while-thin is staff debt — still fail closed for P5 certify
+        # so we never claim COMPLETE while a thin gate is live-armed.
+        and not boost_force_thin
+        and not nm_force_thin
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "force_arm": False,
+        "invent_fills": False,
+        "phase": "P5",
+        "pass": gate_pass,
+        "locks": dict(PHASE5_THROUGHPUT_LOCKS),
+        "selective": {
+            "pass": selective_rules_ok,
+            "m1_holds": bool(selective.get("m1_holds")),
+            "after_m1": bool(selective.get("after_m1")),
+            "boosted_n": selective.get("boosted_n"),
+            "red_day_no_boost": red_ok if selective_rules_ok else False,
+            "green_day_boost": green_ok if selective_rules_ok else False,
+            "label": selective.get("label"),
+        },
+        "sports_green_boost": {
+            "pass": boost_ok and not boost_force_thin,
+            "green_boost": boost.get("green_boost"),
+            "ready": bool(boost.get("ready")),
+            "evidence_thin": bool(boost.get("evidence_thin")),
+            "staff_armed": bool(boost.get("staff_armed")),
+            "force_armed_thin": boost_force_thin,
+            "auto_promote": False,
+            "missing": boost.get("missing"),
+            "label": boost.get("label"),
+        },
+        "near_miss": {
+            "pass": nm_ok and not nm_force_thin,
+            "promote_ready": bool(nm.get("promote_ready")),
+            "evidence_thin": bool(nm.get("evidence_thin")),
+            "labeled_n": nm.get("labeled_n"),
+            "n_to_promote": nm.get("n_to_promote"),
+            "shadow_ev": nm.get("shadow_ev"),
+            "soft_live": nm.get("soft_live"),
+            "artifact_shadow_n": art_n,
+            "artifact_shadow_ev": art_ev,
+            "artifact_evidence_ok": art_evidence_ok,
+            "force_armed_thin": nm_force_thin,
+            "auto_promote": False,
+            "code_live": bool(NEAR_MISS_LIVE),
+            "promote_min_n": int(NEAR_MISS_PROMOTE_N),
+            "label": nm.get("label"),
+        },
+        "firm_queue": {
+            "pass": firm_ok,
+            "label": firm.get("label"),
+            "observe_only": bool(firm.get("observe_only", True)),
+        },
+        "tip_funnel": {
+            "pass": tip_ok,
+            "label": tip.get("label"),
+            "rows_n": tip.get("rows_n"),
+        },
+        "skip_regret": {"pass": skip_ok},
+        "empty_card": {
+            "pass": empty_ok,
+            "bar_sec": empty.get("bar_sec"),
+            "p50_s": empty.get("p50_s"),
+            "status_pass": empty.get("pass"),
+        },
+        "opp_cost": {
+            "pass": opp_ok,
+            "n": opp.get("n"),
+            "label": opp.get("label"),
+        },
+        "daily_r": {
+            "pass": r_ok,
+            "commodity": commodity_r,
+            "expected_commodity": 2.0,
+            "sports": _finite((DAILY_R_BUDGET or {}).get("sports-gap")),
+            "btc": _finite((DAILY_R_BUDGET or {}).get("btc15m")),
+        },
+        "m3_fit": {
+            "pass": m3_ok,
+            "rate": fit.get("rate"),
+            "n_fit": fit.get("n_fit"),
+            "stub": False,
+        },
+        "throughput_vs_m1": {
+            "pass": throughput_ok,
+            "label": throughput.get("label"),
+        },
+        "label": (
+            f"P5 throughput-gate {'PASS' if gate_pass else 'FAIL'} "
+            f"selective={selective_rules_ok} "
+            f"boost={boost.get('green_boost')} "
+            f"nm_live={nm.get('soft_live') or 'none'} "
+            f"cmd_R={commodity_r} "
+            f"empty_bar={empty.get('bar_sec')}"
+        ),
+        "note": (
+            "Phase 5 selective throughput gate — green-only +1; sports green_boost "
+            "gated on 2w M1 + CLV bar; near-miss n≥30 EV≥0 staff-only; firm queue + "
+            "tip funnel + empty CARD <3s + opp-cost; commodity 2.0R locked. "
+            "Never softens floors; never arms LIVE_ORDERS; never invents fills; "
+            "never force-arms or staff-clears here."
+        ),
+        "decision": (
+            "phase5_throughput_gate_pass"
+            if gate_pass
+            else "phase5_throughput_gate_fail"
+        ),
+    }
+
+
+# Phase 6 Master graduation locks — 2 Chicago weeks M1–M7; never Master on
+# volume alone; meme pause/retire is staff-only; commodity stays 2.0R.
+PHASE6_GRADUATION_ORDER = (
+    "sports-gap",
+    "btc15m",
+    "commodity-15m",
+    "kalshi-sized",
+    "kalshi-sp",
+    "memecoin",
+)
+PHASE6_GRADUATION_LOCKS = {
+    "weeks_required": GRADUATION_WEEKS_REQUIRED,
+    "m_codes": tuple(GRADUATION_CODES),
+    "order": PHASE6_GRADUATION_ORDER,
+    "masters_exit_n": 3,
+    "meme_window_days": MEME_RETIRE_WINDOW_DAYS,
+    "meme_auto_retire": False,
+    "auto_promote": False,
+    "commodity_daily_r": 2.0,
+    "note": (
+        "Master = 2 consecutive Chicago weeks all M1–M7. Order: sports → BTC → "
+        "commodity → sized → S&P → meme. Exit ≥3 Masters; meme Master or "
+        "staff-paused via retirement clock. Never Master on volume alone "
+        "(thin_n denial). Never auto-promote / auto-retire."
+    ),
+}
+
+
+def phase6_graduation_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Phase 6 Master graduation exit gate (master plan).
+
+    Pass when infrastructure + locks are honest:
+      1. Graduation board: weeks_required=2, auto_promote=False, M1–M7 codes.
+      2. Capture path + tower Master checklist (desk_master M1–M7) exist.
+      3. thin_n denial prevents Master-on-volume-alone.
+      4. Badge fail-closed gates (fee_ledger / news / CLI bypass) wired.
+      5. Meme retirement clock: recommend_pause only; never auto-retire / expand.
+      6. Graduation order covers fee-clear + loser towers.
+      7. Commodity daily R locked at 2.0; floors locked; LIVE_ORDERS off.
+
+    Economic exit (≥3 Masters + meme Master|paused) reported separately —
+    empty/thin boards still pass the infrastructure gate (no invent fills).
+
+    Observe / certify only — never force-arms, staff-clears, or invents weeks.
+    """
+    board = graduation_board(root, bots=bots) or {}
+    weeks_req = int(board.get("weeks_required") or 0)
+    weeks_ok = weeks_req == int(GRADUATION_WEEKS_REQUIRED) == 2
+    auto_ok = bool(board.get("auto_promote") is False)
+    codes_ok = tuple(GRADUATION_CODES) == ("M1", "M2", "M3", "M4", "M5", "M6", "M7")
+    thin_denial_ok = "thin_n" in list(board.get("denial_code_enum") or [])
+    capture_ok = callable(capture_graduation_week)
+
+    # Tower Master checklist still exposes M1–M7 on desk_master rows.
+    m_row_ok = False
+    try:
+        import desk_master
+        import inspect
+        src = inspect.getsource(desk_master.tower_master_row)
+        m_row_ok = all(c in src for c in GRADUATION_CODES)
+    except Exception:
+        m_row_ok = False
+
+    gates = board.get("gates") if isinstance(board.get("gates"), dict) else (
+        graduation_gate_flags(root, bots=bots) or {}
+    )
+    gates_ok = (
+        isinstance(gates, dict)
+        and "fee_ledger_fail" in gates
+        and "news_fail_open" in gates
+        and "cli_bypass" in gates
+        and bool(gates.get("cli_bypass")) is False
+        and bool(LIVE_ORDERS_ENABLED) is False
+    )
+
+    order_ok = set(PHASE6_GRADUATION_ORDER) == set(FEE_CLEAR) | set(LOSER_IDS)
+
+    meme_bot = None
+    if isinstance(bots, list):
+        meme_bot = next(
+            (b for b in bots if isinstance(b, dict) and str(b.get("id") or "") == "memecoin"),
+            None,
+        )
+    meme = meme_retirement_clock(meme_bot)
+    meme_ok = (
+        isinstance(meme, dict)
+        and bool(meme.get("retired") is False)  # never auto-retire flag
+        and bool(meme.get("expand_volume") is False)
+        and int(meme.get("window_days") or 0) == int(MEME_RETIRE_WINDOW_DAYS)
+        and "auto" not in str(meme.get("action") or "").lower()
+    )
+
+    masters = list(board.get("masters") or [])
+    masters_n = int(board.get("masters_n") or len(masters) or 0)
+    meme_status = "not_ready"
+    meme_tower = (board.get("towers") or {}).get("memecoin") if isinstance(
+        board.get("towers"), dict
+    ) else None
+    if isinstance(meme_tower, dict) and meme_tower.get("status") == "master":
+        meme_status = "master"
+    elif bool(meme.get("recommend_pause")) or bool(meme.get("retired")):
+        meme_status = "paused"
+    elif str(meme.get("action") or "") in ("pause_entries", "retired"):
+        meme_status = "paused"
+    else:
+        meme_status = str(
+            (meme_tower or {}).get("status") or meme.get("action") or "measuring"
+        )
+
+    economic_pass = bool(masters_n >= 3 and meme_status in ("master", "paused"))
+
+    commodity_r = _finite((DAILY_R_BUDGET or {}).get("commodity-15m"))
+    r_ok = commodity_r is not None and abs(float(commodity_r) - 2.0) < 1e-9
+    floors_ok = bool((fee_floors_locked_check() or {}).get("ok"))
+
+    gate_pass = (
+        weeks_ok
+        and auto_ok
+        and codes_ok
+        and thin_denial_ok
+        and capture_ok
+        and m_row_ok
+        and gates_ok
+        and order_ok
+        and meme_ok
+        and r_ok
+        and floors_ok
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "force_arm": False,
+        "invent_fills": False,
+        "phase": "P6",
+        "pass": gate_pass,
+        "economic_pass": economic_pass,
+        "locks": dict(PHASE6_GRADUATION_LOCKS),
+        "graduation": {
+            "pass": weeks_ok and auto_ok and capture_ok and thin_denial_ok,
+            "weeks_required": weeks_req,
+            "weeks_n": board.get("weeks_n"),
+            "masters": masters,
+            "masters_n": masters_n,
+            "masters_exit_n": 3,
+            "masters_badged": board.get("masters_badged"),
+            "status_by_bot": {
+                bid: (board.get("towers") or {}).get(bid, {}).get("status")
+                for bid in PHASE6_GRADUATION_ORDER
+                if isinstance((board.get("towers") or {}).get(bid), dict)
+            },
+            "denial_code_enum": board.get("denial_code_enum"),
+            "auto_promote": False,
+        },
+        "m_codes": {
+            "pass": codes_ok and m_row_ok,
+            "codes": list(GRADUATION_CODES),
+            "tower_master_row": m_row_ok,
+        },
+        "badge_gates": {
+            "pass": gates_ok,
+            "fee_ledger_fail": bool(gates.get("fee_ledger_fail")),
+            "news_fail_open": bool(gates.get("news_fail_open")),
+            "cli_bypass": bool(gates.get("cli_bypass")),
+            "master_badge_fail_closed": bool(gates.get("master_badge_fail_closed")),
+            "badge_allowed": bool(gates.get("badge_allowed")),
+        },
+        "meme": {
+            "pass": meme_ok,
+            "status": meme_status,
+            "recommend_pause": bool(meme.get("recommend_pause")),
+            "retired": bool(meme.get("retired")),
+            "expand_volume": bool(meme.get("expand_volume")),
+            "window_days": meme.get("window_days"),
+            "n": meme.get("n"),
+            "expectancy_taxed": meme.get("expectancy_taxed"),
+            "action": meme.get("action"),
+            "auto_retire": False,
+        },
+        "order": {
+            "pass": order_ok,
+            "towers": list(PHASE6_GRADUATION_ORDER),
+        },
+        "daily_r": {
+            "pass": r_ok,
+            "commodity": commodity_r,
+            "expected_commodity": 2.0,
+        },
+        "label": (
+            f"P6 graduation-gate {'PASS' if gate_pass else 'FAIL'} "
+            f"infra={gate_pass} economic={economic_pass} "
+            f"masters={masters_n}/3 meme={meme_status} "
+            f"weeks={weeks_req} cmd_R={commodity_r}"
+        ),
+        "note": (
+            "Phase 6 Master graduation gate — 2 Chicago weeks M1–M7; thin_n "
+            "blocks volume-only Master; meme pause via retirement clock "
+            "(never auto-retire); exit ≥3 Masters + meme Master|paused is "
+            "economic_pass (ops). Never softens floors; never arms LIVE_ORDERS; "
+            "never invents fills/weeks; never force-arms or staff-clears."
+        ),
+        "decision": (
+            "phase6_graduation_gate_pass"
+            if gate_pass
+            else "phase6_graduation_gate_fail"
+        ),
+    }
+
+
+# Phase 7 firm portfolio locks — firm ROI > lonely towers; commodity stays 2.0R.
+PHASE7_PORTFOLIO_LOCKS = {
+    "btc_inx_veto": True,
+    "wti_brent_haircut": 0.5,
+    "meme_isolated": True,
+    "barbell_meme_max": BARBELL_MEME_MAX,
+    "barbell_fee_clear_min": BARBELL_FEE_CLEAR_MIN,
+    "daily_r": dict(DAILY_R_BUDGET),
+    "profit_lock_target_usd": PROFIT_LOCK_TARGET_USD,
+    "profit_lock_size_mult": PROFIT_LOCK_SIZE_MULT,
+    "incubation_min_n": INCUBATION_MIN_N,
+    "meme_window_days": MEME_RETIRE_WINDOW_DAYS,
+    "meme_auto_retire": False,
+    "auto_promote": False,
+    "commodity_daily_r": 2.0,
+    "firm_m1_exit_weeks": 2,
+    "active_towers_exit_n": 3,
+    "note": (
+        "Firm portfolio: BTC↔INX hard veto; WTI↔Brent 0.5× haircut; meme isolated; "
+        "barbell meme≤15% / fee-clear≥70%; daily R (sports 1.5 / BTC+cmd 2.0); "
+        "profit-lock $40 → 0.5×; incubation n≥50; meme pause never auto-retire. "
+        "Exit: firm M1≥0 for 2 weeks with ≥3 active towers + retirement path tested."
+    ),
+}
+
+
+def phase7_portfolio_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+    cfg: dict | None = None,
+) -> dict:
+    """Phase 7 firm portfolio construction exit gate (master plan).
+
+    Pass when infrastructure + locks are honest:
+      1. Correlation: BTC↔INX veto, WTI↔Brent haircut, meme isolated sleeve.
+      2. Daily R budgets locked (sports 1.5R, BTC/cmd 2.0R); settle-only blocks.
+      3. Profit-lock harvest: $40 target → 0.5× size; never invents PnL.
+      4. Incubation lane: n≥50 fee-aware settles; auto_promote=False.
+      5. Meme retirement clock: recommend pause; never auto-retire / expand.
+      6. Green-or-gone + capital OS barbell + bleed/heat boards wired.
+      7. Commodity daily R locked at 2.0; floors locked; LIVE_ORDERS off.
+
+    Economic exit (firm M1≥0 × 2 weeks with ≥3 active towers + retirement
+    path tested) reported as economic_pass — empty boards still pass infra.
+
+    Observe / certify only — never force-arms, staff-clears, or invents fills.
+    """
+    cfg = cfg or {}
+    corr_ok = False
+    corr = {}
+    try:
+        import desk_profit
+        corr = desk_profit.correlation_matrix(bots, cfg=cfg) or {}
+        hair = desk_profit.SERIES_HAIRCUT_MULT
+        pairs = desk_profit.SERIES_HAIRCUT_PAIRS
+        corr_ok = (
+            bool(corr.get("btc_inx_veto"))
+            and bool(corr.get("meme_isolated"))
+            and bool(corr.get("fee_floors_locked"))
+            and abs(float(hair) - 0.5) < 1e-9
+            and ("KXWTI15M", "KXBRENT15M") in tuple(pairs)
+            and callable(desk_profit.correlation_veto_reason)
+            and callable(desk_profit.series_corr_haircut)
+        )
+    except Exception:
+        corr_ok = False
+
+    r_sports = _finite(DAILY_R_BUDGET.get("sports-gap"))
+    r_btc = _finite(DAILY_R_BUDGET.get("btc15m"))
+    r_cmd = _finite(DAILY_R_BUDGET.get("commodity-15m"))
+    r_ok = (
+        r_sports is not None and abs(float(r_sports) - 1.5) < 1e-9
+        and r_btc is not None and abs(float(r_btc) - 2.0) < 1e-9
+        and r_cmd is not None and abs(float(r_cmd) - 2.0) < 1e-9
+        and callable(daily_r_blocks)
+        and callable(capture_daily_r_board)
+    )
+
+    pl = profit_lock_status(root) or {}
+    pl_ok = (
+        abs(float(PROFIT_LOCK_TARGET_USD) - 40.0) < 1e-9
+        and abs(float(PROFIT_LOCK_SIZE_MULT) - 0.5) < 1e-9
+        and callable(capture_profit_lock)
+        and callable(profit_lock_size_mult)
+        and bool(pl.get("fee_floors_locked", True))
+    )
+
+    inc = incubation_board(root) or {}
+    inc_ok = (
+        int(INCUBATION_MIN_N) >= 50
+        and int(inc.get("min_n") or 0) == int(INCUBATION_MIN_N)
+        and bool(inc.get("auto_promote") is False)
+        and bool(inc.get("fee_floors_locked", True))
+    )
+
+    meme_bot = None
+    if isinstance(bots, list):
+        meme_bot = next(
+            (b for b in bots if isinstance(b, dict) and str(b.get("id") or "") == "memecoin"),
+            None,
+        )
+    meme = meme_retirement_clock(meme_bot)
+    # Retirement path tested: negative EV window can recommend pause (synthetic probe).
+    retire_probe = meme_retirement_clock({
+        "id": "memecoin",
+        "history": [{"pnl": -1.0, "contracts": 1} for _ in range(max(12, MEME_RETIRE_MIN_N))],
+    })
+    retire_path_ok = bool(retire_probe.get("recommend_pause")) and bool(
+        retire_probe.get("retired") is False
+    )
+    meme_ok = (
+        isinstance(meme, dict)
+        and bool(meme.get("retired") is False)
+        and bool(meme.get("expand_volume") is False)
+        and int(meme.get("window_days") or 0) == int(MEME_RETIRE_WINDOW_DAYS)
+        and retire_path_ok
+    )
+
+    gog = green_or_gone_status(bots) or {}
+    gog_ok = isinstance(gog, dict) and bool(gog.get("fee_floors_locked", True))
+
+    capital = capital_os_status(root, bots=bots, cfg=cfg) or {}
+    barbell = capital.get("barbell") if isinstance(capital.get("barbell"), dict) else (
+        barbell_status(bots, cfg=cfg) if callable(barbell_status) else {}
+    )
+    try:
+        if not barbell:
+            barbell = barbell_status(bots, cfg=cfg) or {}
+    except Exception:
+        barbell = barbell or {}
+    barbell_ok = (
+        abs(float(BARBELL_MEME_MAX) - 0.15) < 1e-9
+        and abs(float(BARBELL_FEE_CLEAR_MIN) - 0.70) < 1e-9
+        and isinstance(barbell, dict)
+        and abs(float(barbell.get("meme_max") or BARBELL_MEME_MAX) - 0.15) < 1e-9
+    )
+
+    bleed_ok = callable(firm_bleed_ratio) and callable(capture_bleed_week)
+    heat_ok = callable(firm_heat_map) and callable(distance_to_zero_board)
+
+    m1 = firm_taxed_m1(bots) or {}
+    m1_exp = _finite(m1.get("expectancy_taxed"))
+    active_towers = [
+        r for r in (m1.get("by_tower") or [])
+        if isinstance(r, dict) and int(r.get("n") or 0) > 0
+    ]
+    # Two Chicago weeks firm M1≥0 — prefer weekly scorecards when present.
+    store = _load(_path(WEEKLY_SCORECARD, root), {"paper_only": True, "cards": []})
+    cards = [c for c in (store.get("cards") or []) if isinstance(c, dict)]
+    cards = sorted(cards, key=lambda c: str(c.get("label") or ""))
+    firm_weeks = [
+        c for c in cards
+        if _finite(c.get("firm_m1") if c.get("firm_m1") is not None else c.get("m1")) is not None
+    ][-2:]
+    weeks_ok = (
+        len(firm_weeks) >= 2
+        and all(
+            (_finite(c.get("firm_m1") if c.get("firm_m1") is not None else c.get("m1")) or -1)
+            + 1e-12 >= 0.0
+            for c in firm_weeks
+        )
+    )
+    economic_pass = bool(
+        weeks_ok
+        and len(active_towers) >= 3
+        and m1_exp is not None
+        and m1_exp + 1e-12 >= 0.0
+        and retire_path_ok
+    )
+
+    floors_ok = bool((fee_floors_locked_check() or {}).get("ok"))
+    live_off = bool(LIVE_ORDERS_ENABLED) is False
+
+    gate_pass = (
+        corr_ok
+        and r_ok
+        and pl_ok
+        and inc_ok
+        and meme_ok
+        and gog_ok
+        and barbell_ok
+        and bleed_ok
+        and heat_ok
+        and floors_ok
+        and live_off
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "force_arm": False,
+        "invent_fills": False,
+        "phase": "P7",
+        "pass": gate_pass,
+        "economic_pass": economic_pass,
+        "locks": dict(PHASE7_PORTFOLIO_LOCKS),
+        "correlation": {
+            "pass": corr_ok,
+            "btc_inx_veto": bool(corr.get("btc_inx_veto")),
+            "meme_isolated": bool(corr.get("meme_isolated")),
+            "wti_brent_haircut": 0.5,
+            "open_n": corr.get("open_n"),
+            "label": corr.get("note"),
+        },
+        "daily_r": {
+            "pass": r_ok,
+            "sports": r_sports,
+            "btc": r_btc,
+            "commodity": r_cmd,
+            "expected": {"sports-gap": 1.5, "btc15m": 2.0, "commodity-15m": 2.0},
+        },
+        "profit_lock": {
+            "pass": pl_ok,
+            "target_usd": float(PROFIT_LOCK_TARGET_USD),
+            "size_mult_safe": float(PROFIT_LOCK_SIZE_MULT),
+            "safe_mode": bool(pl.get("safe_mode")),
+            "size_mult": pl.get("size_mult"),
+            "week_pnl": pl.get("week_pnl"),
+        },
+        "incubation": {
+            "pass": inc_ok,
+            "min_n": int(INCUBATION_MIN_N),
+            "incubating_n": inc.get("incubating_n"),
+            "ready_n": inc.get("ready_n"),
+            "auto_promote": False,
+        },
+        "meme_retirement": {
+            "pass": meme_ok,
+            "recommend_pause": bool(meme.get("recommend_pause")),
+            "retired": bool(meme.get("retired")),
+            "expand_volume": bool(meme.get("expand_volume")),
+            "path_tested": retire_path_ok,
+            "auto_retire": False,
+            "window_days": meme.get("window_days"),
+        },
+        "green_or_gone": {
+            "pass": gog_ok,
+            "board_pass": bool(gog.get("pass")),
+            "flagged_n": gog.get("flagged_n"),
+            "label": gog.get("label"),
+        },
+        "barbell": {
+            "pass": barbell_ok,
+            "meme_max": float(BARBELL_MEME_MAX),
+            "fee_clear_min": float(BARBELL_FEE_CLEAR_MIN),
+            "label": barbell.get("label") if isinstance(barbell, dict) else None,
+        },
+        "firm_m1": {
+            "expectancy_taxed": m1_exp,
+            "active_towers_n": len(active_towers),
+            "weeks_n": len(firm_weeks),
+            "weeks_ok": weeks_ok,
+            "week_labels": [str(c.get("label") or "") for c in firm_weeks],
+        },
+        "label": (
+            f"P7 portfolio-gate {'PASS' if gate_pass else 'FAIL'} "
+            f"infra={gate_pass} economic={economic_pass} "
+            f"corr={corr_ok} cmd_R={r_cmd} "
+            f"pl={PROFIT_LOCK_TARGET_USD:g}/{PROFIT_LOCK_SIZE_MULT:g} "
+            f"incub≥{INCUBATION_MIN_N}"
+        ),
+        "note": (
+            "Phase 7 firm portfolio gate — correlation veto/haircut; daily R; "
+            "profit-lock $40→0.5×; incubation n≥50; meme pause path tested; "
+            "barbell + green-or-gone. Economic exit (firm M1≥0 ×2w, ≥3 towers) "
+            "is economic_pass (ops). Never softens floors; never arms LIVE_ORDERS; "
+            "never invents fills; never force-arms or staff-clears; never "
+            "auto-transfers Kalshi paper wins into meme cash."
+        ),
+        "decision": (
+            "phase7_portfolio_gate_pass"
+            if gate_pass
+            else "phase7_portfolio_gate_fail"
+        ),
+    }
+
+
+# Phase 8 helper evidence locks — scanners feed mains; never place alone until
+# Gate A + staff arm; commodity 2.0R / sports 1.5R stay locked.
+PHASE8_HELPERS_LOCKS = {
+    "helper_gate_a_min_n": HELPER_GATE_A_MIN_N,
+    "helper_auto_promote": False,
+    "helper_places_orders_default": False,
+    "may_place_alone_default": False,
+    "skip_regret_auto_loosen": False,
+    "ladder_min_p": 0.80,
+    "sports_daily_r": 1.5,
+    "commodity_daily_r": 2.0,
+    "note": (
+        "Helpers observe/digest only until Gate A (n≥20, taxed EV≥0) + staff arm. "
+        "Skip-regret accept/defer never auto-loosens. Ladder/parlay stay shadow "
+        "until Φ≥80 staff promote. ETH calib never auto-writes Φ. "
+        "Exit: ≥1 helper-proven promote or documented reject."
+    ),
+}
+
+
+def phase8_helpers_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Phase 8 helper evidence loop exit gate (master plan).
+
+    Pass when infrastructure + locks are honest:
+      1. Helper Gate A: n≥20 + taxed EV≥0; auto_promote=False; places_orders=False.
+      2. may_place_alone defaults False; autonomy blocked until Gate A + staff arm.
+      3. Insight helpers execution lock: no paper_buy/paper_sell / opens.
+      4. Skip-regret twin: candidates + accept/defer log; never auto-loosens.
+      5. Advice lift board observe-only on Gate A path.
+      6. ETH calib publishable without auto Φ write; Phase3 ladder/parlay shadow.
+      7. Sports daily R 1.5 + commodity 2.0 locked; floors locked; LIVE off.
+
+    Economic exit (≥1 helper-proven promote OR documented reject) is
+    economic_pass — empty boards still pass infra (no invent fills).
+
+    Observe / certify only — never force-arms, staff-clears, or invents evidence.
+    """
+    gate_a = helper_gate_a(root)
+    promote = helper_promote_status(root)
+    gate_a_ok = (
+        int(HELPER_GATE_A_MIN_N) >= 20
+        and int(gate_a.get("min_n") or 0) == int(HELPER_GATE_A_MIN_N)
+        and bool(gate_a.get("auto_promote") is False)
+        and bool(gate_a.get("places_orders") is False)
+        and bool(promote.get("auto_promote") is False)
+        and bool(promote.get("places_orders") is False)
+        and callable(record_helper_fill)
+        and callable(staff_set_helper_autonomy)
+    )
+
+    alone_default = helper_may_place_alone(root, "calendar_scanner")
+    block_msg = helper_autonomy_blocks(root, "calendar_scanner")
+    autonomy_ok = (
+        alone_default is False
+        and isinstance(block_msg, str)
+        and bool(block_msg)  # blocked while thin
+    )
+
+    exec_lock = insight_helpers_execution_lock(root) or {}
+    exec_ok = (
+        bool(exec_lock.get("pass") or exec_lock.get("ok"))
+        and bool(exec_lock.get("may_place_alone") is False)
+        and bool(exec_lock.get("places_orders") is False)
+        and bool(exec_lock.get("auto_promote") is False)
+    )
+
+    skip_cands = skip_regret_candidates(root) or {}
+    skip_log = skip_regret_decision_log(root) or {}
+    skip_ok = (
+        bool(skip_cands.get("auto_promote") is False)
+        and bool(skip_log.get("auto_promote") is False)
+        and bool(skip_log.get("loosen_soft_gates") is False)
+        and callable(staff_log_skip_regret_decision)
+        and callable(skip_regret_weekly_card)
+    )
+
+    advice = helper_advice_lift_board(root) or {}
+    advice_log = helper_advice_log_board(root) or {}
+    advice_ok = (
+        bool(advice.get("auto_promote") is False)
+        and bool(advice.get("places_orders") is False)
+        and bool(advice.get("gate_a_path") is True)
+        and bool(advice.get("staff_arm") is False or advice.get("observe_only"))
+    )
+
+    pilots = gate_a_pilots_board(root) or {}
+    pilots_ok = (
+        bool(pilots.get("auto_promote") is False)
+        and bool(pilots.get("staff_arm") is False)
+        and bool(pilots.get("observe_only", True))
+    )
+
+    eth = eth_calibration_report(bots)
+    eth_ok = isinstance(eth, dict) and eth.get("auto_write_phi") is False
+
+    ladder_ok = False
+    try:
+        import desk_phase3
+        ladder_ok = (
+            abs(float(desk_phase3.LADDER_MIN_P) - 0.80) < 1e-9
+            and callable(getattr(desk_phase3, "evaluate_ladder_rung", None))
+        )
+    except Exception:
+        ladder_ok = False
+
+    r_sports = _finite(DAILY_R_BUDGET.get("sports-gap"))
+    r_cmd = _finite(DAILY_R_BUDGET.get("commodity-15m"))
+    r_ok = (
+        r_sports is not None and abs(float(r_sports) - 1.5) < 1e-9
+        and r_cmd is not None and abs(float(r_cmd) - 2.0) < 1e-9
+    )
+
+    floors_ok = bool((fee_floors_locked_check() or {}).get("ok"))
+    live_off = bool(LIVE_ORDERS_ENABLED) is False
+
+    # Economic: ≥1 helper-proven promote OR documented reject.
+    accept_n = int(advice.get("accept_n") or advice_log.get("accept_n") or 0)
+    reject_n = int(advice.get("reject_n") or advice_log.get("reject_n") or 0)
+    skip_accepts = int(skip_log.get("accepts") or 0)
+    skip_defers = int(skip_log.get("defers") or 0)
+    ready_n = int(promote.get("ready_n") or 0)
+    armed_ready = 0
+    for row in promote.get("helpers") or []:
+        if isinstance(row, dict) and row.get("armed") and row.get("promote_ready"):
+            armed_ready += 1
+    documented_decision = bool(
+        accept_n >= 1 or reject_n >= 1 or skip_accepts >= 1 or skip_defers >= 1
+    )
+    proven_promote = bool(armed_ready >= 1)
+    economic_pass = bool(documented_decision or proven_promote)
+
+    gate_pass = (
+        gate_a_ok
+        and autonomy_ok
+        and exec_ok
+        and skip_ok
+        and advice_ok
+        and pilots_ok
+        and eth_ok
+        and ladder_ok
+        and r_ok
+        and floors_ok
+        and live_off
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "force_arm": False,
+        "invent_fills": False,
+        "places_orders": False,
+        "phase": "P8",
+        "pass": gate_pass,
+        "economic_pass": economic_pass,
+        "locks": dict(PHASE8_HELPERS_LOCKS),
+        "helper_gate_a": {
+            "pass": gate_a_ok,
+            "min_n": int(HELPER_GATE_A_MIN_N),
+            "ready_n": ready_n,
+            "thin_n": promote.get("thin_n"),
+            "auto_promote": False,
+            "places_orders": False,
+            "label": promote.get("label"),
+        },
+        "autonomy": {
+            "pass": autonomy_ok,
+            "may_place_alone_default": False,
+            "calendar_scanner_alone": alone_default,
+            "calendar_scanner_block": block_msg,
+        },
+        "execution_lock": {
+            "pass": exec_ok,
+            "ok": exec_lock.get("ok"),
+            "violation_n": exec_lock.get("violation_n"),
+            "may_place_alone": False,
+            "label": exec_lock.get("label"),
+        },
+        "skip_regret": {
+            "pass": skip_ok,
+            "candidates_n": len(skip_cands.get("candidates") or []),
+            "accepts": skip_accepts,
+            "defers": skip_defers,
+            "loosen_soft_gates": False,
+            "auto_promote": False,
+        },
+        "advice_lift": {
+            "pass": advice_ok,
+            "accept_n": accept_n,
+            "reject_n": reject_n,
+            "lift": advice.get("lift"),
+            "gate_a_path": True,
+            "staff_arm": bool(advice.get("staff_arm")),
+            "label": advice.get("label"),
+        },
+        "gate_a_pilots": {
+            "pass": pilots_ok,
+            "any_ready": bool(pilots.get("any_ready")),
+            "staff_arm": False,
+            "label": pilots.get("label"),
+        },
+        "eth_calibration": {
+            "pass": eth_ok,
+            "auto_write_phi": False,
+            "n": eth.get("n") if isinstance(eth, dict) else None,
+        },
+        "ladder_parlay_shadow": {
+            "pass": ladder_ok,
+            "ladder_min_p": 0.80,
+            "shadow_only": True,
+        },
+        "daily_r": {
+            "pass": r_ok,
+            "sports": r_sports,
+            "commodity": r_cmd,
+            "expected": {"sports-gap": 1.5, "commodity-15m": 2.0},
+        },
+        "economic": {
+            "documented_decision": documented_decision,
+            "proven_promote": proven_promote,
+            "accept_n": accept_n,
+            "reject_n": reject_n,
+            "skip_accepts": skip_accepts,
+            "skip_defers": skip_defers,
+            "armed_ready_n": armed_ready,
+        },
+        "label": (
+            f"P8 helpers-gate {'PASS' if gate_pass else 'FAIL'} "
+            f"infra={gate_pass} economic={economic_pass} "
+            f"gate_a_ready={ready_n} "
+            f"advice={accept_n}/{reject_n} "
+            f"skip={skip_accepts}/{skip_defers} "
+            f"exec_ok={exec_ok}"
+        ),
+        "note": (
+            "Phase 8 helper evidence gate — Gate A n≥20 EV≥0; no place-alone; "
+            "exec lock; skip-regret never loosens; advice lift observe; "
+            "ETH/ladder shadow. Economic exit (≥1 promote or documented reject) "
+            "is economic_pass (ops). Never softens floors; never arms LIVE_ORDERS; "
+            "never invents fills; never force-arms or helper auto-buys."
+        ),
+        "decision": (
+            "phase8_helpers_gate_pass"
+            if gate_pass
+            else "phase8_helpers_gate_fail"
+        ),
+    }
+
+
+# Phase 10 ruin drills & harvest locks — soft/hard/nuclear UX; cold 30–50%;
+# anti-revenge; stale-world; fee-ledger completeness. No LIVE overrides.
+PHASE10_RUIN_LOCKS = {
+    "ruin_levels": list(RUIN_LEVELS),
+    "cold_harvest_pct_band": [COLD_HARVEST_PCT_MIN, COLD_HARVEST_PCT_MAX],
+    "cold_harvest_pct_default": COLD_HARVEST_PCT_DEFAULT,
+    "anti_revenge_minutes": ANTI_REVENGE_MINUTES,
+    "clock_skew_max_s": CLOCK_SKEW_MAX_SEC,
+    "stale_loop_default_s": STALE_LOOP_DEFAULT,
+    "fee_ledger_bar": 0.80,
+    "one_more_trade_override": False,
+    "sports_daily_r": 1.5,
+    "commodity_daily_r": 2.0,
+    "note": (
+        "Ruin soft/hard/nuclear blocks entries (hard/nuclear pause). "
+        "Cold harvest 30–50% of green week PnL visible on board. "
+        "Anti-revenge + stale-world skip entries; exits still run. "
+        "Fee ledger completeness ≥80% once n≥5. "
+        "Exit: one full disaster drill passed + harvest rule visible. "
+        "Forbidden: one-more-trade overrides after kill."
+    ),
+}
+
+
+def phase10_ruin_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Phase 10 ruin drills & harvest exit gate (master plan).
+
+    Pass when infrastructure + locks are honest:
+      1. Soft/hard/nuclear ruin UX: set/clear/status/blocks_entries wired.
+      2. Cold harvest 30–50% band + default 40% visible on board.
+      3. Anti-revenge same-market cool after stop/flip (minutes locked).
+      4. Stale-world / clock-skew skip when loop/quote latency exceeds bar.
+      5. Fee ledger completeness path (bar 80%, empty hist passes).
+      6. No one-more-trade override after kill (blocks_entries non-empty when armed).
+      7. Sports 1.5R + commodity 2.0R locked; floors locked; LIVE off.
+
+    Economic exit (one full disaster drill practiced + harvest rule visible)
+    is economic_pass — empty history still passes infra (no invent drills).
+
+    Observe / certify only — never arms LIVE, never invents drills/fills,
+    never force-arms or staff-clears.
+    """
+    ruin = ruin_drill_status(root) or {}
+    ruin_ok = (
+        tuple(RUIN_LEVELS) == ("soft", "hard", "nuclear")
+        and callable(set_ruin_drill)
+        and callable(clear_ruin_drill)
+        and callable(ruin_drill_blocks_entries)
+        and bool(ruin.get("live_orders_enabled") is False)
+        and bool(ruin.get("fee_floors_locked") is True)
+        and isinstance(ruin.get("levels"), dict)
+        and all(k in (ruin.get("levels") or {}) for k in RUIN_LEVELS)
+    )
+
+    # Prove blocks fire when soft is armed — always on an isolated temp root so
+    # observe/certify never mutates the live desk ruin journal.
+    block_probe_ok = False
+    try:
+        import tempfile
+        with tempfile.TemporaryDirectory() as probe_root:
+            armed = set_ruin_drill(
+                probe_root, "soft", who="phase10_gate", note="infra probe",
+            )
+            block_msg = ruin_drill_blocks_entries(probe_root)
+            cleared = clear_ruin_drill(
+                probe_root, who="phase10_gate", note="infra probe clear",
+            )
+            block_probe_ok = (
+                bool(armed.get("ok"))
+                and isinstance(block_msg, str)
+                and "ruin drill" in block_msg
+                and bool(cleared.get("ok"))
+                and ruin_drill_blocks_entries(probe_root) == ""
+            )
+    except Exception:
+        block_probe_ok = False
+
+    cold = cold_harvest_status(root) or {}
+    band = cold.get("pct_band") or []
+    cold_ok = (
+        abs(float(COLD_HARVEST_PCT_MIN) - 0.30) < 1e-9
+        and abs(float(COLD_HARVEST_PCT_MAX) - 0.50) < 1e-9
+        and abs(float(COLD_HARVEST_PCT_DEFAULT) - 0.40) < 1e-9
+        and isinstance(band, (list, tuple))
+        and len(band) >= 2
+        and abs(float(band[0]) - 0.30) < 1e-9
+        and abs(float(band[1]) - 0.50) < 1e-9
+        and abs(float(cold.get("default_pct") or 0) - 0.40) < 1e-9
+        and callable(capture_cold_harvest)
+        and bool(cold.get("fee_floors_locked") is True)
+    )
+
+    anti = anti_revenge_status(root) or {}
+    anti_ok = (
+        int(ANTI_REVENGE_MINUTES) >= 15
+        and int(anti.get("minutes") or 0) == int(ANTI_REVENGE_MINUTES)
+        and callable(anti_revenge_blocks)
+        and bool(anti.get("observe_only") is True)
+    )
+
+    stale = stale_world_status(root, bots=bots) or {}
+    stale_ok = (
+        abs(float(CLOCK_SKEW_MAX_SEC) - 30.0) < 1e-9
+        and abs(float(STALE_LOOP_DEFAULT) - 40.0) < 1e-9
+        and abs(float(stale.get("clock_skew_max_s") or 0) - 30.0) < 1e-9
+        and callable(stale_world_blocks)
+        and isinstance(stale.get("rows"), list)
+    )
+    # Probe: over-bar loop must block; under-bar must not.
+    try:
+        over = stale_world_blocks(root, "btc15m", loop_seconds=STALE_LOOP_SEC.get("btc15m", 40) + 5)
+        under = stale_world_blocks(root, "btc15m", loop_seconds=5.0)
+        stale_probe_ok = bool(over) and not bool(under)
+    except Exception:
+        stale_probe_ok = False
+
+    fee = fee_ledger_completeness(root, bots=bots) or {}
+    fee_ok = (
+        abs(float(fee.get("bar") or 0) - 0.80) < 1e-9
+        and bool(fee.get("pass") is True or (fee.get("history_n") or 0) == 0)
+        and callable(record_fee_ledger)
+        and bool(fee.get("fee_floors_locked") is True)
+    )
+
+    r_sports = _finite(DAILY_R_BUDGET.get("sports-gap"))
+    r_cmd = _finite(DAILY_R_BUDGET.get("commodity-15m"))
+    r_ok = (
+        r_sports is not None and abs(float(r_sports) - 1.5) < 1e-9
+        and r_cmd is not None and abs(float(r_cmd) - 2.0) < 1e-9
+    )
+    floors_ok = bool((fee_floors_locked_check() or {}).get("ok"))
+    live_off = bool(LIVE_ORDERS_ENABLED) is False
+
+    # No one-more-trade override after kill: entry_gate path + blocks non-empty.
+    override_forbidden = True  # PHASE10_RUIN_LOCKS.one_more_trade_override is False
+    no_override_ok = (
+        override_forbidden is True
+        and block_probe_ok
+        and callable(ruin_drill_blocks_entries)
+    )
+
+    # Economic: one full disaster drill practiced this Chicago month AND harvest
+    # rule visible. Empty history → economic_pass False (no invent drills).
+    # Temp-root probe never credits practiced_this_month on the live journal.
+    history_n = int(ruin.get("history_n") or 0)
+    practiced = bool(ruin.get("practiced_this_month"))
+    harvest_visible = cold_ok
+    harvest_done = bool(
+        isinstance(cold.get("latest"), dict)
+        and not cold["latest"].get("skipped")
+        and float(cold["latest"].get("harvested") or 0) > 0
+    )
+    disaster_passed = bool(practiced)
+    # Plan exit: "One full disaster drill passed; harvest rule visible on board."
+    economic_pass = bool(disaster_passed and harvest_visible)
+
+    gate_pass = (
+        ruin_ok
+        and block_probe_ok
+        and cold_ok
+        and anti_ok
+        and stale_ok
+        and stale_probe_ok
+        and fee_ok
+        and r_ok
+        and floors_ok
+        and live_off
+        and no_override_ok
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "force_arm": False,
+        "invent_fills": False,
+        "places_orders": False,
+        "one_more_trade_override": False,
+        "phase": "P10",
+        "pass": gate_pass,
+        "economic_pass": economic_pass,
+        "locks": dict(PHASE10_RUIN_LOCKS),
+        "ruin_drill": {
+            "pass": ruin_ok and block_probe_ok,
+            "levels": list(RUIN_LEVELS),
+            "active": bool(ruin.get("active")),
+            "history_n": history_n,
+            "practiced_this_month": practiced,
+            "block_probe_ok": block_probe_ok,
+            "live_orders_enabled": False,
+        },
+        "cold_harvest": {
+            "pass": cold_ok,
+            "pct_band": [COLD_HARVEST_PCT_MIN, COLD_HARVEST_PCT_MAX],
+            "default_pct": COLD_HARVEST_PCT_DEFAULT,
+            "cold_total": cold.get("cold_total"),
+            "weeks_n": cold.get("weeks_n"),
+            "harvest_done": harvest_done,
+            "rule_visible": harvest_visible,
+        },
+        "anti_revenge": {
+            "pass": anti_ok,
+            "minutes": ANTI_REVENGE_MINUTES,
+            "active_n": anti.get("active_n"),
+        },
+        "stale_world": {
+            "pass": stale_ok and stale_probe_ok,
+            "clock_skew_max_s": CLOCK_SKEW_MAX_SEC,
+            "stale_loop_default_s": STALE_LOOP_DEFAULT,
+            "probe_ok": stale_probe_ok,
+            "blocked": stale.get("blocked"),
+        },
+        "fee_ledger": {
+            "pass": fee_ok,
+            "bar": 0.80,
+            "rate": fee.get("rate"),
+            "history_n": fee.get("history_n"),
+            "ledger_n": fee.get("ledger_n"),
+        },
+        "daily_r": {
+            "pass": r_ok,
+            "sports": r_sports,
+            "commodity": r_cmd,
+            "expected": {"sports-gap": 1.5, "commodity-15m": 2.0},
+        },
+        "no_override": {
+            "pass": no_override_ok,
+            "one_more_trade_override": False,
+        },
+        "economic": {
+            "disaster_passed": disaster_passed,
+            "harvest_done": harvest_done,
+            "harvest_visible": harvest_visible,
+        },
+        "label": (
+            f"P10 ruin-gate {'PASS' if gate_pass else 'FAIL'} "
+            f"infra={gate_pass} economic={economic_pass} "
+            f"ruin_hist={history_n} practiced={practiced} "
+            f"cold_total={cold.get('cold_total')} "
+            f"fee_rate={fee.get('rate')}"
+        ),
+        "note": (
+            "Phase 10 ruin drills & harvest gate — soft/hard/nuclear UX; "
+            "cold 30–50%; anti-revenge; stale-world; fee completeness. "
+            "Economic exit (disaster drill practiced + harvest rule visible) "
+            "is economic_pass (ops). Never softens floors; never arms LIVE_ORDERS; "
+            "never invents drills/fills; never one-more-trade after kill."
+        ),
+        "decision": (
+            "phase10_ruin_gate_pass"
+            if gate_pass
+            else "phase10_ruin_gate_fail"
+        ),
+    }
+
+
+# Phase 11 continuous hillclimb locks — one allowlisted lever/week forever;
+# raise-only floors; no midweek thrash; no auto param write; P9 LIVE blocked.
+PHASE11_HILLCLIMB_LOCKS = {
+    "allowlist": [
+        "VOL_SAFE",
+        "HIT_FOR_BIG",
+        "venue_min_edge_btc",
+        "min_cushion_btc",
+        "kelly_fraction",
+    ],
+    "none_lever": HILLCLIMB_NONE_LEVER,
+    "raise_only": ["venue_min_edge_btc", "min_cushion_btc"],
+    "idea_review_days": IDEA_REVIEW_DAYS,
+    "auto_revert": False,
+    "auto_apply": False,
+    "parallel_levers": False,
+    "midweek_thrash": False,
+    "sports_daily_r": 1.5,
+    "commodity_daily_r": 2.0,
+    "note": (
+        "One lever/week from allowlist (or NONE). venue_min_edge_btc / "
+        "min_cushion_btc raise-only. Sunday promote/demote; midweek thrash banned. "
+        "Kill → staff demote (auto_revert=False). Idea review 90d. Quarterly W rebaseline. "
+        "Exit: none — steady state. Forbidden: parallel conflicting lever changes."
+    ),
+}
+
+
+def phase11_hillclimb_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Phase 11 continuous hillclimb steady-state gate (master plan).
+
+    Pass when infrastructure + locks are honest:
+      1. Allowlist = VOL_SAFE / HIT_FOR_BIG / venue_min_edge_btc / min_cushion_btc /
+         kelly_fraction (+ NONE).
+      2. Raise-only on venue_min_edge_btc + min_cushion_btc.
+      3. One-lever discipline; midweek thrash blocked; parallel levers forbidden.
+      4. Kill flag observe-only with auto_revert=False (staff demote path).
+      5. Sunday packet review gate for non-NONE picks.
+      6. Idea review cadence 90d; quarterly rebaseline status present.
+      7. Sports 1.5R + commodity 2.0R locked; floors locked; LIVE off.
+
+    Plan exit gate is None (forever steady state). economic_pass is ops:
+    staff has an active lever (or NONE) this Chicago week — empty stays False.
+
+    Observe / certify only — never auto-picks, never auto-reverts params,
+    never arms LIVE, never softens floors.
+    """
+    _ = bots  # bots unused — hillclimb is desk-journal + constants
+    required = (
+        "VOL_SAFE",
+        "HIT_FOR_BIG",
+        "venue_min_edge_btc",
+        "min_cushion_btc",
+        "kelly_fraction",
+    )
+    al = hillclimb_allowlist() or {}
+    levers = al.get("levers") if isinstance(al.get("levers"), dict) else {}
+    allow_ok = (
+        all(name in HILLCLIMB_ALLOWLIST for name in required)
+        and all(name in levers for name in required)
+        and str(al.get("none_lever") or "") == HILLCLIMB_NONE_LEVER
+        and bool(HILLCLIMB_ALLOWLIST["venue_min_edge_btc"].get("raise_only"))
+        and bool(HILLCLIMB_ALLOWLIST["min_cushion_btc"].get("raise_only"))
+        and not bool(HILLCLIMB_ALLOWLIST["VOL_SAFE"].get("raise_only"))
+    )
+
+    templates = hillclimb_lever_evidence_templates() or {}
+    templates_ok = (
+        bool(templates.get("auto_apply") is False)
+        and bool(templates.get("observe_only") is True)
+        and all(
+            (templates.get("templates") or {}).get(n, {}).get("writes_venue_params") is False
+            for n in required
+        )
+    )
+
+    discipline = hillclimb_one_lever_discipline(root) or {}
+    discipline_ok = bool(discipline.get("pass") or discipline.get("ok"))
+
+    lever_st = hillclimb_lever_status(root) or {}
+    lever_ok = (
+        bool(lever_st.get("auto_promote") is False)
+        and bool(lever_st.get("auto_revert") is False)
+        and bool(lever_st.get("observe_only") is True)
+        and bool(lever_st.get("process_only") is True)
+        and callable(staff_pick_hillclimb_lever)
+        and callable(staff_demote_hillclimb_lever)
+    )
+
+    # Midweek thrash banned: second pick same week without force must fail.
+    thrash_ok = False
+    try:
+        import tempfile
+        with tempfile.TemporaryDirectory() as probe:
+            staff_mark_sunday_packet_reviewed(probe, who="phase11_gate")
+            first = staff_pick_hillclimb_lever(
+                probe, "VOL_SAFE", note="infra probe", force=False,
+            )
+            second = staff_pick_hillclimb_lever(
+                probe, "HIT_FOR_BIG", note="thrash probe", force=False,
+            )
+            thrash_ok = bool(first.get("ok")) and not bool(second.get("ok"))
+    except Exception:
+        thrash_ok = False
+
+    # Raise-only refuse soften: proposed below floor must fail.
+    raise_ok = False
+    try:
+        import tempfile
+        with tempfile.TemporaryDirectory() as probe:
+            soft = staff_pick_hillclimb_lever(
+                probe,
+                "venue_min_edge_btc",
+                proposed_value=0.03,
+                force=True,
+                note="raise-only probe",
+            )
+            raise_ok = not bool(soft.get("ok"))
+    except Exception:
+        raise_ok = False
+
+    kill = hillclimb_kill_status(root) or {}
+    kill_ok = (
+        bool(kill.get("auto_revert") is False)
+        and bool(kill.get("fee_floors_locked") is True)
+        and callable(staff_hillclimb_kill_postmortem)
+        and callable(hillclimb_postmortem_board)
+    )
+
+    sunday = sunday_packet_review_status(root) or {}
+    sunday_ok = (
+        callable(staff_mark_sunday_packet_reviewed)
+        and "gate_ok" in sunday
+        and bool(sunday.get("fee_floors_locked") is True)
+    )
+
+    ideas = idea_review_status(root) or {}
+    ideas_ok = (
+        int(IDEA_REVIEW_DAYS) == 90
+        and int(ideas.get("review_days") or 0) == 90
+        and bool(ideas.get("auto_promote") is False)
+    )
+
+    quarterly = quarterly_rebaseline_status(root) or {}
+    quarterly_ok = (
+        bool(quarterly.get("fee_floors_locked") is True)
+        and "has_quarterly" in quarterly
+    )
+
+    e9 = {}
+    try:
+        e9 = hillclimb_e9_week_board(root) or {}
+    except Exception:
+        e9 = {}
+    e9_ok = True  # optional densify board — presence not required for infra
+
+    r_sports = _finite(DAILY_R_BUDGET.get("sports-gap"))
+    r_cmd = _finite(DAILY_R_BUDGET.get("commodity-15m"))
+    r_ok = (
+        r_sports is not None and abs(float(r_sports) - 1.5) < 1e-9
+        and r_cmd is not None and abs(float(r_cmd) - 2.0) < 1e-9
+    )
+    floors_ok = bool((fee_floors_locked_check() or {}).get("ok"))
+    live_off = bool(LIVE_ORDERS_ENABLED) is False
+
+    active_this_week = bool(lever_st.get("active_this_week"))
+    economic_pass = bool(active_this_week and discipline_ok)
+
+    gate_pass = (
+        allow_ok
+        and templates_ok
+        and discipline_ok
+        and lever_ok
+        and thrash_ok
+        and raise_ok
+        and kill_ok
+        and sunday_ok
+        and ideas_ok
+        and quarterly_ok
+        and e9_ok
+        and r_ok
+        and floors_ok
+        and live_off
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "auto_apply": False,
+        "auto_revert": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "force_arm": False,
+        "invent_fills": False,
+        "places_orders": False,
+        "parallel_levers": False,
+        "midweek_thrash": False,
+        "phase": "P11",
+        "pass": gate_pass,
+        "economic_pass": economic_pass,
+        "steady_state": True,
+        "locks": dict(PHASE11_HILLCLIMB_LOCKS),
+        "allowlist": {
+            "pass": allow_ok,
+            "levers": list(required),
+            "none_lever": HILLCLIMB_NONE_LEVER,
+            "raise_only": ["venue_min_edge_btc", "min_cushion_btc"],
+        },
+        "templates": {
+            "pass": templates_ok,
+            "auto_apply": False,
+            "writes_venue_params": False,
+        },
+        "discipline": {
+            "pass": discipline_ok,
+            "ok": discipline.get("ok"),
+            "single_entry": discipline.get("single_entry"),
+            "off_allowlist": discipline.get("off_allowlist"),
+            "lever": discipline.get("lever"),
+        },
+        "lever_process": {
+            "pass": lever_ok and thrash_ok and raise_ok,
+            "active_this_week": active_this_week,
+            "needs_staff_pick": bool(lever_st.get("needs_staff_pick")),
+            "thrash_blocked": thrash_ok,
+            "raise_only_blocks_soften": raise_ok,
+            "auto_revert": False,
+            "label": lever_st.get("label"),
+        },
+        "kill": {
+            "pass": kill_ok,
+            "kill": bool(kill.get("kill")),
+            "auto_revert": False,
+        },
+        "sunday_review": {
+            "pass": sunday_ok,
+            "reviewed": bool(sunday.get("reviewed")),
+            "week": sunday.get("week"),
+        },
+        "idea_review": {
+            "pass": ideas_ok,
+            "review_days": IDEA_REVIEW_DAYS,
+            "open_n": ideas.get("open_n"),
+            "stale_n": ideas.get("stale_n"),
+        },
+        "quarterly": {
+            "pass": quarterly_ok,
+            "has_quarterly": bool(quarterly.get("has_quarterly")),
+        },
+        "daily_r": {
+            "pass": r_ok,
+            "sports": r_sports,
+            "commodity": r_cmd,
+            "expected": {"sports-gap": 1.5, "commodity-15m": 2.0},
+        },
+        "economic": {
+            "active_this_week": active_this_week,
+            "discipline_ok": discipline_ok,
+            "steady_state": True,
+            "exit_gate": None,
+        },
+        "label": (
+            f"P11 hillclimb-gate {'PASS' if gate_pass else 'FAIL'} "
+            f"infra={gate_pass} economic={economic_pass} "
+            f"active_week={active_this_week} "
+            f"discipline={discipline_ok} "
+            f"thrash_blocked={thrash_ok} "
+            f"raise_only={raise_ok}"
+        ),
+        "note": (
+            "Phase 11 continuous hillclimb gate — one allowlisted lever/week; "
+            "raise-only floors; Sunday review; kill→staff demote; idea 90d; "
+            "quarterly W rebaseline. Exit gate is None (steady state). "
+            "economic_pass = active lever this Chicago week (ops). "
+            "Never softens floors; never arms LIVE_ORDERS; never auto-picks "
+            "or auto-reverts params; never parallel conflicting levers."
+        ),
+        "decision": (
+            "phase11_hillclimb_gate_pass"
+            if gate_pass
+            else "phase11_hillclimb_gate_fail"
         ),
     }
 
@@ -6496,6 +8558,8 @@ def selective_throughput_observe(
         "towers": towers,
         "boosted_n": boosted_n,
         "after_m1": m1_holds,
+        "auto_promote": False,
+        "live_orders_enabled": False,
         "label": (
             f"selective throughput after_m1={m1_holds} boosted={boosted_n} "
             "(observe · never softens floors)"
@@ -6521,12 +8585,35 @@ def firm_health_observe(
     misplaced = capital_misplaced(bots, cfg)
     bleed_card = latest_bleed_week(root) or {}
     capital = capital_os_status(root, bots=bots, cfg=cfg)
+    # Prefer live bots.today when provided — a same-day stale latest with
+    # settle_only=[] must not hide profit-lock settle-only (#482/#483 sibling).
     daily = latest_daily_r_board(root) or {}
-    if not daily and bots:
-        daily = capture_daily_r_board(root, bots=bots) if root else {
+    if bots:
+        if root:
+            daily = capture_daily_r_board(root, bots=bots)
+        else:
+            settle_only = []
+            towers = {}
+            for bot in bots:
+                if not isinstance(bot, dict):
+                    continue
+                bot_id = str(bot.get("id") or "")
+                if not bot_id:
+                    continue
+                row = daily_r_status(bot_id, bot.get("today"))
+                towers[bot_id] = row
+                if row.get("settle_only"):
+                    settle_only.append(bot_id)
+            daily = {
+                "towers": towers,
+                "settle_only": sorted(settle_only),
+                "note": "ephemeral daily R (no root)",
+            }
+    elif not daily:
+        daily = {
             "towers": {},
             "settle_only": [],
-            "note": "ephemeral daily R (no root)",
+            "note": "daily R board empty",
         }
     profit = profit_lock_status(root)
     opp = opp_cost_summary(root)
@@ -6787,6 +8874,1583 @@ def baseline_fee_observe(
         "note": (
             "Baseline/fee observe — W0 artifact for week-over-week compare; "
             "fee-ledger completeness target ≥80% once n≥5. Floors locked."
+        ),
+    }
+
+
+# Money-machine plan slice 1 — Thorp/GS CRB observe + RenTech fee sim.
+# Counterfactual only. Never writes kelly_fraction, never LIVE, never softens floors.
+LIVE_KELLY_FRACTION = 0.25
+HALF_KELLY_FRACTION = 0.50
+FEE_CLEAR_CRB_BOTS = ("sports-gap", "btc15m", "commodity-15m")
+
+
+def fee_sim_probe(
+    *,
+    venue: str,
+    fair: float,
+    ask: float,
+    contracts: float = 1.0,
+) -> dict:
+    """Fee-true binary probe: does fair−ask−fee clear the locked venue floor?"""
+    import desk_profit
+
+    venue_key = str(venue or "").strip()
+    floor = float(desk_profit.DEFAULT_VENUE_MIN_EDGE.get(venue_key) or 0.0)
+    p = _finite(fair)
+    a = _finite(ask)
+    n = _finite(contracts) or 1.0
+    if p is None or a is None or not (0.0 < a < 1.0):
+        return {
+            "ok": False,
+            "clear": False,
+            "reason": "need fair + ask in (0,1)",
+            "venue": venue_key,
+            "floor": floor,
+            "paper_only": True,
+            "fee_floors_locked": True,
+        }
+    fee = estimate_kalshi_fee(a, n)
+    fee_per = fee / n if n else fee
+    edge = float(p) - float(a) - float(fee_per)
+    clear = edge + 1e-12 >= floor
+    return {
+        "ok": True,
+        "clear": clear,
+        "venue": venue_key,
+        "fair": round(float(p), 4),
+        "ask": round(float(a), 4),
+        "fee": round(float(fee), 4),
+        "fee_per_contract": round(float(fee_per), 4),
+        "edge_after_fee": round(float(edge), 4),
+        "floor": floor,
+        "contracts": round(float(n), 4),
+        "reason": (
+            "clears floor" if clear else f"edge {edge:.4f} < floor {floor:g}"
+        ),
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+    }
+
+
+def fee_sim_observe(
+    root: str | None = None,
+    *,
+    probes: list | None = None,
+) -> dict:
+    """RenTech-style cost gate: kill strategies that cannot clear floors after fees."""
+    del root  # reserved for future ledger join; probes are pure math today
+    default = probes or [
+        {"venue": "kalshi_sports", "fair": 0.62, "ask": 0.52, "label": "sports_lag_ok"},
+        {"venue": "kalshi_sports", "fair": 0.55, "ask": 0.52, "label": "sports_thin"},
+        {"venue": "kalshi_btc15m", "fair": 0.70, "ask": 0.62, "label": "btc_mid"},
+        {"venue": "kalshi_commodity15m", "fair": 0.68, "ask": 0.60, "label": "cmd_mid"},
+        {"venue": "kalshi_inx", "fair": 0.88, "ask": 0.84, "label": "inx_band"},
+    ]
+    rows = []
+    clears = 0
+    for raw in default:
+        if not isinstance(raw, dict):
+            continue
+        row = fee_sim_probe(
+            venue=str(raw.get("venue") or ""),
+            fair=float(raw.get("fair") or 0),
+            ask=float(raw.get("ask") or 0),
+            contracts=float(raw.get("contracts") or 1),
+        )
+        row["label"] = str(raw.get("label") or row.get("venue") or "")
+        if row.get("clear"):
+            clears += 1
+        rows.append(row)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "ok": True,
+        "n": len(rows),
+        "clears_n": clears,
+        "probes": rows,
+        "label": f"fee_sim clears={clears}/{len(rows)} floors_locked",
+        "note": (
+            "Fee-true probe board — strategies that fail here never get desk cash. "
+            "Does not invent fills. Floors locked."
+        ),
+    }
+
+
+def dutch_book_probe(
+    legs: list | None = None,
+    *,
+    venue: str = "kalshi_sports",
+) -> dict:
+    """Exclusive-outcome underround probe after Kalshi fees.
+
+    Buy-all only when sum(ask + fee) < 1 − floor. Overround is the house edge
+    (observe, never invent a fade). Floors stay locked.
+    """
+    import desk_profit
+
+    venue_key = str(venue or "kalshi_sports")
+    floor = float(desk_profit.DEFAULT_VENUE_MIN_EDGE.get(venue_key) or 0.0)
+    rows = []
+    total = 0.0
+    for raw in legs or []:
+        if not isinstance(raw, dict):
+            continue
+        ask = _finite(raw.get("ask"))
+        if ask is None or not (0.0 < ask < 1.0):
+            continue
+        fee = estimate_kalshi_fee(ask, 1.0)
+        cost = float(ask) + float(fee)
+        total += cost
+        rows.append({
+            "side": str(raw.get("side") or raw.get("game") or ""),
+            "ask": round(float(ask), 4),
+            "fee": round(float(fee), 4),
+            "cost": round(cost, 4),
+        })
+    if len(rows) < 2:
+        return {
+            "ok": False,
+            "clear": False,
+            "reason": "need ≥2 exclusive legs with asks",
+            "venue": venue_key,
+            "floor": floor,
+            "legs": rows,
+            "sum_ask_fee": round(total, 4),
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "observe_only": True,
+            "auto_promote": False,
+            "live_orders_enabled": False,
+        }
+    edge = 1.0 - total
+    clear = edge + 1e-12 >= floor
+    return {
+        "ok": True,
+        "clear": clear,
+        "venue": venue_key,
+        "floor": floor,
+        "legs": rows,
+        "sum_ask_fee": round(total, 4),
+        "edge": round(edge, 4),
+        "reason": (
+            "underround clears floor" if clear
+            else (
+                "overround — house edge" if edge < 0
+                else f"underround edge {edge:.4f} < floor {floor:g}"
+            )
+        ),
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+    }
+
+
+def dutch_book_observe(
+    root: str | None = None,
+    *,
+    baskets: list | None = None,
+) -> dict:
+    """Dutch-book / mutual-exclusion completer observe board."""
+    del root
+    default = baskets or [
+        {
+            "label": "underround_sports",
+            "venue": "kalshi_sports",
+            "legs": [{"side": "home", "ask": 0.44}, {"side": "away", "ask": 0.44}],
+        },
+        {
+            "label": "overround_sports",
+            "venue": "kalshi_sports",
+            "legs": [{"side": "home", "ask": 0.52}, {"side": "away", "ask": 0.52}],
+        },
+        {
+            "label": "thin_underround",
+            "venue": "kalshi_sports",
+            "legs": [{"side": "home", "ask": 0.47}, {"side": "away", "ask": 0.47}],
+        },
+    ]
+    rows = []
+    clears = 0
+    for raw in default:
+        if not isinstance(raw, dict):
+            continue
+        probe = dutch_book_probe(raw.get("legs") or [], venue=str(raw.get("venue") or "kalshi_sports"))
+        probe["label"] = str(raw.get("label") or "")
+        if probe.get("clear"):
+            clears += 1
+        rows.append(probe)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "ok": True,
+        "n": len(rows),
+        "clears_n": clears,
+        "baskets": rows,
+        "label": f"dutch_book clears={clears}/{len(rows)} floors_locked",
+        "note": (
+            "Exclusive-outcome underround board after fees. "
+            "Overround is observe-only (not a short). Floors locked. Never LIVE."
+        ),
+    }
+
+
+# Polymarket international taker coefficients (docs.polymarket.com/trading/fees).
+# US small-account 0.095 is worse — observe boards default to international.
+POLYMARKET_TAKER_RATE = {
+    "crypto": 0.07,
+    "sports": 0.05,
+    "economics": 0.05,
+    "econ": 0.05,
+    "weather": 0.05,
+    "culture": 0.05,
+    "other": 0.05,
+    "politics": 0.04,
+    "finance": 0.04,
+    "mentions": 0.04,
+    "tech": 0.04,
+    "geopolitics": 0.0,
+}
+
+
+def estimate_polymarket_fee(price, category: str = "other", contracts: float = 1.0) -> float:
+    """Polymarket international taker: rate × p × (1 − p) × C, ceil to 1¢."""
+    p = _finite(price)
+    n = _finite(contracts) or 1.0
+    if p is None or not (0.0 < p < 1.0) or n <= 0:
+        return 0.0
+    rate = POLYMARKET_TAKER_RATE.get(str(category or "other").strip().lower())
+    if rate is None:
+        rate = POLYMARKET_TAKER_RATE["other"]
+    raw = float(rate) * float(p) * (1.0 - float(p)) * float(n)
+    return math.ceil(round(raw * 100, 6)) / 100.0
+
+
+def cross_venue_arb_probe(
+    row: dict | None = None,
+    *,
+    kalshi_venue: str = "kalshi_sports",
+) -> dict:
+    """Kalshi↔Polymarket same-outcome arb probe after both taker fees.
+
+    Buy YES on the cheap book and NO on the other. Incomplete legs skip —
+    never invent a complementary ask. Idea-bank / observe only. Never LIVE.
+    """
+    import desk_profit
+
+    raw = row if isinstance(row, dict) else {}
+    venue_key = str(raw.get("kalshi_venue") or kalshi_venue or "kalshi_sports")
+    floor = float(desk_profit.DEFAULT_VENUE_MIN_EDGE.get(venue_key) or 0.0)
+    category = str(raw.get("poly_category") or raw.get("category") or "other")
+    k_yes = _finite(raw.get("kalshi_yes_ask") if raw.get("kalshi_yes_ask") is not None else raw.get("kalshi_ask"))
+    p_yes = _finite(raw.get("poly_yes_ask") if raw.get("poly_yes_ask") is not None else raw.get("poly_ask"))
+    k_no = _finite(raw.get("kalshi_no_ask"))
+    p_no = _finite(raw.get("poly_no_ask"))
+    base = {
+        "ok": False,
+        "clear": False,
+        "kalshi_venue": venue_key,
+        "floor": floor,
+        "poly_category": category,
+        "idea_bank_only": True,
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "label": str(raw.get("label") or raw.get("outcome") or ""),
+    }
+    paths = []
+    # Path A: Kalshi YES + Poly NO
+    if (
+        k_yes is not None and p_no is not None
+        and 0.0 < k_yes < 1.0 and 0.0 < p_no < 1.0
+    ):
+        k_fee = estimate_kalshi_fee(k_yes, 1.0)
+        p_fee = estimate_polymarket_fee(p_no, category, 1.0)
+        cost = float(k_yes) + float(k_fee) + float(p_no) + float(p_fee)
+        edge = 1.0 - cost
+        paths.append({
+            "path": "kalshi_yes+poly_no",
+            "cost": round(cost, 4),
+            "edge": round(edge, 4),
+            "kalshi_fee": round(float(k_fee), 4),
+            "poly_fee": round(float(p_fee), 4),
+            "clear": edge + 1e-12 >= floor,
+        })
+    # Path B: Poly YES + Kalshi NO
+    if (
+        p_yes is not None and k_no is not None
+        and 0.0 < p_yes < 1.0 and 0.0 < k_no < 1.0
+    ):
+        p_fee = estimate_polymarket_fee(p_yes, category, 1.0)
+        k_fee = estimate_kalshi_fee(k_no, 1.0)
+        cost = float(p_yes) + float(p_fee) + float(k_no) + float(k_fee)
+        edge = 1.0 - cost
+        paths.append({
+            "path": "poly_yes+kalshi_no",
+            "cost": round(cost, 4),
+            "edge": round(edge, 4),
+            "kalshi_fee": round(float(k_fee), 4),
+            "poly_fee": round(float(p_fee), 4),
+            "clear": edge + 1e-12 >= floor,
+        })
+    if not paths:
+        base["reason"] = "need complete YES+NO asks on both venues — no invent"
+        base["paths"] = []
+        return base
+    best = max(paths, key=lambda r: float(r.get("edge") or -99))
+    clear = bool(best.get("clear"))
+    base.update({
+        "ok": True,
+        "clear": clear,
+        "paths": paths,
+        "best": best,
+        "edge": best.get("edge"),
+        "reason": (
+            "cross-venue arb clears floor" if clear
+            else f"best edge {best.get('edge')} < floor {floor:g} (fee wall)"
+        ),
+    })
+    return base
+
+
+def cross_venue_arb_observe(
+    root: str | None = None,
+    *,
+    pairs: list | None = None,
+) -> dict:
+    """Kalshi↔Polymarket arb observe board. Idea-bank. Fee-true kill of thin gaps."""
+    path = None
+    if root:
+        cand = os.path.join(root, "desk_poly_arb_pairs.json")
+        if os.path.isfile(cand):
+            path = cand
+    loaded = []
+    if path:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                blob = json.load(handle)
+            if isinstance(blob, dict):
+                loaded = blob.get("pairs") or blob.get("rows") or []
+            elif isinstance(blob, list):
+                loaded = blob
+        except (OSError, json.JSONDecodeError):
+            loaded = []
+    default = pairs if pairs is not None else loaded
+    if not default:
+        # Demo fixtures: typical 1¢ mid gap dies after two fees; a fat gap can clear.
+        default = [
+            {
+                "label": "thin_gap_sports",
+                "kalshi_venue": "kalshi_sports",
+                "poly_category": "sports",
+                "kalshi_yes_ask": 0.48,
+                "poly_no_ask": 0.50,
+            },
+            {
+                "label": "fat_gap_geopolitics",
+                "kalshi_venue": "kalshi_econ",
+                "poly_category": "geopolitics",
+                "kalshi_yes_ask": 0.40,
+                "poly_no_ask": 0.48,
+            },
+            {
+                "label": "incomplete_pair",
+                "kalshi_venue": "kalshi_sports",
+                "poly_category": "sports",
+                "kalshi_yes_ask": 0.45,
+            },
+        ]
+    rows = []
+    clears = 0
+    for raw in default:
+        if not isinstance(raw, dict):
+            continue
+        probe = cross_venue_arb_probe(raw)
+        if probe.get("clear"):
+            clears += 1
+        rows.append(probe)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "idea_bank_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "ok": True,
+        "n": len(rows),
+        "clears_n": clears,
+        "pairs": rows,
+        "source": path,
+        "label": f"poly_arb clears={clears}/{len(rows)} floors_locked",
+        "note": (
+            "Kalshi↔Polymarket same-outcome arb after both taker fees. "
+            "Thin gaps fail the fee wall (research reject as a live tower). "
+            "Incomplete legs skipped — no invent. Idea-bank only. Never LIVE."
+        ),
+    }
+
+
+POLY_GAMMA = "https://gamma-api.polymarket.com"
+POLY_HARVEST_UA = {"User-Agent": "paper-bots-poly-harvest/1.0 (paper-only)"}
+
+# Idea-bank structural match map — same Fed Dec outcomes across venues.
+# Asks are live-fetched; never invent a missing leg or fair.
+POLY_ARB_MATCH_SEEDS = (
+    {
+        "label": "fed_dec_no_change",
+        "kalshi_ticker": "KXFEDDECISION-26DEC-H0",
+        "poly_slug": (
+            "will-there-be-no-change-in-fed-interest-rates-after-the-"
+            "december-2026-meeting-20260729232808635"
+        ),
+        "kalshi_venue": "kalshi_econ",
+        "poly_category": "finance",
+    },
+    {
+        "label": "fed_dec_cut_25",
+        "kalshi_ticker": "KXFEDDECISION-26DEC-C25",
+        "poly_slug": (
+            "will-the-fed-decrease-interest-rates-by-25-bps-after-the-"
+            "december-2026-meeting-20260729232808634"
+        ),
+        "kalshi_venue": "kalshi_econ",
+        "poly_category": "finance",
+    },
+    {
+        "label": "fed_dec_hike_25",
+        "kalshi_ticker": "KXFEDDECISION-26DEC-H25",
+        "poly_slug": (
+            "will-the-fed-increase-interest-rates-by-25-bps-after-the-"
+            "december-2026-meeting-20260729232808636"
+        ),
+        "kalshi_venue": "kalshi_econ",
+        "poly_category": "finance",
+    },
+)
+
+
+def _http_get_json(url: str, *, opener=None, headers: dict | None = None):
+    """GET JSON via opener or urllib. None on miss — never invent."""
+    import urllib.request
+
+    opener = opener or (
+        lambda u: urllib.request.urlopen(
+            urllib.request.Request(u, headers=headers or POLY_HARVEST_UA),
+            timeout=12,
+        ).read()
+    )
+    try:
+        blob = opener(url)
+    except Exception:
+        return None
+    if blob is None or blob == b"" or blob == "":
+        return None
+    try:
+        if isinstance(blob, bytes):
+            return json.loads(blob.decode("utf-8", errors="replace"))
+        if isinstance(blob, str):
+            return json.loads(blob)
+        if isinstance(blob, (dict, list)):
+            return blob
+    except json.JSONDecodeError:
+        return None
+    return None
+
+
+def _kalshi_market_by_ticker(ticker: str, *, opener=None) -> dict | None:
+    ticker = str(ticker or "").strip()
+    if not ticker:
+        return None
+    url = f"{KALSHI_PUBLIC}/markets/{ticker}"
+    data = _http_get_json(url, opener=opener, headers=MACRO_HARVEST_UA)
+    if isinstance(data, dict):
+        mkt = data.get("market") if isinstance(data.get("market"), dict) else data
+        return mkt if isinstance(mkt, dict) else None
+    return None
+
+
+def _poly_market_by_slug(slug: str, *, opener=None) -> dict | None:
+    slug = str(slug or "").strip()
+    if not slug:
+        return None
+    url = f"{POLY_GAMMA}/markets?slug={slug}"
+    data = _http_get_json(url, opener=opener, headers=POLY_HARVEST_UA)
+    if isinstance(data, list):
+        for row in data:
+            if isinstance(row, dict) and str(row.get("slug") or "") == slug:
+                return row
+        return data[0] if data and isinstance(data[0], dict) else None
+    if isinstance(data, dict):
+        return data
+    return None
+
+
+def _poly_yes_no_asks(market: dict) -> tuple[float | None, float | None]:
+    """Binary Poly yes ask + no ask from the same book.
+
+    yes_ask = bestAsk. no_ask = 1 − bestBid (binary complement of the yes bid) —
+    same book, not a second venue invent. Missing bid → no_ask None.
+    """
+    if not isinstance(market, dict):
+        return None, None
+    yes_ask = _finite(market.get("bestAsk"))
+    yes_bid = _finite(market.get("bestBid"))
+    if yes_ask is not None:
+        if yes_ask > 1.0 + 1e-12 and yes_ask <= 100.0:
+            yes_ask = yes_ask / 100.0
+        if not (0.0 < yes_ask < 1.0):
+            yes_ask = None
+    no_ask = None
+    if yes_bid is not None:
+        if yes_bid > 1.0 + 1e-12 and yes_bid <= 100.0:
+            yes_bid = yes_bid / 100.0
+        if 0.0 < yes_bid < 1.0:
+            no_ask = round(1.0 - float(yes_bid), 4)
+            if not (0.0 < no_ask < 1.0):
+                no_ask = None
+    return yes_ask, no_ask
+
+
+def _kalshi_yes_no_asks(market: dict) -> tuple[float | None, float | None]:
+    """Kalshi yes/no asks from dollars fields. Never invent the other side."""
+    if not isinstance(market, dict):
+        return None, None
+    yes_ask = _kalshi_yes_ask(market)
+    no_ask = None
+    for key in ("no_ask_dollars", "no_ask"):
+        n = _finite(market.get(key))
+        if n is None:
+            continue
+        if n > 1.0 + 1e-12 and n <= 100.0:
+            n = n / 100.0
+        if 0.0 < n < 1.0:
+            no_ask = float(n)
+            break
+    return yes_ask, no_ask
+
+
+def poly_kalshi_ask_harvest(
+    root: str | None = None,
+    *,
+    opener=None,
+    matches: list | None = None,
+) -> dict:
+    """Refresh Kalshi↔Polymarket asks for idea-bank match seeds.
+
+    Structural match map only (staff/seed). Live asks from both public books.
+    Incomplete legs stay incomplete — never invent a missing venue ask or fair.
+    Writes desk_poly_arb_pairs.json for cross_venue_arb_observe.
+    """
+    root = root or _root()
+    seeds = matches if matches is not None else list(POLY_ARB_MATCH_SEEDS)
+    # Optional staff override file (tickers/slugs only — no invented prices).
+    if matches is None and root:
+        path = os.path.join(root, "desk_poly_arb_matches.json")
+        if os.path.isfile(path):
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    blob = json.load(handle)
+                rows = blob.get("matches") if isinstance(blob, dict) else blob
+                if isinstance(rows, list) and rows:
+                    seeds = [r for r in rows if isinstance(r, dict)]
+            except (OSError, json.JSONDecodeError):
+                pass
+
+    pairs = []
+    complete_n = 0
+    incomplete_n = 0
+    for seed in seeds:
+        if not isinstance(seed, dict):
+            continue
+        label = str(seed.get("label") or seed.get("kalshi_ticker") or "pair")
+        k_ticker = str(seed.get("kalshi_ticker") or "").strip()
+        p_slug = str(seed.get("poly_slug") or "").strip()
+        venue = str(seed.get("kalshi_venue") or "kalshi_econ")
+        category = str(seed.get("poly_category") or "finance")
+        k_mkt = _kalshi_market_by_ticker(k_ticker, opener=opener) if k_ticker else None
+        p_mkt = _poly_market_by_slug(p_slug, opener=opener) if p_slug else None
+        k_yes, k_no = _kalshi_yes_no_asks(k_mkt or {})
+        p_yes, p_no = _poly_yes_no_asks(p_mkt or {})
+        row = {
+            "label": label,
+            "kalshi_ticker": k_ticker,
+            "poly_slug": p_slug,
+            "kalshi_venue": venue,
+            "poly_category": category,
+            "kalshi_yes_ask": round(k_yes, 4) if k_yes is not None else None,
+            "kalshi_no_ask": round(k_no, 4) if k_no is not None else None,
+            "poly_yes_ask": round(p_yes, 4) if p_yes is not None else None,
+            "poly_no_ask": round(p_no, 4) if p_no is not None else None,
+            "source": "live_public_books",
+            "idea_bank_only": True,
+        }
+        # Complete enough for at least one arb path.
+        path_a = k_yes is not None and p_no is not None
+        path_b = p_yes is not None and k_no is not None
+        if path_a or path_b:
+            complete_n += 1
+        else:
+            incomplete_n += 1
+        pairs.append(row)
+
+    out_path = os.path.join(root, "desk_poly_arb_pairs.json")
+    payload = {
+        "paper_only": True,
+        "idea_bank_only": True,
+        "observe_only": True,
+        "fee_floors_locked": True,
+        "note": (
+            "Live Kalshi↔Polymarket asks for structural match seeds. "
+            "Incomplete legs left null — never invent. Idea-bank only."
+        ),
+        "pairs": pairs,
+    }
+    try:
+        with open(out_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+            handle.write("\n")
+        wrote = True
+    except OSError as exc:
+        return {
+            "ok": False,
+            "paper_only": True,
+            "idea_bank_only": True,
+            "reason": f"write failed: {exc.__class__.__name__}",
+        }
+
+    board = cross_venue_arb_observe(root, pairs=pairs)
+    return {
+        "ok": True,
+        "paper_only": True,
+        "idea_bank_only": True,
+        "observe_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "wrote": wrote,
+        "pairs_path": out_path,
+        "seed_n": len(seeds),
+        "complete_n": complete_n,
+        "incomplete_n": incomplete_n,
+        "clears_n": int(board.get("clears_n") or 0),
+        "board": board,
+        "label": (
+            f"poly_harvest complete={complete_n}/{len(pairs)} "
+            f"clears={board.get('clears_n') or 0} idea_bank"
+        ),
+        "note": (
+            "Public Kalshi+Polymarket asks harvested for Fed Dec match seeds. "
+            "Fee wall still kills thin gaps. Never invent missing legs. Never LIVE."
+        ),
+    }
+
+
+def cpi_nowcast_probe(row: dict | None = None) -> dict:
+    """Cleveland-Fed-style nowcast fair vs Kalshi CPI ask after fees.
+
+    Buy only when nowcast_fair − ask − Kalshi fee ≥ kalshi_econ 0.05.
+    Incomplete fair/ask skips — never invent. Idea-bank only (KXCPI).
+    """
+    import desk_profit
+
+    raw = row if isinstance(row, dict) else {}
+    floor = float(desk_profit.DEFAULT_VENUE_MIN_EDGE.get("kalshi_econ") or 0.05)
+    fair = _finite(
+        raw.get("nowcast_fair") if raw.get("nowcast_fair") is not None else raw.get("fair")
+    )
+    ask = _finite(raw.get("ask") if raw.get("ask") is not None else raw.get("kalshi_ask"))
+    label = str(raw.get("label") or raw.get("strike") or raw.get("ticker") or "cpi")
+    base = {
+        "ok": False,
+        "clear": False,
+        "action": "skip",
+        "label": label,
+        "nowcast_fair": fair,
+        "ask": ask,
+        "fee": None,
+        "edge": None,
+        "floor": floor,
+        "venue": "kalshi_econ",
+        "idea_bank_only": True,
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+    }
+    if fair is None or ask is None:
+        base["reason"] = "need nowcast_fair + ask — no invent"
+        return base
+    if not (0.0 < ask < 1.0) or not (0.0 < fair < 1.0):
+        base["reason"] = "fair/ask out of range"
+        base["ok"] = True
+        return base
+    fee = estimate_kalshi_fee(ask, 1.0)
+    edge = float(fair) - float(ask) - float(fee)
+    base.update({
+        "ok": True,
+        "fee": round(float(fee), 4),
+        "edge": round(edge, 4),
+        "nowcast_fair": round(float(fair), 4),
+        "ask": round(float(ask), 4),
+    })
+    if edge + 1e-12 < floor:
+        base["reason"] = (
+            f"cpi edge {edge:.4f} < floor {floor:g} "
+            f"(fair {fair:.3f} ask {ask:.3f} fee {fee:.4f})"
+        )
+        return base
+    base["clear"] = True
+    base["action"] = "buy"
+    base["reason"] = (
+        f"cpi nowcast clears floor: fair {fair:.3f} ask {ask:.3f} "
+        f"fee {fee:.4f} edge {edge:.4f}"
+    )
+    return base
+
+
+def cpi_nowcast_observe(
+    root: str | None = None,
+    *,
+    strikes: list | None = None,
+) -> dict:
+    """CPI nowcast vs Kalshi observe board. Idea-bank. Floors locked."""
+    path = None
+    if root:
+        cand = os.path.join(root, "desk_cpi_nowcast.json")
+        if os.path.isfile(cand):
+            path = cand
+    loaded = []
+    if path:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                blob = json.load(handle)
+            if isinstance(blob, dict):
+                loaded = blob.get("strikes") or blob.get("quotes") or blob.get("rows") or []
+            elif isinstance(blob, list):
+                loaded = blob
+        except (OSError, json.JSONDecodeError):
+            loaded = []
+    default = strikes if strikes is not None else loaded
+    if not default:
+        # Demo: thin nowcast fails econ floor; fat clears; incomplete skipped.
+        default = [
+            {
+                "label": "thin_near_50",
+                "strike": "KXCPI-NEAR50",
+                "nowcast_fair": 0.55,
+                "ask": 0.52,
+            },
+            {
+                "label": "fat_nowcast",
+                "strike": "KXCPI-FAT",
+                "nowcast_fair": 0.62,
+                "ask": 0.50,
+            },
+            {
+                "label": "incomplete",
+                "strike": "KXCPI-MISS",
+                "ask": 0.48,
+            },
+        ]
+    rows = []
+    clears = 0
+    for raw in default:
+        if not isinstance(raw, dict):
+            continue
+        probe = cpi_nowcast_probe(raw)
+        if probe.get("clear"):
+            clears += 1
+        rows.append(probe)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "idea_bank_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "ok": True,
+        "n": len(rows),
+        "clears_n": clears,
+        "strikes": rows,
+        "source": path,
+        "label": f"cpi_nowcast clears={clears}/{len(rows)} floors_locked",
+        "note": (
+            "Cleveland-Fed-style CPI nowcast vs Kalshi ask after fees. "
+            "KXCPI stays idea-bank for main AUTO. Incomplete fair/ask skipped — "
+            "no invent. Floors locked. Never LIVE."
+        ),
+    }
+
+
+KALSHI_PUBLIC = "https://api.elections.kalshi.com/trade-api/v2"
+MACRO_HARVEST_UA = {"User-Agent": "paper-bots-macro-harvest/1.0 (paper-only)"}
+
+
+def _kalshi_yes_ask(row: dict) -> float | None:
+    """Parse Kalshi yes ask from dollars fields. Never invent."""
+    for key in ("yes_ask_dollars", "yes_ask", "ask"):
+        n = _finite(row.get(key))
+        if n is None:
+            continue
+        # Legacy integer cents → dollars when clearly out of [0,1].
+        if n > 1.0 + 1e-12 and n <= 100.0:
+            n = n / 100.0
+        if 0.0 < n < 1.0:
+            return float(n)
+    return None
+
+
+def _fetch_kalshi_series_markets(
+    series: str,
+    *,
+    opener=None,
+    limit: int = 100,
+) -> list[dict]:
+    """Public Kalshi open markets for one series. Empty on network miss."""
+    import urllib.error
+    import urllib.request
+
+    series = str(series or "").strip().upper()
+    if not series:
+        return []
+    url = f"{KALSHI_PUBLIC}/markets?series_ticker={series}&status=open&limit={int(limit)}"
+    opener = opener or (
+        lambda u: urllib.request.urlopen(
+            urllib.request.Request(u, headers=MACRO_HARVEST_UA), timeout=12,
+        ).read()
+    )
+    try:
+        blob = opener(url)
+    except Exception:
+        return []
+    if not blob:
+        return []
+    try:
+        if isinstance(blob, bytes):
+            data = json.loads(blob.decode("utf-8", errors="replace"))
+        elif isinstance(blob, str):
+            data = json.loads(blob)
+        elif isinstance(blob, dict):
+            data = blob
+        else:
+            return []
+    except json.JSONDecodeError:
+        return []
+    rows = data.get("markets") if isinstance(data, dict) else None
+    return [r for r in (rows or []) if isinstance(r, dict)]
+
+
+def macro_kalshi_harvest(
+    root: str | None = None,
+    *,
+    opener=None,
+    limit: int = 100,
+) -> dict:
+    """Harvest public Kalshi Fed/CPI asks into idea-bank fixtures.
+
+    Writes asks only — FedWatch CME fair and Cleveland CPI nowcast fair are
+    left null until staff drops them (never invent). Also builds dutch-book
+    baskets for exclusive KXFEDDECISION outcomes at one meeting.
+    """
+    root = root or _root()
+    fed_mkts = _fetch_kalshi_series_markets(
+        "KXFEDDECISION", opener=opener, limit=limit,
+    )
+    # Threshold series is secondary — keep decision markets primary for dutch.
+    fed_thr = _fetch_kalshi_series_markets("KXFED", opener=opener, limit=limit)
+    cpi_mkts = _fetch_kalshi_series_markets("KXCPI", opener=opener, limit=limit)
+
+    fed_bins: list[dict] = []
+    for row in fed_mkts + fed_thr:
+        ask = _kalshi_yes_ask(row)
+        if ask is None:
+            continue
+        fed_bins.append({
+            "outcome": str(row.get("ticker") or row.get("subtitle") or "fed"),
+            "ticker": str(row.get("ticker") or ""),
+            "meeting": str(row.get("event_ticker") or ""),
+            "title": str(row.get("title") or row.get("subtitle") or "")[:120],
+            "ask": round(ask, 4),
+            # Fair stays null — CME FedWatch not wired; never invent.
+            "fedwatch_fair": None,
+            "source": "kalshi_public",
+        })
+
+    cpi_rows: list[dict] = []
+    for row in cpi_mkts:
+        ask = _kalshi_yes_ask(row)
+        if ask is None:
+            continue
+        cpi_rows.append({
+            "label": str(row.get("ticker") or "cpi"),
+            "strike": str(row.get("ticker") or ""),
+            "title": str(row.get("title") or row.get("subtitle") or "")[:120],
+            "ask": round(ask, 4),
+            # Fair stays null — Cleveland nowcast not wired; never invent.
+            "nowcast_fair": None,
+            "source": "kalshi_public",
+        })
+
+    # Exclusive Fed decision baskets by event for dutch observe.
+    by_event: dict[str, list[dict]] = {}
+    for row in fed_mkts:
+        ask = _kalshi_yes_ask(row)
+        if ask is None:
+            continue
+        event = str(row.get("event_ticker") or "").strip()
+        if not event:
+            continue
+        by_event.setdefault(event, []).append({
+            "side": str(row.get("ticker") or row.get("subtitle") or ""),
+            "ask": round(ask, 4),
+        })
+    dutch_baskets = []
+    dutch_clears = 0
+    for event, legs in sorted(by_event.items()):
+        if len(legs) < 2:
+            continue
+        probe = dutch_book_probe(legs, venue="kalshi_econ")
+        probe["label"] = event
+        if probe.get("clear"):
+            dutch_clears += 1
+        dutch_baskets.append(probe)
+
+    tower = os.path.join(root, "fed-watch-paper")
+    os.makedirs(tower, exist_ok=True)
+    bins_path = os.path.join(tower, "fedwatch_bins.json")
+    cpi_path = os.path.join(root, "desk_cpi_nowcast.json")
+    bins_payload = {
+        "paper_only": True,
+        "shadow_only": True,
+        "idea_bank_only": True,
+        "fee_floors_locked": True,
+        "note": (
+            "Kalshi public asks only. fedwatch_fair left null until CME "
+            "FedWatch is dropped by staff — never invent."
+        ),
+        "bins": fed_bins,
+    }
+    cpi_payload = {
+        "paper_only": True,
+        "idea_bank_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "note": (
+            "Kalshi public CPI asks only. nowcast_fair left null until a "
+            "Cleveland-style nowcast is dropped — never invent."
+        ),
+        "strikes": cpi_rows,
+    }
+    try:
+        with open(bins_path, "w", encoding="utf-8") as handle:
+            json.dump(bins_payload, handle, indent=2)
+            handle.write("\n")
+        with open(cpi_path, "w", encoding="utf-8") as handle:
+            json.dump(cpi_payload, handle, indent=2)
+            handle.write("\n")
+        wrote = True
+    except OSError as exc:
+        return {
+            "ok": False,
+            "paper_only": True,
+            "idea_bank_only": True,
+            "reason": f"write failed: {exc.__class__.__name__}",
+        }
+
+    # Refresh fed-watch quotes from bins (still no fair → empty quotes).
+    quotes_n = 0
+    try:
+        bot_path = os.path.join(tower, "bot.py")
+        if os.path.isfile(bot_path):
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("fed_watch_harvest", bot_path)
+            mod = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(mod)
+            harvested = mod.harvest_from_bins(
+                root, fed_bins, note="kalshi asks; fair null until CME",
+            )
+            quotes_n = int(harvested.get("n") or 0)
+    except Exception:
+        quotes_n = 0
+
+    return {
+        "ok": True,
+        "paper_only": True,
+        "idea_bank_only": True,
+        "observe_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "wrote": wrote,
+        "fed_ask_n": len(fed_bins),
+        "cpi_ask_n": len(cpi_rows),
+        "fed_quotes_n": quotes_n,
+        "waiting_on_fedwatch_fair": True,
+        "waiting_on_cpi_nowcast_fair": True,
+        "dutch_baskets_n": len(dutch_baskets),
+        "dutch_clears_n": dutch_clears,
+        "dutch_baskets": dutch_baskets[:12],
+        "fedwatch_bins_path": bins_path,
+        "cpi_path": cpi_path,
+        "label": (
+            f"macro_harvest fed_asks={len(fed_bins)} cpi_asks={len(cpi_rows)} "
+            f"dutch_clear={dutch_clears}/{len(dutch_baskets)} "
+            "waiting_on_external_fair"
+        ),
+        "note": (
+            "Public Kalshi Fed/CPI asks harvested. Fairs stay null until CME "
+            "FedWatch / CPI nowcast are staff-dropped — never invent. "
+            "Dutch underrounds on exclusive Fed decision legs are fee-true."
+        ),
+    }
+
+
+def _fee_clear_probe(
+    *,
+    fair,
+    ask,
+    venue: str,
+    label: str,
+    extra: dict | None = None,
+) -> dict:
+    """Shared fee-aware fair−ask probe for tower densify observes."""
+    import desk_profit
+
+    floor = float(desk_profit.DEFAULT_VENUE_MIN_EDGE.get(venue) or 0.0)
+    f = _finite(fair)
+    a = _finite(ask)
+    row = {
+        "ok": False,
+        "clear": False,
+        "action": "skip",
+        "label": label,
+        "fair": f,
+        "ask": a,
+        "fee": None,
+        "edge": None,
+        "floor": floor,
+        "venue": venue,
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+    }
+    if extra:
+        row.update(extra)
+    if f is None or a is None:
+        row["reason"] = "need fair + ask — no invent"
+        return row
+    if not (0.0 < a < 1.0) or not (0.0 < f < 1.0):
+        row["ok"] = True
+        row["reason"] = "fair/ask out of range"
+        return row
+    fee = estimate_kalshi_fee(a, 1.0)
+    edge = float(f) - float(a) - float(fee)
+    row.update({
+        "ok": True,
+        "fee": round(float(fee), 4),
+        "edge": round(edge, 4),
+        "fair": round(float(f), 4),
+        "ask": round(float(a), 4),
+    })
+    if edge + 1e-12 < floor:
+        row["reason"] = (
+            f"edge {edge:.4f} < floor {floor:g} "
+            f"(fair {f:.3f} ask {a:.3f} fee {fee:.4f})"
+        )
+        return row
+    row["clear"] = True
+    row["action"] = "buy"
+    row["reason"] = (
+        f"clears floor: fair {f:.3f} ask {a:.3f} fee {fee:.4f} edge {edge:.4f}"
+    )
+    return row
+
+
+def btc_vol_binary_probe(row: dict | None = None) -> dict:
+    """DVOL/sigma model fair vs btc15m ask. Floor kalshi_btc15m 0.05 locked."""
+    raw = row if isinstance(row, dict) else {}
+    fair = raw.get("vol_fair") if raw.get("vol_fair") is not None else raw.get("fair")
+    ask = raw.get("ask") if raw.get("ask") is not None else raw.get("kalshi_ask")
+    dvol = _finite(raw.get("dvol"))
+    return _fee_clear_probe(
+        fair=fair,
+        ask=ask,
+        venue="kalshi_btc15m",
+        label=str(raw.get("label") or raw.get("ticker") or "btc15m"),
+        extra={"dvol": dvol, "kind": "btc_vol_binary"},
+    )
+
+
+def commodity_curve_probe(row: dict | None = None) -> dict:
+    """Curve/roll-yield fair vs commodity-15m ask. Floor 0.05 locked."""
+    raw = row if isinstance(row, dict) else {}
+    fair = (
+        raw.get("curve_fair") if raw.get("curve_fair") is not None
+        else raw.get("fair")
+    )
+    ask = raw.get("ask") if raw.get("ask") is not None else raw.get("kalshi_ask")
+    roll = _finite(raw.get("roll_yield"))
+    regime = str(raw.get("eia_regime") or raw.get("regime") or "")
+    return _fee_clear_probe(
+        fair=fair,
+        ask=ask,
+        venue="kalshi_commodity15m",
+        label=str(raw.get("label") or raw.get("ticker") or "commodity"),
+        extra={
+            "roll_yield": roll,
+            "eia_regime": regime,
+            "kind": "commodity_curve",
+        },
+    )
+
+
+FEATURE_STORE_NAME = "desk_feature_store.jsonl"
+BTC_VOL_BINARY_NAME = "desk_btc_vol_binary.json"
+COMMODITY_CURVE_NAME = "desk_commodity_curve.json"
+VOL_CURVE_HARVEST_LIMIT = 50
+
+
+def _feature_store_rows(root: str | None, *, bots: set[str], limit: int = 200) -> list[dict]:
+    """Newest feature-store rows for bots that already logged model_p + ask."""
+    path = os.path.join(root or _root(), FEATURE_STORE_NAME)
+    if not os.path.isfile(path):
+        return []
+    want = {str(b) for b in bots}
+    matched: list[dict] = []
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return []
+    for ln in reversed(lines):
+        try:
+            row = json.loads(ln)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("bot") or "") not in want:
+            continue
+        if _finite(row.get("model_p")) is None or _finite(row.get("ask")) is None:
+            continue
+        matched.append(row)
+        if len(matched) >= int(limit):
+            break
+    matched.reverse()
+    return matched
+
+
+def _eia_regime_from_row(row: dict) -> str:
+    codes = row.get("skip_codes") or []
+    blob = " ".join(str(c) for c in codes) + " " + str(row.get("note") or "")
+    low = blob.lower()
+    if "eia" in low or "inventory" in low or "blackout" in low:
+        return "eia_blackout"
+    return str(row.get("eia_regime") or row.get("regime") or "")
+
+
+def vol_curve_harvest(
+    root: str | None = None,
+    *,
+    limit: int = VOL_CURVE_HARVEST_LIMIT,
+) -> dict:
+    """Write BTC/commodity observe fixtures from feature-store (+ closed) rows.
+
+    Only keeps rows that already have model fair + ask. Never invents DVOL,
+    roll yield, or missing prices. Floors stay locked. Observe only.
+    """
+    root = root or _root()
+    limit = max(1, int(limit or VOL_CURVE_HARVEST_LIMIT))
+    btc_src = _feature_store_rows(root, bots={"btc15m"}, limit=limit * 2)
+    cmd_src = _feature_store_rows(root, bots={"commodity-15m"}, limit=limit * 2)
+    btc_rows: list[dict] = []
+    for row in btc_src:
+        fair = _finite(row.get("model_p"))
+        ask = _finite(row.get("ask"))
+        if fair is None or ask is None:
+            continue
+        if not (0.0 < fair < 1.0) or not (0.0 < ask < 1.0):
+            continue
+        btc_rows.append({
+            "label": str(row.get("ticker") or row.get("series") or "btc15m"),
+            "ticker": str(row.get("ticker") or ""),
+            "vol_fair": round(float(fair), 4),
+            "ask": round(float(ask), 4),
+            "dvol": _finite(row.get("dvol") if row.get("dvol") is not None else row.get("sig_dvol")),
+            "z": _finite(row.get("z")),
+            "source": "feature_store",
+            "at": str(row.get("at") or ""),
+        })
+        if len(btc_rows) >= limit:
+            break
+    cmd_rows: list[dict] = []
+    for row in cmd_src:
+        fair = _finite(row.get("model_p"))
+        ask = _finite(row.get("ask"))
+        if fair is None or ask is None:
+            continue
+        if not (0.0 < fair < 1.0) or not (0.0 < ask < 1.0):
+            continue
+        cmd_rows.append({
+            "label": str(row.get("ticker") or row.get("series") or "commodity"),
+            "ticker": str(row.get("ticker") or ""),
+            "curve_fair": round(float(fair), 4),
+            "ask": round(float(ask), 4),
+            # Roll yield is not in the feature store — leave null (no invent).
+            "roll_yield": _finite(row.get("roll_yield")),
+            "eia_regime": _eia_regime_from_row(row),
+            "z": _finite(row.get("z")),
+            "source": "feature_store",
+            "at": str(row.get("at") or ""),
+        })
+        if len(cmd_rows) >= limit:
+            break
+    # Supplement commodity from closed fair_at_entry when store is thin.
+    if len(cmd_rows) < limit:
+        closed_path = os.path.join(root, "commodity-15m-paper", "paper_account.json")
+        try:
+            with open(closed_path, encoding="utf-8") as handle:
+                acc = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            acc = {}
+        for row in reversed(list(acc.get("closed") or [])):
+            if not isinstance(row, dict):
+                continue
+            fair = _finite(
+                row.get("fair_at_entry") if row.get("fair_at_entry") is not None else row.get("fair")
+            )
+            ask = _finite(row.get("ask"))
+            if fair is None or ask is None:
+                continue
+            if not (0.0 < fair < 1.0) or not (0.0 < ask < 1.0):
+                continue
+            tick = str(row.get("ticker") or "")
+            if any(r.get("ticker") == tick for r in cmd_rows):
+                continue
+            cmd_rows.append({
+                "label": tick or "commodity",
+                "ticker": tick,
+                "curve_fair": round(float(fair), 4),
+                "ask": round(float(ask), 4),
+                "roll_yield": None,
+                "eia_regime": str(row.get("vol_regime") or ""),
+                "z": None,
+                "source": "closed_fair_at_entry",
+                "at": str(row.get("closed") or row.get("opened") or ""),
+            })
+            if len(cmd_rows) >= limit:
+                break
+    btc_path = os.path.join(root, BTC_VOL_BINARY_NAME)
+    cmd_path = os.path.join(root, COMMODITY_CURVE_NAME)
+    btc_payload = {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "venue": "kalshi_btc15m",
+        "floor": 0.05,
+        "note": "Harvested model_p+ask from feature store — never invent DVOL",
+        "rows": btc_rows,
+    }
+    cmd_payload = {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "venue": "kalshi_commodity15m",
+        "floor": 0.05,
+        "note": "Harvested model_p/fair_at_entry+ask — never invent roll yield",
+        "rows": cmd_rows,
+    }
+    try:
+        with open(btc_path, "w", encoding="utf-8") as handle:
+            json.dump(btc_payload, handle, indent=2)
+            handle.write("\n")
+        with open(cmd_path, "w", encoding="utf-8") as handle:
+            json.dump(cmd_payload, handle, indent=2)
+            handle.write("\n")
+        wrote = True
+    except OSError as exc:
+        return {
+            "ok": False,
+            "paper_only": True,
+            "observe_only": True,
+            "fee_floors_locked": True,
+            "reason": f"write failed: {exc.__class__.__name__}",
+            "btc_n": len(btc_rows),
+            "commodity_n": len(cmd_rows),
+        }
+    return {
+        "ok": True,
+        "paper_only": True,
+        "observe_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "btc_n": len(btc_rows),
+        "commodity_n": len(cmd_rows),
+        "btc_path": btc_path,
+        "commodity_path": cmd_path,
+        "wrote": wrote,
+        "note": (
+            "Vol/curve harvest from feature-store (+ commodity closed fair_at_entry). "
+            "Incomplete fair/ask skipped — no invent. Floors locked. Never LIVE."
+        ),
+    }
+
+
+def vol_curve_observe(
+    root: str | None = None,
+    *,
+    btc_rows: list | None = None,
+    commodity_rows: list | None = None,
+) -> dict:
+    """BTC vol-binary + commodity curve densify observe board."""
+    btc_path = commodity_path = None
+    if root:
+        bp = os.path.join(root, BTC_VOL_BINARY_NAME)
+        cp = os.path.join(root, COMMODITY_CURVE_NAME)
+        if os.path.isfile(bp):
+            btc_path = bp
+        if os.path.isfile(cp):
+            commodity_path = cp
+
+    def _load(path, keys):
+        if not path:
+            return []
+        try:
+            with open(path, encoding="utf-8") as handle:
+                blob = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return []
+        if isinstance(blob, list):
+            return blob
+        if isinstance(blob, dict):
+            for k in keys:
+                if isinstance(blob.get(k), list):
+                    return blob[k]
+        return []
+
+    btc_default = btc_rows if btc_rows is not None else _load(
+        btc_path, ("rows", "quotes", "windows"),
+    )
+    cmd_default = commodity_rows if commodity_rows is not None else _load(
+        commodity_path, ("rows", "quotes", "contracts"),
+    )
+    if not btc_default:
+        btc_default = [
+            {"label": "thin_dvol", "vol_fair": 0.54, "ask": 0.52, "dvol": 48.0},
+            {"label": "fat_dvol", "vol_fair": 0.62, "ask": 0.50, "dvol": 55.0},
+            {"label": "incomplete_btc", "ask": 0.51},
+        ]
+    if not cmd_default:
+        cmd_default = [
+            {
+                "label": "thin_curve",
+                "curve_fair": 0.54,
+                "ask": 0.52,
+                "roll_yield": 0.001,
+                "eia_regime": "neutral",
+            },
+            {
+                "label": "fat_backwardation",
+                "curve_fair": 0.61,
+                "ask": 0.50,
+                "roll_yield": -0.012,
+                "eia_regime": "draw",
+            },
+            {"label": "incomplete_cmd", "roll_yield": 0.002},
+        ]
+    btc_out = []
+    btc_clears = 0
+    for raw in btc_default:
+        if not isinstance(raw, dict):
+            continue
+        probe = btc_vol_binary_probe(raw)
+        if probe.get("clear"):
+            btc_clears += 1
+        btc_out.append(probe)
+    cmd_out = []
+    cmd_clears = 0
+    for raw in cmd_default:
+        if not isinstance(raw, dict):
+            continue
+        probe = commodity_curve_probe(raw)
+        if probe.get("clear"):
+            cmd_clears += 1
+        cmd_out.append(probe)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "ok": True,
+        "btc": {
+            "n": len(btc_out),
+            "clears_n": btc_clears,
+            "rows": btc_out,
+            "source": btc_path,
+            "floor": 0.05,
+            "venue": "kalshi_btc15m",
+        },
+        "commodity": {
+            "n": len(cmd_out),
+            "clears_n": cmd_clears,
+            "rows": cmd_out,
+            "source": commodity_path,
+            "floor": 0.05,
+            "venue": "kalshi_commodity15m",
+        },
+        "clears_n": btc_clears + cmd_clears,
+        "label": (
+            f"vol_curve btc={btc_clears}/{len(btc_out)} "
+            f"cmd={cmd_clears}/{len(cmd_out)} floors_locked"
+        ),
+        "note": (
+            "BTC DVOL/vol-binary + commodity curve/EIA densify observe. "
+            "Incomplete fair/ask skipped — no invent. Floors stay 0.05. Never LIVE."
+        ),
+    }
+
+
+def funding_carry_twins_observe(root: str | None = None) -> dict:
+    """ETH observe twin + SOL reject beside the BTC carry sleeve.
+
+    Research rule: ETH is the same factor — a line inside BTC carry, not a
+    second tower. SOL 2026 mean is red — reject. Never opens desk cash.
+    """
+    del root
+    tower = os.path.join(_root(), "btc-carry-paper", "bot.py")
+    twins = None
+    reason = ""
+    if os.path.isfile(tower):
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("btc_carry_twins", tower)
+            mod = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(mod)
+            twins = mod.twin_research_card()
+        except Exception as exc:
+            reason = f"btc-carry twin import failed: {exc.__class__.__name__}"
+    else:
+        reason = "btc-carry tower missing"
+    if not isinstance(twins, dict):
+        return {
+            "ok": False,
+            "paper_only": True,
+            "observe_only": True,
+            "fee_floors_locked": True,
+            "auto_promote": False,
+            "live_orders_enabled": False,
+            "second_tower": False,
+            "reason": reason or "twin card unavailable",
+        }
+    return {
+        "ok": True,
+        "paper_only": True,
+        "observe_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "second_tower": False,
+        "opens_desk_cash": False,
+        "twins": twins,
+        "label": (
+            "funding_twins btc=hold eth=observe sol=reject "
+            "no_second_tower floors_locked"
+        ),
+        "note": twins.get("note") or (
+            "ETH observe twin / SOL reject. Only BTC opens the shadow sleeve."
+        ),
+    }
+
+
+def half_kelly_crb_observe(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+    cfg: dict | None = None,
+) -> dict:
+    """GS CRB + Thorp half-Kelly counterfactual vs live kelly_fraction=0.25.
+
+    Observe only. Does not change live sizing, profit-lock, or venue floors.
+    """
+    import desk_profit
+
+    del root
+    cfg = dict(cfg or {})
+    live_bots = [b for b in (bots or []) if isinstance(b, dict) and not b.get("shadow_only")]
+    desk_open = sum(float(_finite(b.get("open_risk")) or 0.0) for b in live_bots)
+    max_risk = float(_finite(cfg.get("max_open_risk")) or 100.0)
+    remaining = max(0.0, max_risk - desk_open)
+    # Shared probe ticket: fee-clear edge that would size under kelly-lite.
+    probe_p, probe_edge, probe_ask = 0.62, 0.08, 0.52
+    live_cfg = {**cfg, "sizing": "kelly_lite", "kelly_fraction": LIVE_KELLY_FRACTION}
+    half_cfg = {**cfg, "sizing": "kelly_lite", "kelly_fraction": HALF_KELLY_FRACTION}
+    live_stake = desk_profit.kelly_lite_dollars(
+        probe_p, probe_edge, live_cfg, open_risk_used=desk_open, ask=probe_ask,
+    )
+    half_stake = desk_profit.kelly_lite_dollars(
+        probe_p, probe_edge, half_cfg, open_risk_used=desk_open, ask=probe_ask,
+    )
+    by_bot = []
+    for bot_id in FEE_CLEAR_CRB_BOTS:
+        bot = next((b for b in live_bots if str(b.get("id") or "") == bot_id), None)
+        open_risk = float(_finite((bot or {}).get("open_risk")) or 0.0) if bot else 0.0
+        by_bot.append({
+            "bot": bot_id,
+            "open_risk": round(open_risk, 2),
+            "live_kelly_stake": live_stake,
+            "half_kelly_stake": half_stake,
+            "delta_usd": round(float(half_stake) - float(live_stake), 2),
+        })
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "ok": True,
+        "live_kelly_fraction": LIVE_KELLY_FRACTION,
+        "observe_kelly_fraction": HALF_KELLY_FRACTION,
+        "desk_open_risk": round(desk_open, 2),
+        "max_open_risk": round(max_risk, 2),
+        "remaining_open_risk": round(remaining, 2),
+        "probe": {
+            "prob": probe_p,
+            "edge": probe_edge,
+            "ask": probe_ask,
+            "note": "Synthetic fee-clear ticket for CRB contrast only",
+        },
+        "live_kelly_stake": live_stake,
+        "half_kelly_stake": half_stake,
+        "delta_usd": round(float(half_stake) - float(live_stake), 2),
+        "towers": by_bot,
+        "label": (
+            f"half_kelly_crb live={LIVE_KELLY_FRACTION:g} observe={HALF_KELLY_FRACTION:g} "
+            f"Δ=${float(half_stake) - float(live_stake):+.2f} "
+            f"open=${desk_open:.2f}/{max_risk:.0f}"
+        ),
+        "note": (
+            "Counterfactual half-Kelly vs live kelly_fraction=0.25 on fee-clear towers. "
+            "Does not resize live stakes. Floors locked. Never LIVE."
         ),
     }
 
@@ -10393,11 +14057,164 @@ def hillclimb_allowlist() -> dict:
         "levers": {
             k: dict(v, name=k) for k, v in HILLCLIMB_ALLOWLIST.items()
         },
+        "none_lever": HILLCLIMB_NONE_LEVER,
         "note": (
-            "One lever per Chicago week. venue_min_edge_btc / min_cushion_btc "
-            "are raise-only. Midweek thrash banned."
+            "One lever per Chicago week (or NONE). venue_min_edge_btc / min_cushion_btc "
+            "are raise-only. Midweek thrash banned. Sunday packet review required (#901)."
         ),
     }
+
+
+def hillclimb_lever_evidence_templates() -> dict:
+    """E9 #903–922: evidence pack templates per allowlisted lever (observe only)."""
+    templates = {}
+    for name, meta in HILLCLIMB_ALLOWLIST.items():
+        templates[name] = {
+            "lever": name,
+            "kind": meta.get("kind"),
+            "raise_only": bool(meta.get("raise_only")),
+            "success_metrics": meta.get("success_metrics") or _HILLCLIMB_SUCCESS,
+            "kill_metrics": meta.get("kill_metrics") or _HILLCLIMB_KILL,
+            "dry_run": dict(meta.get("dry_run") or _HILLCLIMB_DRY),
+            "writes_venue_params": False,
+            "applies_live": False,
+            "note": meta.get("note"),
+        }
+    templates[HILLCLIMB_NONE_LEVER] = {
+        "lever": HILLCLIMB_NONE_LEVER,
+        "kind": "observe",
+        "raise_only": False,
+        "success_metrics": "Observation continues; no param change (#923)",
+        "kill_metrics": "N/A — no lever active",
+        "dry_run": {
+            **_HILLCLIMB_DRY,
+            "target": "none",
+            "proposed": {"lever": "NONE", "observation_continues": True},
+        },
+        "writes_venue_params": False,
+        "applies_live": False,
+        "note": "Valid pick — document why observation continues.",
+    }
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_apply": False,
+        "templates": templates,
+        "levers": sorted(HILLCLIMB_ALLOWLIST.keys()) + [HILLCLIMB_NONE_LEVER],
+        "label": f"hillclimb evidence templates n={len(templates)}",
+        "note": (
+            "E9 evidence templates (#903–922) + NONE (#923). "
+            "Dry-run is shadow/paper only — never writes venue params."
+        ),
+    }
+
+
+def hillclimb_dry_run_board(lever: str | None = None) -> dict:
+    """Dry-run config for one lever (or all) — shadow/paper only (#906+)."""
+    templates = hillclimb_lever_evidence_templates()["templates"]
+    name = str(lever or "").strip()
+    if name:
+        row = templates.get(name)
+        if not row:
+            return {
+                "ok": False,
+                "reason": f"unknown lever {name}",
+                "allowlist": sorted(templates.keys()),
+                "paper_only": True,
+                "fee_floors_locked": True,
+            }
+        return {
+            "ok": True,
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "observe_only": True,
+            "auto_apply": False,
+            "lever": name,
+            "dry_run": row.get("dry_run"),
+            "success_metrics": row.get("success_metrics"),
+            "kill_metrics": row.get("kill_metrics"),
+            "label": f"hillclimb dry-run {name} (shadow/paper · no param write)",
+            "note": "Dry-run only — never applies LIVE or softens floors.",
+        }
+    return {
+        "ok": True,
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_apply": False,
+        "by_lever": {
+            k: v.get("dry_run") for k, v in templates.items()
+        },
+        "label": "hillclimb dry-run board (all levers · shadow/paper)",
+        "note": "Dry-run only — never applies LIVE or softens floors.",
+    }
+
+
+def sunday_packet_review_status(root: str | None = None) -> dict:
+    """#901 — Chicago week Sunday packet review gate for new hillclimb levers."""
+    week = _chicago_week_id()
+    store = _load(
+        _path(HILLCLIMB_RITUAL_NAME, root),
+        {"paper_only": True, "reviews": {}, "latest": None},
+    )
+    reviews = store.get("reviews") if isinstance(store.get("reviews"), dict) else {}
+    row = reviews.get(week) if isinstance(reviews.get(week), dict) else None
+    reviewed = bool(row and row.get("reviewed"))
+    packet_present = False
+    try:
+        from helpers.sunday_packet import packet_path
+        packet_present = os.path.isfile(packet_path(root))
+    except Exception:
+        packet_present = False
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "week": week,
+        "reviewed": reviewed,
+        "packet_present": packet_present,
+        "latest": row,
+        "gate_ok": reviewed,
+        "label": (
+            f"sunday_review week={week} reviewed={reviewed} "
+            f"packet={'yes' if packet_present else 'no'}"
+        ),
+        "note": (
+            "No new hillclimb lever until Sunday packet reviewed this Chicago week (#901). "
+            "NONE remains valid without review. force=True for tests only."
+        ),
+    }
+
+
+def staff_mark_sunday_packet_reviewed(
+    root: str | None,
+    *,
+    who: str = "",
+    note: str = "",
+) -> dict:
+    """Staff marks Sunday packet reviewed for this Chicago week (#901)."""
+    week = _chicago_week_id()
+    path = _path(HILLCLIMB_RITUAL_NAME, root)
+    store = _load(path, {"paper_only": True, "reviews": {}, "latest": None})
+    reviews = store.get("reviews") if isinstance(store.get("reviews"), dict) else {}
+    row = {
+        "week": week,
+        "reviewed": True,
+        "at": _now(),
+        "who": str(who or "")[:40],
+        "note": str(note or "sunday packet reviewed")[:200],
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+    }
+    reviews[week] = row
+    store["reviews"] = reviews
+    store["latest"] = row
+    store["paper_only"] = True
+    store["fee_floors_locked"] = True
+    _save(path, store)
+    return {"ok": True, "row": row, "paper_only": True, "fee_floors_locked": True}
 
 
 def active_hillclimb_lever(root: str | None = None) -> dict | None:
@@ -10424,11 +14241,12 @@ def hillclimb_lever_status(root: str | None = None) -> dict:
         "observe_only": True,
         "process_only": True,  # TC-151 — staff must pick; no auto
         "ticket": "TC-151",
-        "allowlist": sorted(HILLCLIMB_ALLOWLIST.keys()),
+        "allowlist": sorted(HILLCLIMB_ALLOWLIST.keys()) + [HILLCLIMB_NONE_LEVER],
         "active": active,
         "week": week,
         "active_this_week": same_week,
         "needs_staff_pick": needs_staff_pick,
+        "sunday_review": sunday_packet_review_status(root),
         "evidence_thin": needs_staff_pick or kill_flag,
         "kill": kill_flag,
         "kill_action": (kill.get("status") or {}).get("action") if isinstance(kill.get("status"), dict) else kill.get("action"),
@@ -10464,20 +14282,45 @@ def staff_pick_hillclimb_lever(
 ) -> dict:
     """Staff picks the single hillclimb lever for this Chicago week.
 
+    #901: new non-NONE lever requires Sunday packet reviewed (unless force).
+    #902/#923: NONE is a valid pick (observation continues).
     Midweek thrash banned unless force=True (tests) or demote first.
     Raise-only levers reject proposed_value below locked floor.
+    Never writes venue params / never LIVE.
     """
     name = str(lever or "").strip()
-    meta = HILLCLIMB_ALLOWLIST.get(name)
+    is_none = name.upper() == HILLCLIMB_NONE_LEVER
+    if is_none:
+        name = HILLCLIMB_NONE_LEVER
+        meta = {
+            "kind": "observe",
+            "raise_only": False,
+            "note": "NONE — observation continues (#923)",
+        }
+    else:
+        meta = HILLCLIMB_ALLOWLIST.get(name)
     if not meta:
         return {
             "ok": False,
             "reason": f"lever not on allowlist: {name}",
-            "allowlist": sorted(HILLCLIMB_ALLOWLIST.keys()),
+            "allowlist": sorted(HILLCLIMB_ALLOWLIST.keys()) + [HILLCLIMB_NONE_LEVER],
             "auto_promote": False,
             "fee_floors_locked": True,
         }
     week = _chicago_week_id()
+    if not is_none and not force:
+        ritual = sunday_packet_review_status(root)
+        if not ritual.get("reviewed"):
+            return {
+                "ok": False,
+                "reason": (
+                    "Sunday packet not reviewed this Chicago week (#901) — "
+                    "mark reviewed or pick NONE"
+                ),
+                "sunday_review": ritual,
+                "auto_promote": False,
+                "fee_floors_locked": True,
+            }
     path = _path(HILLCLIMB_LEVER_NAME, root)
     store = _load(path, {"paper_only": True, "active": None, "history": []})
     active = store.get("active") if isinstance(store.get("active"), dict) else None
@@ -10524,8 +14367,11 @@ def staff_pick_hillclimb_lever(
         "at": _now(),
         "note": str(note or "")[:200] or str(meta.get("note") or "")[:200],
         "staff_approved": True,
+        "observation_continues": bool(is_none),
         "auto_promote": False,
+        "auto_apply": False,
         "fee_floors_locked": True,
+        "writes_venue_params": False,
     }
     hist = [h for h in (store.get("history") or []) if isinstance(h, dict)]
     if active:
@@ -10540,8 +14386,13 @@ def staff_pick_hillclimb_lever(
         "ok": True,
         "active": row,
         "auto_promote": False,
+        "auto_apply": False,
         "fee_floors_locked": True,
-        "reason": f"picked {name} for {week}",
+        "reason": (
+            f"picked NONE for {week} — observation continues"
+            if is_none
+            else f"picked {name} for {week}"
+        ),
     }
 
 
@@ -10577,6 +14428,389 @@ def staff_clear_hillclimb_lever(
         "auto_promote": False,
         "fee_floors_locked": True,
         "live_orders_enabled": False,
+    }
+
+
+# ---- E9 #924–931: activate / broadcast / daily / kill postmortem / win lock -
+
+def hillclimb_lever_activation_board(root: str | None = None) -> dict:
+    """#924 — assert desk_hillclimb_lever.json has at most one active entry."""
+    store = _load(
+        _path(HILLCLIMB_LEVER_NAME, root),
+        {"paper_only": True, "active": None, "history": []},
+    )
+    active = store.get("active") if isinstance(store.get("active"), dict) else None
+    hist = [h for h in (store.get("history") or []) if isinstance(h, dict)]
+    # Guard: refuse silently-stacked actives if a buggy writer ever set a list.
+    raw_active = store.get("active")
+    stacked = isinstance(raw_active, list)
+    n_active = 1 if active and not stacked else (len(raw_active) if stacked else 0)
+    ok = (not stacked) and n_active <= 1
+    lever = str(active.get("lever") or "") if active else None
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_apply": False,
+        "writes_venue_params": False,
+        "ok": ok,
+        "pass": ok,
+        "single_entry": bool(ok and n_active <= 1),
+        "activated": bool(active),
+        "n_active": n_active,
+        "lever": lever,
+        "week": (active or {}).get("week") if active else None,
+        "history_n": len(hist),
+        "label": (
+            f"hillclimb_activation ok={ok} lever={lever or 'none'} "
+            f"single={ok} (#924)"
+        ),
+        "note": (
+            "Activation is the single active row in desk_hillclimb_lever.json. "
+            "Never writes venue params. Never LIVE."
+        ),
+    }
+
+
+def hillclimb_lever_masters_broadcast(root: str | None = None) -> dict:
+    """#925 — Masters soft_copy for the active lever (staff paste · never auto-post)."""
+    status = hillclimb_lever_status(root)
+    active = status.get("active") if isinstance(status.get("active"), dict) else None
+    kill = bool(status.get("kill"))
+    week = status.get("week")
+    lever = str((active or {}).get("lever") or "none")
+    soft = (
+        f"**Hillclimb lever** (paper · floors locked · live=False)\n"
+        f"week={week} active={lever} kill={kill} "
+        f"sunday_reviewed={(status.get('sunday_review') or {}).get('reviewed')}\n"
+        f"{status.get('label') or 'hillclimb observe'}\n"
+        f"_staff paste only · never auto-posts · never auto-applies_"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_publish": False,
+        "auto_apply": False,
+        "live_orders_enabled": False,
+        "week": week,
+        "lever": lever if active else None,
+        "kill": kill,
+        "soft_copy": soft,
+        "discord": soft,
+        "label": f"hillclimb_broadcast week={week} lever={lever} (#925)",
+        "note": "Masters broadcast — observe/paste only; never auto-posts Discord.",
+    }
+
+
+def hillclimb_lever_daily_check(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """#926/#927 — daily M1/M3/fills during lever week + week-2 kill surface."""
+    week = _chicago_week_id()
+    active = active_hillclimb_lever(root)
+    kill = hillclimb_kill_status(root)
+    latest = kill.get("latest") if isinstance(kill.get("latest"), dict) else None
+    # Prefer live bots snapshot when provided; else last captured card.
+    m1 = None
+    m3 = None
+    fills_n = None
+    if bots is not None:
+        try:
+            snap = capture_hillclimb_week(root, bots=bots, label=_chicago_day())
+            card = snap.get("card") if isinstance(snap, dict) else None
+            if isinstance(card, dict):
+                latest = card
+        except Exception:
+            pass
+    if isinstance(latest, dict):
+        m1 = latest.get("m1")
+        m3 = latest.get("m3")
+        fills_n = latest.get("fills_n")
+    weeks = []
+    try:
+        store = _load(
+            _path(HILLCLIMB_KILL, root),
+            {"paper_only": True, "weeks": []},
+        )
+        weeks = [w for w in (store.get("weeks") or []) if isinstance(w, dict)]
+    except Exception:
+        weeks = []
+    # Cards attributed to current active lever (same Chicago week id on active).
+    lever = str((active or {}).get("lever") or "") if active else ""
+    lever_cards = [
+        w for w in weeks
+        if str(w.get("lever") or "") == lever and lever
+    ]
+    week2_ready = len(lever_cards) >= HILLCLIMB_KILL_WEEKS or bool(kill.get("kill"))
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_apply": False,
+        "auto_revert": False,
+        "week": week,
+        "lever": lever or None,
+        "active": bool(active),
+        "m1": m1,
+        "m3": m3,
+        "fills_n": fills_n,
+        "lever_cards_n": len(lever_cards),
+        "kill": bool(kill.get("kill")),
+        "kill_action": kill.get("action"),
+        "week2_check_ready": week2_ready,
+        "latest_card": latest,
+        "label": (
+            f"hillclimb_daily week={week} lever={lever or 'none'} "
+            f"m1={m1} m3={m3} fills={fills_n} kill={bool(kill.get('kill'))} "
+            f"(#926/#927)"
+        ),
+        "note": (
+            "Daily lever health during the Chicago week. Week-2 kill via "
+            "evaluate_hillclimb_kill — flag only, never auto-reverts."
+        ),
+    }
+
+
+def hillclimb_one_lever_discipline(root: str | None = None) -> dict:
+    """#930/#931 — never stack two allowlist levers; never invent off-allowlist."""
+    activation = hillclimb_lever_activation_board(root)
+    active = active_hillclimb_lever(root)
+    lever = str((active or {}).get("lever") or "") if active else ""
+    off = bool(
+        lever
+        and lever != HILLCLIMB_NONE_LEVER
+        and lever not in HILLCLIMB_ALLOWLIST
+    )
+    ok = bool(activation.get("ok")) and not off
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "ok": ok,
+        "pass": ok,
+        "single_entry": bool(activation.get("single_entry")),
+        "off_allowlist": off,
+        "lever": lever or None,
+        "allowlist": sorted(HILLCLIMB_ALLOWLIST.keys()) + [HILLCLIMB_NONE_LEVER],
+        "label": (
+            f"hillclimb_discipline ok={ok} single={activation.get('single_entry')} "
+            f"off_allowlist={off} (#930/#931)"
+        ),
+        "note": (
+            "One allowlisted lever (or NONE) per Chicago week. "
+            "Off-allowlist invent forbidden without plan amend."
+        ),
+    }
+
+
+def staff_hillclimb_kill_postmortem(
+    root: str | None,
+    *,
+    who: str = "",
+    note: str = "",
+    demote: bool = True,
+) -> dict:
+    """#928 — on kill flag: staff revert same day + write postmortem journal.
+
+    Never auto-reverts params. Floors locked. LIVE off.
+    """
+    kill = hillclimb_kill_status(root)
+    if not kill.get("kill") and not note:
+        return {
+            "ok": False,
+            "reason": "no kill flag — refuse empty postmortem",
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "auto_revert": False,
+        }
+    active = active_hillclimb_lever(root)
+    demoted = None
+    if demote and active:
+        dem = staff_demote_hillclimb_lever(
+            root,
+            note=note or "kill postmortem",
+            reason="kill_rule_revert",
+        )
+        demoted = dem.get("demoted")
+    path = _path(HILLCLIMB_POSTMORTEM_NAME, root)
+    store = _load(
+        path,
+        {"paper_only": True, "rows": [], "fee_floors_locked": True},
+    )
+    row = {
+        "at": _now(),
+        "week": _chicago_week_id(),
+        "who": str(who or "")[:40],
+        "lever": str((active or {}).get("lever") or demoted or ""),
+        "kill": bool(kill.get("kill")),
+        "kill_action": kill.get("action"),
+        "kill_reason": (kill.get("status") or {}).get("reason")
+        if isinstance(kill.get("status"), dict)
+        else kill.get("reason"),
+        "note": str(note or "kill postmortem — reverted")[:240],
+        "demoted": demoted,
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_revert": False,
+        "auto_apply": False,
+    }
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    rows.append(row)
+    store["rows"] = rows[-MAX_HILLCLIMB_POSTMORTEM:]
+    store["latest"] = row
+    store["paper_only"] = True
+    store["fee_floors_locked"] = True
+    _save(path, store)
+    return {
+        "ok": True,
+        "row": row,
+        "n": len(store["rows"]),
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_revert": False,
+    }
+
+
+def hillclimb_postmortem_board(root: str | None = None) -> dict:
+    """Observe board for kill postmortems (#928)."""
+    store = _load(
+        _path(HILLCLIMB_POSTMORTEM_NAME, root),
+        {"paper_only": True, "rows": []},
+    )
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "n": len(rows),
+        "latest": store.get("latest") if isinstance(store.get("latest"), dict) else (
+            rows[-1] if rows else None
+        ),
+        "recent": rows[-8:],
+        "label": f"hillclimb_postmortem n={len(rows)} (#928)",
+        "note": "Kill postmortems — staff revert same day; never auto-reverts params.",
+    }
+
+
+def staff_hillclimb_lock_win(
+    root: str | None,
+    *,
+    who: str = "",
+    note: str = "",
+    lever: str = "",
+) -> dict:
+    """#929 — lock a successful lever week with an observe journal (no param write).
+
+    Still one-lever discipline — does not stack or auto-apply.
+    """
+    active = active_hillclimb_lever(root)
+    name = str(lever or (active or {}).get("lever") or "").strip()
+    if not name:
+        return {
+            "ok": False,
+            "reason": "lever required",
+            "paper_only": True,
+            "fee_floors_locked": True,
+        }
+    if name != HILLCLIMB_NONE_LEVER and name not in HILLCLIMB_ALLOWLIST:
+        return {
+            "ok": False,
+            "reason": f"off-allowlist invent forbidden: {name}",
+            "paper_only": True,
+            "fee_floors_locked": True,
+        }
+    path = _path(HILLCLIMB_WIN_LOCK_NAME, root)
+    store = _load(
+        path,
+        {"paper_only": True, "rows": [], "fee_floors_locked": True},
+    )
+    row = {
+        "at": _now(),
+        "week": _chicago_week_id(),
+        "who": str(who or "")[:40],
+        "lever": name[:64],
+        "note": str(note or "lock win — one lever discipline")[:240],
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_apply": False,
+        "one_lever_discipline": True,
+    }
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    rows.append(row)
+    store["rows"] = rows[-MAX_HILLCLIMB_WIN_LOCK:]
+    store["latest"] = row
+    store["paper_only"] = True
+    store["fee_floors_locked"] = True
+    _save(path, store)
+    return {
+        "ok": True,
+        "row": row,
+        "n": len(store["rows"]),
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_apply": False,
+    }
+
+
+def hillclimb_win_lock_board(root: str | None = None) -> dict:
+    """Observe board for locked lever wins (#929)."""
+    store = _load(
+        _path(HILLCLIMB_WIN_LOCK_NAME, root),
+        {"paper_only": True, "rows": []},
+    )
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_apply": False,
+        "n": len(rows),
+        "latest": store.get("latest") if isinstance(store.get("latest"), dict) else (
+            rows[-1] if rows else None
+        ),
+        "recent": rows[-8:],
+        "label": f"hillclimb_win_lock n={len(rows)} (#929)",
+        "note": "Win locks are journal-only — still one lever/week; never auto-applies.",
+    }
+
+
+def hillclimb_e9_week_board(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Combined E9 #924–931 observe board."""
+    activation = hillclimb_lever_activation_board(root)
+    broadcast = hillclimb_lever_masters_broadcast(root)
+    daily = hillclimb_lever_daily_check(root, bots=bots)
+    discipline = hillclimb_one_lever_discipline(root)
+    post = hillclimb_postmortem_board(root)
+    wins = hillclimb_win_lock_board(root)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_apply": False,
+        "auto_revert": False,
+        "live_orders_enabled": False,
+        "activation": activation,
+        "broadcast": broadcast,
+        "daily": daily,
+        "discipline": discipline,
+        "postmortem": post,
+        "win_lock": wins,
+        "soft_copy": broadcast.get("soft_copy"),
+        "label": (
+            f"e9_week act={activation.get('lever')} "
+            f"daily_kill={daily.get('kill')} disc={discipline.get('ok')}"
+        ),
+        "note": (
+            "E9 lever-week pack (#924–931): single activation, Masters broadcast, "
+            "daily M1/M3/fills, kill postmortem, win lock, one-lever discipline."
+        ),
     }
 
 
@@ -10974,6 +15208,13 @@ def capture_cold_harvest(
     """
     day = label or _chicago_day()
     week_id = _chicago_week_id(day)
+    # When bots are provided, refresh profit-lock week first so harvest tracks live
+    # green (same-day stale week_pnl must not lag Masters bleed_week — #486 twin).
+    if bots:
+        try:
+            capture_profit_lock(root, bots=bots, label=day)
+        except Exception:
+            pass
     # Prefer profit-lock week accumulator when present; else firm today as thin proxy.
     pl_store = _load(
         _path(PROFIT_LOCK, root),
@@ -10982,8 +15223,7 @@ def capture_cold_harvest(
     weeks_pl = pl_store.get("weeks") if isinstance(pl_store.get("weeks"), dict) else {}
     week_row = weeks_pl.get(week_id) if isinstance(weeks_pl.get(week_id), dict) else {}
     week_pnl = _finite(week_row.get("week_pnl"))
-    if week_pnl is None:
-        # Ensure profit-lock has today's snap, then re-read.
+    if week_pnl is None and not bots:
         try:
             capture_profit_lock(root, bots=bots, label=day)
             pl_store = _load(
@@ -11154,12 +15394,43 @@ def plan_summary(
         "sports_hard_stop_shadow": sports_hard_stop_shadow_summary(root),
         "commodity_time_stop": commodity_time_stop_shadow_summary(root),
         "sports_time_final": sports_time_final_shadow_summary(root),
+        "phase3_exits": phase3_exit_gate(root, bots=bots),
+        "phase4_calib": phase4_calib_gate(root, bots=bots),
+        "phase5_throughput": phase5_throughput_gate(root, bots=bots),
+        "phase6_graduation": phase6_graduation_gate(root, bots=bots),
+        "phase7_portfolio": phase7_portfolio_gate(root, bots=bots, cfg=cfg),
+        "phase8_helpers": phase8_helpers_gate(root, bots=bots),
+        "phase10_ruin": phase10_ruin_gate(root, bots=bots),
+        "phase11_hillclimb": phase11_hillclimb_gate(root, bots=bots),
         "weekly_scorecard": latest_weekly_scorecard(root),
         "graduation": graduation_board(root, bots=bots),
-        "hillclimb_kill": hillclimb_kill_status(root),
-        "profit_lock": profit_lock_status(root),
-        "skip_regret_weekly": latest_skip_regret_weekly(root),
-        "daily_r": latest_daily_r_board(root),
+        # Prefer live bots whenever provided (#488 profit_lock twin).
+        "hillclimb_kill": (
+            hillclimb_kill_status(root)
+            if not (root and bots)
+            else (
+                capture_hillclimb_week(root, bots=bots),
+                hillclimb_kill_status(root),
+            )[1]
+        ),
+        # Prefer live bots whenever provided (#487 cold_harvest twin).
+        "profit_lock": (
+            capture_profit_lock(root, bots=bots)
+            if (root and bots)
+            else profit_lock_status(root)
+        ),
+        # Prefer live journal whenever root is present (#494 Masters twin).
+        "skip_regret_weekly": (
+            skip_regret_weekly_card(root)
+            if root
+            else latest_skip_regret_weekly(root)
+        ),
+        # Prefer live bots.today when provided (#484 firm_health twin).
+        "daily_r": (
+            capture_daily_r_board(root, bots=bots)
+            if (root and bots)
+            else latest_daily_r_board(root)
+        ),
         "inx_band_promote": inx_band_promote_status(root),
         "incubation": incubation_board(root),
         "ruin_drill": ruin_drill_status(root),
@@ -11167,8 +15438,15 @@ def plan_summary(
         "fee_ledger_completeness": fee_ledger_completeness(root, bots=bots),
         "stale_world": stale_world_status(root, bots=bots),
         "helper_gate_a": helper_promote_status(root),
-        "cold_harvest": cold_harvest_status(root),
+        # Prefer live bots whenever provided (#486 Masters twin).
+        "cold_harvest": (
+            capture_cold_harvest(root, bots=bots)
+            if (root and bots)
+            else cold_harvest_status(root)
+        ),
         "hillclimb_lever": hillclimb_lever_status(root),
+        "hillclimb_e9_week": hillclimb_e9_week_board(root, bots=bots),
+        "hillclimb_broadcast": hillclimb_lever_masters_broadcast(root),
         "dual_control": dual_control_status(root),
         "quarterly_rebaseline": quarterly_rebaseline_status(root),
         "capital_os": capital_os_status(root, bots=bots, cfg=cfg),
@@ -11177,7 +15455,15 @@ def plan_summary(
         "sports_green_boost": sports_green_boost_status(root, bots=bots),
         "green_or_gone": green_or_gone_status(bots),
         "btc_calibration": btc_calibration_report(bots),
-        "firm_queue": firm_queue_status(root),
+        # Prefer live offer book whenever bots are provided (#495 Masters twin).
+        "firm_queue": (
+            (
+                capture_firm_queue(root, bots=bots, cfg=cfg),
+                firm_queue_status(root),
+            )[1]
+            if (root and bots)
+            else firm_queue_status(root)
+        ),
         "empty_card": empty_card_status(root),
         "empty_card_series": empty_card_series_board(root),
         "depth_adjusted_edge": depth_adjusted_edge_board(root),
@@ -11188,6 +15474,11 @@ def plan_summary(
         "selective_kill": selective_kill_status(root, bots=bots),
         "tip_funnel": tip_funnel_board(root),
         "gate_a_pilot": gate_a_pilot_btc_calendar(root),
+        "gate_a_pilot_sports_clv": gate_a_pilot_sports_clv(root),
+        "gate_a_pilots": gate_a_pilots_board(root),
+        "helper_advice_log": helper_advice_log_board(root),
+        "helper_advice_lift": helper_advice_lift_board(root),
+        "insight_helpers_execution_lock": insight_helpers_execution_lock(root),
         "eligible_fill_funnel": eligible_fill_funnel(root, bots=bots),
         "throughput_vs_m1": throughput_vs_m1_board(root, bots=bots),
         "promote_distance": promote_distance_observe(root, bots=bots),
@@ -11458,6 +15749,9 @@ def self_check() -> None:
         al = hillclimb_allowlist()
         assert "VOL_SAFE" in al["levers"]
         assert al["levers"]["venue_min_edge_btc"]["raise_only"] is True
+        blocked_sun = staff_pick_hillclimb_lever(tmp, "VOL_SAFE", note="week experiment")
+        assert blocked_sun["ok"] is False
+        staff_mark_sunday_packet_reviewed(tmp, who="selftest")
         pick = staff_pick_hillclimb_lever(tmp, "VOL_SAFE", note="week experiment")
         assert pick["ok"] is True
         thrash = staff_pick_hillclimb_lever(tmp, "HIT_FOR_BIG")
@@ -11470,6 +15764,12 @@ def self_check() -> None:
         dem = staff_demote_hillclimb_lever(tmp, note="sunday")
         assert dem["ok"] is True
         assert active_hillclimb_lever(tmp) is None
+        none = staff_pick_hillclimb_lever(tmp, "NONE", note="observe")
+        assert none["ok"] is True
+        assert none["active"]["observation_continues"] is True
+        templates = hillclimb_lever_evidence_templates()
+        assert "VOL_SAFE" in templates["templates"]
+        assert templates["templates"]["VOL_SAFE"]["dry_run"]["writes_venue_params"] is False
         # Dual-control stub: two staff + all items; live stays False.
         assert LIVE_ORDERS_ENABLED is False
         for iid, _ in DUAL_CONTROL_ITEMS:

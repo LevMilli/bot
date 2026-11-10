@@ -845,7 +845,18 @@ def run():
     if today_pnl <= -stop:
         entries_off = f"Daily loss stop is hit (${abs(today_pnl):.2f} against ${stop:.2f})."
     if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
-        entries_off = entries_off or (
+        # Prefer-1: honor stored DESK_BLOCK_REASON — do not invent bland entry_gate.
+        gate_why = ""
+        try:
+            if DESK_ROOT not in sys.path:
+                sys.path.insert(0, DESK_ROOT)
+            import desk_living
+            gate_why = desk_living.desk_block_entries_reason(
+                "Desk entry_gate blocked new paper buys. Exits and settles still run."
+            )
+        except Exception:
+            gate_why = ""
+        entries_off = entries_off or gate_why or (
             "Desk entry_gate blocked new paper buys. Exits and settles still run."
         )
     before_book = json.dumps(
@@ -1232,10 +1243,22 @@ def run():
             if hs == as_:
                 still.append(p); continue   # tie/unclear -> wait for Kalshi settlement
             winner = "home" if hs > as_ else "away"
-            payout = p["contracts"] * 1.0 if winner == p["side"] else 0.0
+            won = winner == p["side"]
+            payout = p["contracts"] * 1.0 if won else 0.0
             pnl = round(payout - p["cost"], 2)
             s["cash"] = round(s["cash"] + payout, 2)
-            p.update({"closed": ts, "exit": "settled", "payout": payout, "pnl": pnl, "final_score": f"{as_}-{hs}"})
+            # Honest binary settle mark — HS/tf catchup reads exit_price|exit_bid|mark_bid
+            # only (never entry companion). Losers with exit_price=0 densify when
+            # settle-retro market bid is missing; winners with 1.0 stay non-invent
+            # (wipe guard / organic-exit rules). Commodity #462 sibling.
+            p.update({
+                "closed": ts,
+                "exit": "settled",
+                "exit_price": 1.0 if won else 0.0,
+                "payout": payout,
+                "pnl": pnl,
+                "final_score": f"{as_}-{hs}",
+            })
             s["closed"].append(p)
             if desk is not None:
                 desk.record_learning(DESK_ROOT, {
@@ -1623,11 +1646,28 @@ def run():
                     p["scale_out_at"] = ts
                     p["scale_out_fair"] = round(float(fair), 4)
                     reason = f"scale-out +{SCALE_OUT_FAIR_MOVE*100:.0f}¢ fair (50%)"
+                    # Densify clip into closed[] so boards/CLV/phase2 see partial exits
+                    # (cash already moved; runner stays open). Never invent tip.
+                    clip_row = dict(p)
+                    clip_row.update({
+                        "closed": ts,
+                        "exit": reason,
+                        "exit_price": round(float(bid), 4),
+                        "payout": proceeds,
+                        "pnl": pnl,
+                        "contracts": clip,
+                        "cost": cost_clip,
+                        "fair_at_exit": round(float(fair), 4),
+                        "scale_out_clip": True,
+                        "runner_left": int(p.get("contracts") or 0),
+                    })
+                    s.setdefault("closed", []).append(clip_row)
                     try:
                         if DESK_ROOT not in sys.path:
                             sys.path.insert(0, DESK_ROOT)
                         import desk_roi_plan
                         import desk_living
+                        import desk_phase2
                         desk_roi_plan.record_fee_ledger(
                             DESK_ROOT,
                             bot="sports-gap",
@@ -1652,6 +1692,22 @@ def run():
                             kind="scale_out",
                             eligible=True,
                             note=reason[:120],
+                        )
+                        desk_phase2.remember_scale_out(
+                            DESK_ROOT,
+                            bot="sports-gap",
+                            ticker=str(p.get("ticker") or ""),
+                            plan={
+                                "league": p.get("league"),
+                                "side": p.get("side"),
+                                "clip": clip,
+                                "runner": int(p.get("contracts") or 0),
+                                "bid": round(float(bid), 4),
+                                "pnl": pnl,
+                                "fair": round(float(fair), 4),
+                                "fair_at_entry": p.get("fair_at_entry"),
+                                "reason": reason[:120],
+                            },
                         )
                     except Exception:
                         pass
@@ -1948,20 +2004,42 @@ def run():
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_roi_plan
+        def _densify_gate_skip(reason: str, *, note: str) -> None:
+            """CARD prepend + brain densify for buy-loop gate locks (#519 sibling)."""
+            skips = summary_out.setdefault("skips", [])
+            skips.insert(0, reason)
+            if desk_brain is not None:
+                try:
+                    desk_brain.record_decision(
+                        DESK_ROOT, bot="sports-gap", action="skip",
+                        reasons=[reason], note=note,
+                    )
+                except Exception:
+                    pass
+
         cool = desk_roi_plan.adverse_cool_blocks(DESK_ROOT, "sports-gap")
         if cool:
             lines.append(f"| {ts} | | | | | | | | {cool} |")
-            summary_out.setdefault("skips", []).append(cool)
+            # Prepend so CARD densifies cool ahead of evaluate noise (#519 leftover).
+            _densify_gate_skip(cool, note="sports adverse-cool densify")
             max_buys_eff = 0
         stale = desk_roi_plan.stale_world_blocks(DESK_ROOT, "sports-gap")
         if stale:
             lines.append(f"| {ts} | | | | | | | | {stale} |")
-            summary_out.setdefault("skips", []).append(stale)
+            # Prepend so CARD densifies stale ahead of evaluate noise (#519 leftover).
+            _densify_gate_skip(stale, note="sports stale-world densify")
+            max_buys_eff = 0
+        # Prefer-1: densify real entry_gate / daily-loss reason (BTC/CMD #531 twin).
+        if entries_off:
+            lines.append(f"| {ts} | | | | | | | | {entries_off} |")
+            _densify_gate_skip(entries_off, note="sports entry-gate densify")
             max_buys_eff = 0
         r_block = desk_roi_plan.daily_r_blocks("sports-gap", red_pnl)
         if r_block:
             lines.append(f"| {ts} | | | | | | | | {r_block} |")
-            summary_out.setdefault("skips", []).append(r_block)
+            # Prepend so CARD/why densify settle-only ahead of evaluate/cool noise (#482 twin).
+            # Settle-only insert last so it stays skips[0] over cool/stale/entry.
+            _densify_gate_skip(r_block, note="sports daily-r densify")
             max_buys_eff = 0
     except Exception:
         pass
@@ -1970,6 +2048,26 @@ def run():
         row, gtxt = c["row"], c["gtxt"]
         reason = None
         if buys_this_check >= max_buys_eff:
+            # Prefer-1: gate (settle-only / cool / stale / entry / ruin) zeroed the cap —
+            # do not invent capacity skip into brain while CARD names the gate.
+            gate_keys = (
+                "settle-only", "adverse cool", "stale-world", "clock-skew",
+                "entry_gate", "ruin drill", "daily loss",
+                "max open risk", "max open positions",
+            )
+            gate_hits = [
+                str(s)
+                for s in (summary_out.get("skips") or [])
+                if any(k in str(s).lower() for k in gate_keys)
+            ]
+            gate_lock = max_buys_eff == 0 and bool(gate_hits)
+            if gate_lock:
+                gate_why = next(
+                    (s for s in gate_hits if "settle-only" in s.lower()),
+                    gate_hits[0],
+                )
+                lines.append(row + gtxt + f" | {gate_why} |")
+                continue
             reason = f"max buys this check ({max_buys_eff})"
         elif red_pnl < 0 and str(c.get("lane") or "") == "speed":
             reason = f"speed lane off on red sports book (red ${red_pnl:.2f})"

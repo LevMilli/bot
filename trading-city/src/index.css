@@ -244,6 +244,11 @@ a {
   pointer-events: none;
 }
 
+/* Open list fills the plaza down to the clock strip so the roster stays on screen. */
+.tower-menu.open {
+  bottom: 2.15rem;
+}
+
 .tower-menu > * {
   pointer-events: auto;
 }
@@ -315,7 +320,8 @@ a {
 }
 
 .tower-menu-panel {
-  max-height: min(42vh, 22rem);
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   border: 1px solid rgba(154, 163, 199, 0.28);
   background: rgba(4, 8, 22, 0.94);
@@ -374,8 +380,8 @@ a {
 
 .tower-tab-body {
   display: grid;
-  gap: 0.08rem;
-  padding: 0.38rem 0 0.38rem 0;
+  gap: 0.04rem;
+  padding: 0.28rem 0;
   min-width: 0;
 }
 
@@ -415,7 +421,7 @@ a {
   font-size: 0.58rem;
   line-height: 1.25;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
   opacity: 0.9;
@@ -1276,19 +1282,16 @@ a {
   }
 
   .tower-menu {
-    top: auto;
+    top: 4.7rem;
     left: 0.55rem;
-    right: 0.55rem;
-    bottom: 2.35rem;
-    width: auto;
+    right: auto;
+    bottom: auto;
+    width: min(15.5rem, 86vw);
   }
 
-  .tower-menu-panel {
-    max-height: min(42vh, 22rem);
-  }
-
-  .tower-tab-status {
-    -webkit-line-clamp: 1;
+  .tower-menu.open {
+    /* Stacked clock strip sits higher on a phone. */
+    bottom: 7rem;
   }
 }
 

@@ -129,6 +129,41 @@ class FirmQueue(unittest.TestCase):
             fq = plan.get("firm_queue") or {}
             self.assertGreaterEqual(int(fq.get("offers_n") or 0), 1)
 
+    def test_master_firm_queue_prefers_live_book_over_stale(self):
+        """Same-day stale capture must not keep cleared offers (#495 twin)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            desk_roi_plan.offer_firm_candidates(
+                tmp,
+                [
+                    {
+                        "bot": "btc15m",
+                        "ticker": "KXBTC",
+                        "side": "yes",
+                        "edge": 0.12,
+                        "confidence": 0.9,
+                        "stake_est": 20,
+                    }
+                ],
+                bot="btc15m",
+            )
+            bots = [
+                {"id": "btc15m", "open_risk": 0, "history": [], "gate_a": {}},
+                {"id": "commodity-15m", "open_risk": 0, "history": [], "gate_a": {}},
+            ]
+            desk_roi_plan.capture_firm_queue(
+                tmp, bots=bots, cfg={"max_open_risk": 100}, label="2026-11-09",
+            )
+            stale = (desk_roi_plan.firm_queue_status(tmp).get("latest") or {})
+            self.assertEqual(int(stale.get("offers_n") or 0), 1)
+            desk_roi_plan.offer_firm_candidates(tmp, [], bot="btc15m")
+            summary = desk_master.master_summary(
+                tmp, bots=bots, cfg={"max_open_risk": 100},
+            )
+            fq = (summary.get("roi_plan") or {}).get("firm_queue") or {}
+            latest = fq.get("latest") if isinstance(fq.get("latest"), dict) else fq
+            self.assertEqual(int(latest.get("offers_n") or 0), 0)
+            self.assertEqual(int(fq.get("offers_n") or 0), 0)
+
     def test_fee_floors_untouched(self):
         import desk_profit
         floors = desk_profit.venue_floors_locked()

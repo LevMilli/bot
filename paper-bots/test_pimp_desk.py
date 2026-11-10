@@ -46,6 +46,9 @@ def _tree(tmp, script):
     _write(os.path.join(tmp, "coinbase-spot-paper", "bot.py"), script)
     _write(os.path.join(tmp, "coinbase-spot-paper", "config.json"),
            json.dumps({"paper_only": True, "live_orders": False}))
+    _write(os.path.join(tmp, "btc-carry-paper", "bot.py"), script)
+    _write(os.path.join(tmp, "btc-carry-paper", "config.json"),
+           json.dumps({"paper_only": True, "live_orders": False}))
 
 
 def _ran(tmp, folder):
@@ -105,7 +108,7 @@ class PimpDeskTests(unittest.TestCase):
         self.assertTrue(snap["paper_only"])
         self.assertIn("PAPER ONLY", snap["banner"])
         self.assertEqual([b["id"] for b in snap["bots"]],
-                         ["sports-gap", "kalshi-sp", "btc15m", "commodity-15m", "memecoin", "kalshi-sized", "coinbase-spot", "wall-street"])
+                         ["sports-gap", "kalshi-sp", "btc15m", "commodity-15m", "memecoin", "kalshi-sized", "coinbase-spot", "btc-carry", "sports-sharp-lag", "fed-watch", "wall-street"])
         sized = next(b for b in snap["bots"] if b["id"] == "kalshi-sized")
         coinbase = next(b for b in snap["bots"] if b["id"] == "coinbase-spot")
         self.assertTrue(coinbase["shadow_only"])
@@ -120,6 +123,9 @@ class PimpDeskTests(unittest.TestCase):
             "memecoin": 100.0,
             "kalshi-sized": 500.0,
             "coinbase-spot": 500.0,
+            "btc-carry": 500.0,
+            "sports-sharp-lag": None,
+            "fed-watch": None,
             "wall-street": 0.0,
         }
         for bot in snap["bots"]:
@@ -252,6 +258,20 @@ class PimpDeskTests(unittest.TestCase):
             self.assertFalse(refused["ok"])
             self.assertFalse(os.path.exists(os.path.join(tmp, "memecoin-paper", "ran")))
 
+    def test_child_env_passes_block_reason_with_entries(self):
+        """Post-#550 Prefer-1: manage-when-gated must densify real gate, not bland ENTRIES=1."""
+        env = pimp_desk._child_env(
+            block_entries=True,
+            block_reason="ruin drill soft: new entries off. Settles/exits still run under soft.",
+        )
+        self.assertEqual(env.get("DESK_BLOCK_ENTRIES"), "1")
+        self.assertIn("ruin drill", env.get("DESK_BLOCK_REASON", "").lower())
+        self.assertEqual(env.get("PAPER_ONLY"), "1")
+        # No reason → do not invent a bland DESK_BLOCK_REASON key.
+        bare = pimp_desk._child_env(block_entries=True)
+        self.assertEqual(bare.get("DESK_BLOCK_ENTRIES"), "1")
+        self.assertNotIn("DESK_BLOCK_REASON", bare)
+
     def test_save_roundtrip_and_unknown_bot(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg, err = pimp_desk.save_settings({
@@ -288,7 +308,8 @@ class PimpDeskTests(unittest.TestCase):
         scans = [s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "run"]
         settles = [s for s in pimp_desk.AUTO if s["id"] == "kalshi-sp" and s["action"] == "settle"]
         self.assertEqual(brief["at_ct"], "08:00")
-        self.assertEqual([s["at_ct"] for s in scans], ["12:05", "13:05", "14:20"])
+        self.assertEqual([s["at_ct"] for s in scans], ["12:05", "13:05", "13:40"])
+        self.assertEqual(scans[2]["until_ct"], "14:00")
         self.assertEqual([s["at_ct"] for s in settles], ["13:00", "16:00"])
         self.assertEqual(settles[0]["until_ct"], "15:55")
         self.assertEqual(pimp_desk.ACTIONS["kalshi-sp"]["brief"]["argv"], ("bot.py", "brief", "--dry-run"))
@@ -305,7 +326,8 @@ class PimpDeskTests(unittest.TestCase):
         self.assertIn("8:00", text)
         self.assertIn("12:05", text)
         self.assertIn("13:05", text)
-        self.assertIn("14:20", text)
+        self.assertIn("13:40", text)
+        self.assertNotIn("14:20", text)
         self.assertIn("dry run", text)
         self.assertNotIn("guarantee", text)
         with tempfile.TemporaryDirectory() as tmp:
@@ -314,7 +336,7 @@ class PimpDeskTests(unittest.TestCase):
             morning = dt.datetime(2026, 10, 30, 8, 5, tzinfo=pimp_desk.CT)
             noon = dt.datetime(2026, 10, 30, 12, 10, tzinfo=pimp_desk.CT)
             mid = dt.datetime(2026, 10, 30, 13, 10, tzinfo=pimp_desk.CT)
-            late_slot = dt.datetime(2026, 10, 30, 14, 25, tzinfo=pimp_desk.CT)
+            third_slot = dt.datetime(2026, 10, 30, 13, 45, tzinfo=pimp_desk.CT)
             late = dt.datetime(2026, 10, 30, 14, 56, tzinfo=pimp_desk.CT)
             night = dt.datetime(2026, 10, 30, 3, 0, tzinfo=pimp_desk.CT)
             saturday = dt.datetime(2026, 10, 31, 12, 10, tzinfo=pimp_desk.CT)
@@ -322,12 +344,12 @@ class PimpDeskTests(unittest.TestCase):
             self.assertNotIn(("kalshi-sp", "run", "12:05"), names(morning))
             self.assertIn(("kalshi-sp", "run", "12:05"), names(noon))
             self.assertIn(("kalshi-sp", "run", "13:05"), names(mid))
-            self.assertIn(("kalshi-sp", "run", "14:20"), names(late_slot))
+            self.assertIn(("kalshi-sp", "run", "13:40"), names(third_slot))
             self.assertNotIn(("kalshi-sp", "brief", "08:00"), names(noon))
             self.assertIn(("memecoin", "run", None), names(noon))
             self.assertNotIn(("kalshi-sp", "run", "12:05"), names(late))
             self.assertEqual([row[0] for row in names(night)],
-                             ["sports-gap", "btc15m", "commodity-15m", "memecoin", "coinbase-spot"])
+                             ["sports-gap", "btc15m", "commodity-15m", "memecoin", "coinbase-spot", "btc-carry"])
             self.assertNotIn(("kalshi-sized", "settle", "13:00"), names(night))
             self.assertIn(("kalshi-sp", "run", "12:05"), names(saturday))
             saturday_scan = dt.datetime(2026, 10, 31, 12, 35, tzinfo=pimp_desk.CT)
@@ -347,7 +369,7 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(set(by), {
                 ("sports-gap", "run"), ("btc15m", "run"), ("btc15m", "shadow"),
                 ("commodity-15m", "run"), ("kalshi-sp", "run"), ("kalshi-sized", "run"),
-                ("memecoin", "run"), ("coinbase-spot", "run"),
+                ("memecoin", "run"), ("coinbase-spot", "run"), ("btc-carry", "run"),
                 ("shadow-tick", "auto"),
             })
             for row in rows:
@@ -364,9 +386,11 @@ class PimpDeskTests(unittest.TestCase):
             self.assertTrue((_ran(tmp, "kalshi-sized-paper") or "").startswith("scan\n"))
             self.assertGreaterEqual((_ran(tmp, "memecoin-paper") or "").count("\n"), 1)
             self.assertGreaterEqual((_ran(tmp, "coinbase-spot-paper") or "").count("\n"), 1)
+            self.assertGreaterEqual((_ran(tmp, "btc-carry-paper") or "").count("\n"), 1)
             for folder in (
                 "sports-gap-paper", "btc15m-signal", "kalshi-sp500-paper",
                 "kalshi-sized-paper", "memecoin-paper", "coinbase-spot-paper",
+                "btc-carry-paper",
             ):
                 text = _ran(tmp, folder).lower()
                 for word in ("order", "wallet", "api_key", "any-time", "live"):
@@ -381,10 +405,12 @@ class PimpDeskTests(unittest.TestCase):
             self.assertTrue({
                 ("sports-gap", "run"), ("btc15m", "run"), ("btc15m", "shadow"),
                 ("commodity-15m", "run"), ("memecoin", "run"), ("coinbase-spot", "run"),
+                ("btc-carry", "run"),
             }.issubset(got))
             self.assertTrue(got <= {
                 ("sports-gap", "run"), ("btc15m", "run"), ("btc15m", "shadow"),
                 ("commodity-15m", "run"), ("memecoin", "run"), ("coinbase-spot", "run"),
+                ("btc-carry", "run"),
                 ("shadow-tick", "auto"),
             })
             self.assertTrue(all(row["ok"] for row in more))
@@ -443,7 +469,8 @@ class PimpDeskTests(unittest.TestCase):
             night = dt.datetime(2026, 10, 30, 3, 0, tzinfo=pimp_desk.CT)
             rows = pimp_desk.run_scheduled(night, tmp)
             self.assertEqual(sorted((row["bot"], row["action"], row["ok"]) for row in rows),
-                             [("btc15m", "run", False), ("btc15m", "shadow", False),
+                             [("btc-carry", "run", False),
+                              ("btc15m", "run", False), ("btc15m", "shadow", False),
                               ("coinbase-spot", "run", False),
                               ("commodity-15m", "run", False),
                               ("desk", "midnight-reload", True),
@@ -1101,6 +1128,13 @@ class PimpDeskTests(unittest.TestCase):
             "CARD: z < 1.25 (0.91)\n"
         )
         self.assertIn("SIGNAL: SKIP", pimp_desk._btc_skip(btc))
+        # No-window line densifies skip when CARD is bland (#499 twin).
+        no_win = (
+            "No open KXBTC15M window right now — still tracking ETH/ladder history.\n"
+            "CARD: Checked all open BTC 15-minute markets. No paper buy.\n"
+        )
+        self.assertIn("no open kxbtc15m window", pimp_desk._btc_skip(no_win).lower())
+        self.assertNotIn("did not include a skip line", pimp_desk._btc_skip(no_win).lower())
 
     def test_sports_skip_prefers_densified_card(self):
         sports = (
@@ -1119,6 +1153,13 @@ class PimpDeskTests(unittest.TestCase):
             "no Kalshi match",
             pimp_desk._sports_skip("CARD: no Kalshi match - skip\n"),
         )
+        # Idle no-live CARD is the skip reason — not "did not include a skip line".
+        idle = (
+            "Kalshi tape: +0 new prints\n"
+            "CARD: No live or tip-soon games, so this check bought nothing.\n"
+        )
+        self.assertIn("no live or tip-soon", pimp_desk._sports_skip(idle).lower())
+        self.assertNotIn("did not include a skip line", pimp_desk._sports_skip(idle).lower())
 
     def test_kalshi_skip_prefers_densified_card_over_calendar(self):
         summary = (
@@ -1134,6 +1175,387 @@ class PimpDeskTests(unittest.TestCase):
             pimp_desk.card_copy(summary),
             "post-CPI blackout 30m",
         )
+
+    def test_kalshi_skip_surfaces_drawdown_halt_without_kill_flag(self):
+        """$444 bankroll ≤ $460 drawdown halt must densify even when halted=False."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sp = os.path.join(tmp, "kalshi-sp500-paper")
+            os.makedirs(sp, exist_ok=True)
+            with open(os.path.join(sp, "config.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "starting_bankroll": 500.0,
+                    "drawdown_halt_bankroll": 460.0,
+                    "kill_switch_bankroll": 400.0,
+                    "staff_clear_drawdown_halt": False,
+                }, fh)
+            with open(os.path.join(sp, "calendar.json"), "w", encoding="utf-8") as fh:
+                json.dump({}, fh)
+            state = {"bankroll": 444.37, "halted": False, "open": [], "closed": []}
+            out = pimp_desk._kalshi_skip(tmp, state, summary="")
+            self.assertIn("drawdown halt", out.lower())
+            self.assertIn("444.37", out)
+            self.assertIn("460", out)
+            # Bland settle CARD must not hide the halt (HUD sibling).
+            bland = pimp_desk._kalshi_skip(
+                tmp, state, summary="CARD: No open paper positions.\n",
+            )
+            self.assertIn("drawdown halt", bland.lower())
+            # Above halt → no mystery drawdown line.
+            ok = pimp_desk._kalshi_skip(
+                tmp, {"bankroll": 500.0, "halted": False}, summary="",
+            )
+            self.assertNotIn("drawdown halt", ok.lower())
+            # Staff clear densifies resume truth (not bland empty settle); kill still stone.
+            with open(os.path.join(sp, "config.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "starting_bankroll": 500.0,
+                    "drawdown_halt_bankroll": 460.0,
+                    "kill_switch_bankroll": 400.0,
+                    "staff_clear_drawdown_halt": True,
+                }, fh)
+            cleared = pimp_desk._kalshi_skip(tmp, state, summary="")
+            self.assertIn("staff cleared soft drawdown", cleared.lower())
+            self.assertIn("444.37", cleared)
+            self.assertNotIn("new buys off", cleared.lower())
+            bland_clear = pimp_desk._kalshi_skip(
+                tmp, state, summary="CARD: No open paper positions.\n",
+            )
+            self.assertIn("staff cleared soft drawdown", bland_clear.lower())
+
+    def test_kalshi_sized_skip_reads_own_staff_clear_not_sp(self):
+        """Sized tip must not inherit S&P staff-clear when its own soft DD is still on."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sp = os.path.join(tmp, "kalshi-sp500-paper")
+            sized = os.path.join(tmp, "kalshi-sized-paper")
+            os.makedirs(sp, exist_ok=True)
+            os.makedirs(sized, exist_ok=True)
+            with open(os.path.join(sp, "config.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "starting_bankroll": 500.0,
+                    "drawdown_halt_bankroll": 460.0,
+                    "kill_switch_bankroll": 400.0,
+                    "staff_clear_drawdown_halt": True,
+                }, fh)
+            with open(os.path.join(sized, "config.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "starting_bankroll": 500.0,
+                    "drawdown_halt_bankroll": 460.0,
+                    "kill_switch_bankroll": 400.0,
+                    "staff_clear_drawdown_halt": False,
+                }, fh)
+            for folder in (sp, sized):
+                with open(os.path.join(folder, "calendar.json"), "w", encoding="utf-8") as fh:
+                    json.dump({}, fh)
+            state = {"bankroll": 444.0, "halted": False, "open": [], "closed": []}
+            # Default (S&P folder) still shows staff clear.
+            sp_line = pimp_desk._kalshi_skip(tmp, state, summary="")
+            self.assertIn("staff cleared soft drawdown", sp_line.lower())
+            # Sized folder must densify halt — not the S&P clear lie.
+            sized_line = pimp_desk._kalshi_skip(
+                tmp, state, summary="", bot_id="kalshi-sized", folder="kalshi-sized-paper",
+            )
+            self.assertIn("drawdown halt", sized_line.lower())
+            self.assertNotIn("staff cleared", sized_line.lower())
+            # Sized staff clear densifies resume truth on its own tower.
+            with open(os.path.join(sized, "config.json"), "w", encoding="utf-8") as fh:
+                json.dump({
+                    "starting_bankroll": 500.0,
+                    "drawdown_halt_bankroll": 460.0,
+                    "kill_switch_bankroll": 400.0,
+                    "staff_clear_drawdown_halt": True,
+                }, fh)
+            sized_clear = pimp_desk._kalshi_skip(
+                tmp, state, summary="CARD: No open paper positions.\n",
+                bot_id="kalshi-sized", folder="kalshi-sized-paper",
+            )
+            self.assertIn("staff cleared soft drawdown", sized_clear.lower())
+
+    def test_finish_bot_prefers_hold_why_over_entry_skip_card(self):
+        """Open BTC must not show speed-floor entry skips as the tower why."""
+        spec = {
+            "id": "btc15m",
+            "name": "BTC 15m signal",
+            "kind": "btc",
+            "folder": "btc15m-signal",
+            "state": "paper_account.json",
+            "log": "",
+            "empty": "empty",
+        }
+        view = {
+            "id": "btc15m",
+            "present": True,
+            "has_state": True,
+            "open_count": 1,
+            "positions": [{"ticker": "KXBTC15M-T"}],
+            "trades": [],
+            "history": [],
+            "cash": 96.49,
+            "realized": -2.03,
+            "today": 0.0,
+            "why": "p 0.619 < speed floor 0.70; p 0.619 < ask+fee+buf (accurate) = 0.710; z 0.30 < 0.60",
+            "skip": "",
+            "paused": False,
+            "read_error": "",
+            "central_check": "1:50 AM",
+            "last_check": "1:50 AM",
+        }
+        run = {"ok": True, "summary": "CARD: p 0.619 < speed floor 0.70\n", "at": ""}
+        # Bind run onto view the way _bot_view does before _finish_bot.
+        view["last_run"] = run
+        out = pimp_desk._finish_bot(view, spec, ".")
+        self.assertIn("Holding 1 open paper position", out.get("why") or "")
+        self.assertNotIn("speed floor", (out.get("why") or "").lower())
+
+    def test_finish_bot_inx_settle_empty_leads_with_next_scan(self):
+        """Settle empty must not lead tip why (#497 twin)."""
+        from unittest import mock
+
+        spec = {
+            "id": "kalshi-sp",
+            "name": "Kalshi S&P",
+            "kind": "kalshi",
+            "folder": "kalshi-sp500-paper",
+            "state": "paper_state.json",
+            "log": "",
+            "empty": "empty",
+        }
+        view = {
+            "id": "kalshi-sp",
+            "present": True,
+            "has_state": True,
+            "open_count": 0,
+            "positions": [],
+            "trades": [],
+            "history": [],
+            "cash": 500.0,
+            "realized": 0.0,
+            "today": 0.0,
+            "why": "No open paper positions.",
+            "skip": "",
+            "paused": False,
+            "read_error": "",
+            "central_check": "12:30 PM",
+            "last_check": "12:30 PM",
+            "last_run": {"ok": True, "summary": "No open paper positions.", "action": "settle"},
+        }
+        with mock.patch.object(
+            pimp_desk, "next_inx_scan_line", return_value="Next scan 13:05 CT.",
+        ):
+            out = pimp_desk._finish_bot(view, spec, ".")
+        why = out.get("why") or ""
+        self.assertTrue(why.startswith("Next scan 13:05 CT."))
+        self.assertIn("Settle smoke: empty book", why)
+        self.assertFalse(why.lower().startswith("no open paper"))
+
+    def test_finish_bot_staff_clear_outside_window_leads_with_next_scan(self):
+        """Soft-DD staff-clear must not lead the tip after the entry window."""
+        from unittest import mock
+
+        spec = {
+            "id": "kalshi-sp",
+            "name": "Kalshi S&P",
+            "kind": "kalshi",
+            "folder": "kalshi-sp500-paper",
+            "state": "paper_state.json",
+            "log": "",
+            "empty": "empty",
+        }
+        clear = (
+            "Staff cleared soft drawdown halt: bankroll $444.37 ≤ $460.00 "
+            "(start $500). Paper buys may resume; kill $400 + fee/band/max-1/day stay stone."
+        )
+        view = {
+            "id": "kalshi-sp",
+            "present": True,
+            "has_state": True,
+            "open_count": 0,
+            "positions": [],
+            "trades": [],
+            "history": [],
+            "cash": 444.37,
+            "realized": -55.63,
+            "today": 0.0,
+            "why": clear,
+            "skip": clear,
+            "paused": False,
+            "read_error": "",
+            "central_check": "3:10 PM",
+            "last_check": "3:10 PM",
+            "last_run": {"ok": True, "summary": "No open paper positions.", "action": "settle"},
+        }
+        with mock.patch.object(
+            pimp_desk, "next_inx_scan_line",
+            return_value="Next scan tomorrow 12:05 CT.",
+        ):
+            out = pimp_desk._finish_bot(view, spec, ".")
+        why = out.get("why") or ""
+        self.assertTrue(why.startswith("Next scan tomorrow 12:05 CT."))
+        self.assertIn("Staff cleared soft drawdown", why)
+        self.assertFalse(why.lower().startswith("staff cleared"))
+
+    def test_finish_bot_inx_in_scan_prefers_skip_over_settle_smoke(self):
+        """In-window sized tip must keep densified NO TRADE, not settle boilerplate."""
+        from unittest import mock
+
+        spec = {
+            "id": "kalshi-sized",
+            "name": "Sized Kalshi",
+            "kind": "kalshi",
+            "folder": "kalshi-sized-paper",
+            "state": "paper_state.json",
+            "log": "",
+            "empty": "empty",
+        }
+        view = {
+            "id": "kalshi-sized",
+            "present": True,
+            "has_state": True,
+            "open_count": 0,
+            "positions": [],
+            "trades": [],
+            "history": [],
+            "cash": 500.0,
+            "realized": 0.0,
+            "today": 0.0,
+            "why": "No open paper positions.",
+            "skip": "inx fair: 45m to settle < 60m entry floor (refuse late σ-collapse arm)",
+            "paused": False,
+            "read_error": "",
+            "central_check": "2:14 PM",
+            "last_check": "2:14 PM",
+            "last_run": {"ok": True, "summary": "No open paper positions.", "action": "settle"},
+        }
+        with mock.patch.object(
+            pimp_desk, "next_inx_scan_line",
+            return_value="In scan window until 14:55 CT.",
+        ):
+            out = pimp_desk._finish_bot(view, spec, ".")
+        why = (out.get("why") or "").lower()
+        self.assertIn("60m entry floor", why)
+        self.assertNotIn("settle smoke", why)
+
+    def test_inx_settle_keeps_scan_tip_in_run_window(self):
+        """Empty settle during sized scan window must not wipe densified CARD."""
+        from unittest import mock
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            prior = (
+                "NO TRADE 2026-11-09: inx fair: 45m to settle < 60m entry floor "
+                "(refuse late σ-collapse arm)\n"
+                "CARD: inx fair: 45m to settle < 60m entry floor "
+                "(refuse late σ-collapse arm)"
+            )
+            pimp_desk._save_run(tmp, "kalshi-sized", {
+                "at": "2026-11-09 20:00:00 UTC",
+                "ok": True,
+                "summary": prior,
+                "action": "run",
+            })
+
+            def fake_popen(*_a, **_k):
+                class Proc:
+                    returncode = 0
+
+                    def communicate(self, timeout=None):
+                        return ("No open paper positions.\n", None)
+
+                    def kill(self):
+                        return None
+                return Proc()
+
+            with mock.patch.object(pimp_desk, "inx_in_run_window", return_value=True), \
+                 mock.patch.object(pimp_desk.subprocess, "Popen", side_effect=fake_popen), \
+                 mock.patch.object(pimp_desk, "keep_closed_settlements"), \
+                 mock.patch.object(pimp_desk, "ensure_paper_accounts"), \
+                 mock.patch.object(pimp_desk, "_folder_ok", return_value=True), \
+                 mock.patch.object(pimp_desk, "_paper_ok", return_value=""), \
+                 mock.patch.object(pimp_desk, "_kalshi_paper", return_value=True), \
+                 mock.patch.object(pimp_desk, "_note_state_mtime"), \
+                 mock.patch.object(pimp_desk, "_lock") as lock_m:
+                lock = mock.Mock()
+                lock.acquire.return_value = True
+                lock_m.return_value = lock
+                # Need real folder layout for script path check — stub argv via ACTIONS.
+                sized_dir = os.path.join(tmp, "kalshi-sized-paper")
+                os.makedirs(sized_dir, exist_ok=True)
+                with open(os.path.join(sized_dir, "bot.py"), "w", encoding="utf-8") as fh:
+                    fh.write("print('hi')\n")
+                with open(os.path.join(sized_dir, "config.json"), "w", encoding="utf-8") as fh:
+                    fh.write('{"paper_mode": true}\n')
+                out = pimp_desk.run_bot("kalshi-sized", "settle", tmp)
+            self.assertTrue(out.get("kept_scan_tip"))
+            self.assertIn("60m entry floor", out.get("summary") or "")
+            saved = pimp_desk._load_runs(tmp).get("kalshi-sized") or {}
+            self.assertIn("60m entry floor", saved.get("summary") or "")
+            self.assertEqual(saved.get("action"), "run")
+
+    def test_inx_no_trade_retries_inside_window(self):
+        """NO TRADE must not burn the daily INX stamp — retry so band can clear."""
+        slot = {"id": "kalshi-sized", "action": "run", "at_ct": "12:05", "until_ct": "14:55"}
+        now = dt.datetime(2026, 11, 9, 13, 10, tzinfo=pimp_desk.CT)
+        saved = {}
+        pimp_desk._remember(
+            saved, slot, now,
+            {"ok": True, "summary": "NO TRADE: inx fair p 0.66 < 0.80\nCARD: inx fair p 0.66 < 0.80"},
+        )
+        key = "kalshi-sized:run:12:05"
+        self.assertIsNone(saved.get(key))
+        self.assertIn(key + ":retry", saved)
+        # Late-σ ends retries (stone 60m floor — no legal entry left).
+        saved_late = {}
+        pimp_desk._remember(
+            saved_late, slot, now,
+            {
+                "ok": True,
+                "summary": (
+                    "CARD: inx fair: 38m to settle < 60m entry floor "
+                    "(refuse late σ-collapse arm)"
+                ),
+            },
+        )
+        self.assertEqual(saved_late.get(key), "2026-11-09")
+        with tempfile.TemporaryDirectory() as tmp:
+            # After retry cooldown, sized run is due again inside the window.
+            pimp_desk._atomic_write(
+                pimp_desk.auto_path(tmp),
+                json.dumps({key + ":retry": pimp_desk._iso(now)}) + "\n",
+            )
+            later = now + dt.timedelta(seconds=pimp_desk.AUTO_RETRY_SEC + 1)
+            due = pimp_desk.due_slots(later, tmp)
+            self.assertTrue(any(
+                s.get("id") == "kalshi-sized" and s.get("action") == "run" for s in due
+            ))
+
+    def test_next_for_never_past_inside_open_window(self):
+        """Open settle/run windows must not show a past clock start as next_run."""
+        with tempfile.TemporaryDirectory() as tmp:
+            now = dt.datetime(2026, 11, 9, 14, 39, tzinfo=pimp_desk.CT)
+            # Run already done today; settle window 13:00–15:55 still open → due now,
+            # not "1:00 PM" in the past.
+            pimp_desk._atomic_write(
+                pimp_desk.auto_path(tmp),
+                json.dumps({"kalshi-sized:run:12:05": "2026-11-09"}) + "\n",
+            )
+            text = pimp_desk._next_for("kalshi-sized", tmp, now)
+            self.assertNotIn("1:00 PM", text)
+            self.assertIn("2026", text)
+            # Parse-ish: afternoon next (settle due now → ~2:39) or evening settle.
+            self.assertTrue(
+                "2:39 PM" in text or "2:3" in text or "4:00 PM" in text or "4:05 PM" in text,
+                msg=text,
+            )
+            # All S&P scans done; settle open → next is now, not 1:00 PM.
+            pimp_desk._atomic_write(
+                pimp_desk.auto_path(tmp),
+                json.dumps({
+                    "kalshi-sp:run:12:05": "2026-11-09",
+                    "kalshi-sp:run:13:05": "2026-11-09",
+                    "kalshi-sp:run:13:40": "2026-11-09",
+                }) + "\n",
+            )
+            sp = pimp_desk._next_for("kalshi-sp", tmp, now)
+            self.assertNotIn("1:00 PM", sp)
 
     def test_card_copy_is_plain_and_accounts_keep_cash(self):
         raw = (
@@ -1154,7 +1576,7 @@ class PimpDeskTests(unittest.TestCase):
             made = pimp_desk.ensure_paper_accounts(tmp)
             self.assertEqual(set(made), {
                 "sports-gap", "kalshi-sp", "btc15m", "commodity-15m", "memecoin",
-                "kalshi-sized", "coinbase-spot",
+                "kalshi-sized", "coinbase-spot", "btc-carry",
             })
             snap = pimp_desk.snapshot(tmp)
             by_id = {bot["id"]: bot for bot in snap["bots"]}
@@ -1166,6 +1588,8 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(by_id["kalshi-sized"]["cash"], 500.0)
             self.assertEqual(by_id["coinbase-spot"]["cash"], 500.0)
             self.assertTrue(by_id["coinbase-spot"]["shadow_only"])
+            self.assertEqual(by_id["btc-carry"]["cash"], 500.0)
+            self.assertTrue(by_id["btc-carry"]["shadow_only"])
             self.assertTrue(by_id["kalshi-sized"]["present"])
             self.assertIn("gate_a", snap["desk"])
             self.assertIn("prove_it", snap["desk"])
@@ -1421,7 +1845,11 @@ class PimpDeskTests(unittest.TestCase):
         import desk_profit
         self.assertTrue(desk_profit.model_flip_adverse("YES", 0.85, 0.70, 0.08))
         self.assertFalse(desk_profit.model_flip_adverse("YES", 0.85, 0.80, 0.08))
-        self.assertTrue(desk_profit.model_flip_adverse("NO", 0.20, 0.35, 0.08))
+        # Held-side fair: away/NO adverse is a DROP, not a rise (LALDET false-flip class).
+        self.assertTrue(desk_profit.model_flip_adverse("away", 0.8907, 0.8277, 0.06))
+        self.assertFalse(desk_profit.model_flip_adverse("away", 0.826, 0.915, 0.06))
+        self.assertTrue(desk_profit.model_flip_adverse("NO", 0.85, 0.70, 0.08))
+        self.assertFalse(desk_profit.model_flip_adverse("NO", 0.20, 0.35, 0.08))
 
     def test_midnight_reloads_broke_towers_only(self):
         broke = {

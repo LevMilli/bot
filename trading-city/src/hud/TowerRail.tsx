@@ -51,10 +51,16 @@ export function TowerRail({ bots, onSelect }: Props) {
         className="tower-menu-toggle"
         aria-expanded={open}
         aria-controls={listId}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setOpen((v) => {
+            const next = !v
+            if (next) window.dispatchEvent(new Event('apex-frame-towers'))
+            return next
+          })
+        }}
       >
         <span className="tower-menu-beams" aria-hidden>
-          {bots.slice(0, 6).map((bot, i) => (
+          {bots.map((bot, i) => (
             <i key={bot.id} style={{ background: beamColorFor(bot.id, i) }} />
           ))}
         </span>

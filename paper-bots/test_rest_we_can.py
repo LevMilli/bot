@@ -159,10 +159,12 @@ class RestWeCanDensify(unittest.TestCase):
                 seen.append({"bot": bot_id, "action": action})
                 return {"ok": True, "blocked": False, "summary": f"{bot_id} ok", "error": ""}
 
+            # Outside INX AUTO run windows → settle smoke only (no scan invent).
             with mock.patch.object(pimp_desk, "run_bot", side_effect=fake_run_bot), \
                  mock.patch.object(pimp_desk, "keep_closed_settlements"), \
                  mock.patch.object(pimp_desk, "ensure_paper_accounts"), \
                  mock.patch.object(pimp_desk, "touch_heartbeat"), \
+                 mock.patch.object(pimp_desk, "_window_open", return_value=False), \
                  mock.patch("desk_roi_plan.run_shadow_catchup", return_value={
                      "ok": True, "labeled_n": 0, "backfilled": 0, "repaired": 0,
                      "auto_promote": False, "live": False, "live_orders_enabled": False,
@@ -171,6 +173,9 @@ class RestWeCanDensify(unittest.TestCase):
                  mock.patch("desk_roi_plan.shadow_ops_alerts", return_value={"alerts": []}):
                 out = pimp_desk.run_shadow_tick(tmp, run_bots=True)
             self.assertTrue(out.get("commodity_smoked"))
+            self.assertTrue(out.get("btc_carry_smoked"))
+            self.assertTrue(out.get("coinbase_smoked"))
+            self.assertTrue(out.get("memecoin_smoked"))
             self.assertTrue(out.get("inx_sp_smoked"))
             self.assertTrue(out.get("inx_sized_smoked"))
             self.assertFalse(out["live_orders_enabled"])
@@ -178,17 +183,57 @@ class RestWeCanDensify(unittest.TestCase):
             self.assertFalse(out["auto_promote"])
             self.assertTrue(out["fee_floors_locked"])
             self.assertTrue(any(s["bot"] == "commodity-15m" for s in seen))
+            self.assertTrue(any(s["bot"] == "btc-carry" for s in seen))
+            self.assertTrue(any(s["bot"] == "coinbase-spot" for s in seen))
+            self.assertTrue(any(s["bot"] == "memecoin" for s in seen))
             self.assertTrue(any(
                 s["bot"] == "kalshi-sp" and s["action"] == "settle" for s in seen
             ))
             self.assertTrue(any(
                 s["bot"] == "kalshi-sized" and s["action"] == "settle" for s in seen
             ))
-            # No LIVE / scan invent for INX.
             self.assertFalse(any(
                 s["bot"] in ("kalshi-sp", "kalshi-sized") and s["action"] == "run"
                 for s in seen
             ))
+
+    def test_run_shadow_tick_inx_scan_smoke_in_run_window(self):
+        """During AUTO run window, smoke paper scan — not settle empty (#496 twin)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_cfg(tmp)
+            seen = []
+
+            def fake_run_bot(bot_id, action="run", root=None, **kw):
+                seen.append({"bot": bot_id, "action": action})
+                return {"ok": True, "blocked": False, "summary": f"{bot_id} {action}", "error": ""}
+
+            with mock.patch.object(pimp_desk, "run_bot", side_effect=fake_run_bot), \
+                 mock.patch.object(pimp_desk, "keep_closed_settlements"), \
+                 mock.patch.object(pimp_desk, "ensure_paper_accounts"), \
+                 mock.patch.object(pimp_desk, "touch_heartbeat"), \
+                 mock.patch.object(pimp_desk, "_window_open", return_value=True), \
+                 mock.patch("desk_roi_plan.run_shadow_catchup", return_value={
+                     "ok": True, "labeled_n": 0, "backfilled": 0, "repaired": 0,
+                     "auto_promote": False, "live": False, "live_orders_enabled": False,
+                     "fee_floors_locked": True,
+                 }), \
+                 mock.patch("desk_roi_plan.shadow_ops_alerts", return_value={"alerts": []}):
+                out = pimp_desk.run_shadow_tick(tmp, run_bots=True)
+            self.assertTrue(out.get("inx_sp_smoked"))
+            self.assertTrue(out.get("inx_sized_smoked"))
+            self.assertTrue(any(
+                s["bot"] == "kalshi-sp" and s["action"] == "run" for s in seen
+            ))
+            self.assertTrue(any(
+                s["bot"] == "kalshi-sized" and s["action"] == "run" for s in seen
+            ))
+            rows = out.get("shadow_rows") or []
+            self.assertTrue(any(
+                r.get("bot") == "kalshi-sp" and r.get("action") == "scan-smoke"
+                for r in rows
+            ))
+            self.assertFalse(out["live_orders_enabled"])
+            self.assertFalse(out["live"])
 
     def test_shadow_ops_near_miss_thin_alert(self):
         with tempfile.TemporaryDirectory() as tmp:

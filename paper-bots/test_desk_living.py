@@ -556,14 +556,33 @@ class DeskLivingTests(unittest.TestCase):
                 self.assertTrue(
                     any("doctor_fresh=False" in str(p) for p in (masters.get("priority") or []))
                 )
-            # Fresh empty root → blocked until seed fills digests.
+            # Fresh empty root → blocked (swarm thin and/or no M1 Master).
             with tempfile.TemporaryDirectory() as empty:
                 thin = desk_living.betting_expand_gate(empty)
                 self.assertTrue(thin.get("blocked"))
                 seeded = desk_living.seed_missing_digests(empty)
                 fat = desk_living.betting_expand_gate(empty)
-                if seeded.get("after", {}).get("pass"):
-                    self.assertTrue(fat.get("allow_betting_expand"))
+                # Swarm seed alone is not enough — need firm M1≥0 + fee-clear Master (#881).
+                self.assertFalse(fat.get("m1_pass"))
+                self.assertFalse(fat.get("fee_clear_master"))
+                self.assertTrue(fat.get("blocked"))
+                self.assertFalse(fat.get("allow_betting_expand"))
+                green_bots = [
+                    {
+                        "id": "sports-gap",
+                        "history": [{"pnl": 1.0, "contracts": 1}] * 12,
+                    },
+                    {
+                        "id": "btc15m",
+                        "history": [{"pnl": 0.5, "contracts": 1}] * 12,
+                    },
+                ]
+                ready = desk_living.betting_expand_gate(empty, bots=green_bots)
+                if seeded.get("after", {}).get("pass") and ready.get("swarm_pass"):
+                    self.assertTrue(ready.get("m1_pass"))
+                    self.assertTrue(ready.get("fee_clear_master"))
+                    self.assertTrue(ready.get("allow_betting_expand"))
+                    self.assertFalse(ready.get("blocked"))
             with open(map_path, encoding="utf-8") as handle:
                 body = handle.read()
             self.assertIn("auto_publish", body)
@@ -600,6 +619,62 @@ class DeskLivingTests(unittest.TestCase):
             self.assertEqual(os.environ.get("DESK_BLOCK_ENTRIES"), "1")
             os.environ.pop("DESK_BLOCK_ENTRIES", None)
             os.environ.pop("DESK_BLOCK_REASON", None)
+
+    def test_honor_requeries_when_entries_on_reason_empty(self):
+        """Post-#550 Prefer-1: timer DESK_BLOCK_ENTRIES=1 without REASON must not invent bland."""
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["DESK_BLOCK_ENTRIES"] = "1"
+            os.environ.pop("DESK_BLOCK_REASON", None)
+            try:
+                with mock.patch(
+                    "pimp_desk.entry_gate",
+                    return_value="ruin drill soft: new entries off; bots paused",
+                ):
+                    reason = desk_living.honor_desk_entry_gate(tmp)
+                self.assertIn("ruin drill", reason.lower())
+                self.assertIn("ruin drill", os.environ.get("DESK_BLOCK_REASON", "").lower())
+                self.assertNotEqual(reason, "DESK_BLOCK_ENTRIES=1")
+            finally:
+                os.environ.pop("DESK_BLOCK_ENTRIES", None)
+                os.environ.pop("DESK_BLOCK_REASON", None)
+
+    def test_desk_block_entries_reason_prefers_real_gate(self):
+        """Prefer-1: DESK_BLOCK_REASON must beat bland entry_gate invent."""
+        os.environ.pop("DESK_BLOCK_ENTRIES", None)
+        os.environ.pop("DESK_BLOCK_REASON", None)
+        self.assertEqual(desk_living.desk_block_entries_reason(), "")
+        os.environ["DESK_BLOCK_ENTRIES"] = "1"
+        os.environ["DESK_BLOCK_REASON"] = (
+            "Daily loss stop is hit ($150.00 against $150.00). "
+            "Entry checks stay off until the next Chicago day."
+        )
+        try:
+            why = desk_living.desk_block_entries_reason("Desk entry_gate blocked invent")
+            self.assertIn("daily loss", why.lower())
+            self.assertNotIn("blocked invent", why.lower())
+            # Missing reason falls back without inventing a different gate.
+            os.environ.pop("DESK_BLOCK_REASON", None)
+            fallback = desk_living.desk_block_entries_reason(
+                "Desk entry_gate blocked a new paper buy."
+            )
+            self.assertIn("entry_gate", fallback.lower())
+        finally:
+            os.environ.pop("DESK_BLOCK_ENTRIES", None)
+            os.environ.pop("DESK_BLOCK_REASON", None)
+
+    def test_fee_clear_bots_surface_desk_block_reason(self):
+        """BTC/commodity/sports honor DESK_BLOCK_REASON densify (not bland invent)."""
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent
+        for rel, note in (
+            ("btc15m-signal/btc15m_signal.py", "btc entry-gate densify"),
+            ("commodity-15m-paper/bot.py", "commodity entry-gate densify"),
+            ("sports-gap-paper/gap_bot.py", "desk_block_entries_reason"),
+        ):
+            src = (root / rel).read_text(encoding="utf-8")
+            self.assertIn("desk_block_entries_reason", src, rel)
+            self.assertIn(note, src, rel)
 
     def test_fee_floors_untouched(self):
         floors = desk_profit.DEFAULT_VENUE_MIN_EDGE

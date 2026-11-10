@@ -58,6 +58,31 @@ class BtcCalibration(unittest.TestCase):
             self.assertIn("btc_calibration", plan)
             self.assertTrue(plan.get("fee_floors_locked"))
 
+    def test_master_btc_calib_prefers_live_bots_over_stale(self):
+        """Same-day stale calib n must not lag live BTC history (#490 twin)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            morning = [{
+                "id": "btc15m",
+                "history": _hist(3, 0.82, True),
+                "open_risk": 0,
+                "gate_a": {},
+            }]
+            desk_roi_plan.capture_btc_calibration(tmp, bots=morning, label="2026-11-09")
+            stale = desk_roi_plan.latest_btc_calibration(tmp) or {}
+            self.assertEqual(int(stale.get("n") or 0), 3)
+            live = [{
+                "id": "btc15m",
+                "history": _hist(10, 0.82, True) + _hist(10, 0.82, False),
+                "open_risk": 0,
+                "gate_a": {},
+            }]
+            summary = desk_master.master_summary(
+                tmp, bots=live, cfg={"max_open_risk": 100},
+            )
+            card = (summary.get("roi_plan") or {}).get("btc_calibration") or {}
+            self.assertEqual(int(card.get("n") or 0), 20)
+            self.assertTrue(card.get("miscalibrated"))
+
     def test_fee_floors_untouched(self):
         import desk_profit
         floors = desk_profit.venue_floors_locked()

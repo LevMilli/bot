@@ -26,7 +26,11 @@ MIN_FLOOR = 0.02
 def scaffold(root: str, bot_id: str, name: str, floor: float) -> dict:
     if not ID_OK.match(bot_id):
         return {"ok": False, "reason": "id must be lowercase kebab-case"}
-    if bot_id in ("sports-gap", "kalshi-sp", "btc15m", "commodity-15m", "memecoin", "kalshi-sized", "coinbase-spot", "wall-street"):
+    if bot_id in (
+        "sports-gap", "kalshi-sp", "btc15m", "commodity-15m", "memecoin",
+        "kalshi-sized", "coinbase-spot", "btc-carry", "sports-sharp-lag",
+        "fed-watch", "wall-street",
+    ):
         return {"ok": False, "reason": "that tower already exists"}
     if floor + 1e-12 < MIN_FLOOR or floor > 0.20:
         return {"ok": False, "reason": f"floor stays between {MIN_FLOOR:.2f} and 0.20"}

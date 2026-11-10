@@ -19,6 +19,10 @@ VENUE_KEYS = (
     "solana_dex",
     # Spot return-after-cost floor. Same 0.05 number as BTC, different unit.
     "coinbase_spot",
+    # Registry lock for the held carry. Not the btc15m 0.05 per-trade floor.
+    "binance_btc_carry",
+    # Kalshi Fed / econ binaries (FedWatch shadow). Same 0.05 as BTC binaries.
+    "kalshi_econ",
 )
 
 DEFAULT_VENUE_MIN_EDGE = {
@@ -28,6 +32,8 @@ DEFAULT_VENUE_MIN_EDGE = {
     "kalshi_inx": 0.02,
     "solana_dex": 0.02,
     "coinbase_spot": 0.05,
+    "binance_btc_carry": 0.02,
+    "kalshi_econ": 0.05,
 }
 
 # Display / board tax: assume +1¢ adverse vs stored ask when grading ROI honesty.
@@ -54,6 +60,11 @@ BOT_VENUE = {
     "kalshi-sized": "kalshi_inx",
     "memecoin": "solana_dex",
     "coinbase-spot": "coinbase_spot",
+    "btc-carry": "binance_btc_carry",
+    # Sharp→Kalshi lag reuses locked sports floor 0.06 (no softer venue).
+    "sports-sharp-lag": "kalshi_sports",
+    # FedWatch→Kalshi relative value. Economics floor 0.05. Idea-bank for main AUTO.
+    "fed-watch": "kalshi_econ",
 }
 
 
@@ -677,19 +688,21 @@ def capital_weights(bot_rows: list) -> dict:
 
 
 def model_flip_adverse(side: str, fair_at_entry, fair_now, delta: float) -> bool:
-    """True when fair moved against the held side by ≥ delta."""
+    """True when held-contract fair fell by ≥ delta.
+
+    Callers (sports / BTC / commodity) stash and pass *held-side* fair
+    (away = 1−home WP; NO = NO model p). Adverse is always a drop in that
+    held fair — never invert for NO/away (that false-flipped rising away
+    winners and missed falling away losers).
+    """
     entry = _num(fair_at_entry)
     now = _num(fair_now)
     d = _num(delta)
     if entry is None or now is None or d is None or d < 0:
         return False
-    s = str(side or "").strip().lower()
-    # YES/home: adverse if fair drops; NO/away: adverse if fair rises (against short-ish)
-    if s in ("yes", "home", "buy", "long"):
-        return (entry - now) >= d - 1e-12
-    if s in ("no", "away", "sell", "short"):
-        return (now - entry) >= d - 1e-12
-    return abs(now - entry) >= d - 1e-12
+    # side is accepted for API compat / logging; fair_* are already held-side.
+    _ = str(side or "").strip().lower()
+    return (entry - now) >= d - 1e-12
 
 
 def shadow_promote_ready(expectancy_row: dict, promote_after: dict | None) -> bool:
