@@ -7276,6 +7276,287 @@ def phase6_graduation_gate(
     }
 
 
+# Phase 7 firm portfolio locks — firm ROI > lonely towers; commodity stays 2.0R.
+PHASE7_PORTFOLIO_LOCKS = {
+    "btc_inx_veto": True,
+    "wti_brent_haircut": 0.5,
+    "meme_isolated": True,
+    "barbell_meme_max": BARBELL_MEME_MAX,
+    "barbell_fee_clear_min": BARBELL_FEE_CLEAR_MIN,
+    "daily_r": dict(DAILY_R_BUDGET),
+    "profit_lock_target_usd": PROFIT_LOCK_TARGET_USD,
+    "profit_lock_size_mult": PROFIT_LOCK_SIZE_MULT,
+    "incubation_min_n": INCUBATION_MIN_N,
+    "meme_window_days": MEME_RETIRE_WINDOW_DAYS,
+    "meme_auto_retire": False,
+    "auto_promote": False,
+    "commodity_daily_r": 2.0,
+    "firm_m1_exit_weeks": 2,
+    "active_towers_exit_n": 3,
+    "note": (
+        "Firm portfolio: BTC↔INX hard veto; WTI↔Brent 0.5× haircut; meme isolated; "
+        "barbell meme≤15% / fee-clear≥70%; daily R (sports 1.5 / BTC+cmd 2.0); "
+        "profit-lock $40 → 0.5×; incubation n≥50; meme pause never auto-retire. "
+        "Exit: firm M1≥0 for 2 weeks with ≥3 active towers + retirement path tested."
+    ),
+}
+
+
+def phase7_portfolio_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+    cfg: dict | None = None,
+) -> dict:
+    """Phase 7 firm portfolio construction exit gate (master plan).
+
+    Pass when infrastructure + locks are honest:
+      1. Correlation: BTC↔INX veto, WTI↔Brent haircut, meme isolated sleeve.
+      2. Daily R budgets locked (sports 1.5R, BTC/cmd 2.0R); settle-only blocks.
+      3. Profit-lock harvest: $40 target → 0.5× size; never invents PnL.
+      4. Incubation lane: n≥50 fee-aware settles; auto_promote=False.
+      5. Meme retirement clock: recommend pause; never auto-retire / expand.
+      6. Green-or-gone + capital OS barbell + bleed/heat boards wired.
+      7. Commodity daily R locked at 2.0; floors locked; LIVE_ORDERS off.
+
+    Economic exit (firm M1≥0 × 2 weeks with ≥3 active towers + retirement
+    path tested) reported as economic_pass — empty boards still pass infra.
+
+    Observe / certify only — never force-arms, staff-clears, or invents fills.
+    """
+    cfg = cfg or {}
+    corr_ok = False
+    corr = {}
+    try:
+        import desk_profit
+        corr = desk_profit.correlation_matrix(bots, cfg=cfg) or {}
+        hair = desk_profit.SERIES_HAIRCUT_MULT
+        pairs = desk_profit.SERIES_HAIRCUT_PAIRS
+        corr_ok = (
+            bool(corr.get("btc_inx_veto"))
+            and bool(corr.get("meme_isolated"))
+            and bool(corr.get("fee_floors_locked"))
+            and abs(float(hair) - 0.5) < 1e-9
+            and ("KXWTI15M", "KXBRENT15M") in tuple(pairs)
+            and callable(desk_profit.correlation_veto_reason)
+            and callable(desk_profit.series_corr_haircut)
+        )
+    except Exception:
+        corr_ok = False
+
+    r_sports = _finite(DAILY_R_BUDGET.get("sports-gap"))
+    r_btc = _finite(DAILY_R_BUDGET.get("btc15m"))
+    r_cmd = _finite(DAILY_R_BUDGET.get("commodity-15m"))
+    r_ok = (
+        r_sports is not None and abs(float(r_sports) - 1.5) < 1e-9
+        and r_btc is not None and abs(float(r_btc) - 2.0) < 1e-9
+        and r_cmd is not None and abs(float(r_cmd) - 2.0) < 1e-9
+        and callable(daily_r_blocks)
+        and callable(capture_daily_r_board)
+    )
+
+    pl = profit_lock_status(root) or {}
+    pl_ok = (
+        abs(float(PROFIT_LOCK_TARGET_USD) - 40.0) < 1e-9
+        and abs(float(PROFIT_LOCK_SIZE_MULT) - 0.5) < 1e-9
+        and callable(capture_profit_lock)
+        and callable(profit_lock_size_mult)
+        and bool(pl.get("fee_floors_locked", True))
+    )
+
+    inc = incubation_board(root) or {}
+    inc_ok = (
+        int(INCUBATION_MIN_N) >= 50
+        and int(inc.get("min_n") or 0) == int(INCUBATION_MIN_N)
+        and bool(inc.get("auto_promote") is False)
+        and bool(inc.get("fee_floors_locked", True))
+    )
+
+    meme_bot = None
+    if isinstance(bots, list):
+        meme_bot = next(
+            (b for b in bots if isinstance(b, dict) and str(b.get("id") or "") == "memecoin"),
+            None,
+        )
+    meme = meme_retirement_clock(meme_bot)
+    # Retirement path tested: negative EV window can recommend pause (synthetic probe).
+    retire_probe = meme_retirement_clock({
+        "id": "memecoin",
+        "history": [{"pnl": -1.0, "contracts": 1} for _ in range(max(12, MEME_RETIRE_MIN_N))],
+    })
+    retire_path_ok = bool(retire_probe.get("recommend_pause")) and bool(
+        retire_probe.get("retired") is False
+    )
+    meme_ok = (
+        isinstance(meme, dict)
+        and bool(meme.get("retired") is False)
+        and bool(meme.get("expand_volume") is False)
+        and int(meme.get("window_days") or 0) == int(MEME_RETIRE_WINDOW_DAYS)
+        and retire_path_ok
+    )
+
+    gog = green_or_gone_status(bots) or {}
+    gog_ok = isinstance(gog, dict) and bool(gog.get("fee_floors_locked", True))
+
+    capital = capital_os_status(root, bots=bots, cfg=cfg) or {}
+    barbell = capital.get("barbell") if isinstance(capital.get("barbell"), dict) else (
+        barbell_status(bots, cfg=cfg) if callable(barbell_status) else {}
+    )
+    try:
+        if not barbell:
+            barbell = barbell_status(bots, cfg=cfg) or {}
+    except Exception:
+        barbell = barbell or {}
+    barbell_ok = (
+        abs(float(BARBELL_MEME_MAX) - 0.15) < 1e-9
+        and abs(float(BARBELL_FEE_CLEAR_MIN) - 0.70) < 1e-9
+        and isinstance(barbell, dict)
+        and abs(float(barbell.get("meme_max") or BARBELL_MEME_MAX) - 0.15) < 1e-9
+    )
+
+    bleed_ok = callable(firm_bleed_ratio) and callable(capture_bleed_week)
+    heat_ok = callable(firm_heat_map) and callable(distance_to_zero_board)
+
+    m1 = firm_taxed_m1(bots) or {}
+    m1_exp = _finite(m1.get("expectancy_taxed"))
+    active_towers = [
+        r for r in (m1.get("by_tower") or [])
+        if isinstance(r, dict) and int(r.get("n") or 0) > 0
+    ]
+    # Two Chicago weeks firm M1≥0 — prefer weekly scorecards when present.
+    store = _load(_path(WEEKLY_SCORECARD, root), {"paper_only": True, "cards": []})
+    cards = [c for c in (store.get("cards") or []) if isinstance(c, dict)]
+    cards = sorted(cards, key=lambda c: str(c.get("label") or ""))
+    firm_weeks = [
+        c for c in cards
+        if _finite(c.get("firm_m1") if c.get("firm_m1") is not None else c.get("m1")) is not None
+    ][-2:]
+    weeks_ok = (
+        len(firm_weeks) >= 2
+        and all(
+            (_finite(c.get("firm_m1") if c.get("firm_m1") is not None else c.get("m1")) or -1)
+            + 1e-12 >= 0.0
+            for c in firm_weeks
+        )
+    )
+    economic_pass = bool(
+        weeks_ok
+        and len(active_towers) >= 3
+        and m1_exp is not None
+        and m1_exp + 1e-12 >= 0.0
+        and retire_path_ok
+    )
+
+    floors_ok = bool((fee_floors_locked_check() or {}).get("ok"))
+    live_off = bool(LIVE_ORDERS_ENABLED) is False
+
+    gate_pass = (
+        corr_ok
+        and r_ok
+        and pl_ok
+        and inc_ok
+        and meme_ok
+        and gog_ok
+        and barbell_ok
+        and bleed_ok
+        and heat_ok
+        and floors_ok
+        and live_off
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "force_arm": False,
+        "invent_fills": False,
+        "phase": "P7",
+        "pass": gate_pass,
+        "economic_pass": economic_pass,
+        "locks": dict(PHASE7_PORTFOLIO_LOCKS),
+        "correlation": {
+            "pass": corr_ok,
+            "btc_inx_veto": bool(corr.get("btc_inx_veto")),
+            "meme_isolated": bool(corr.get("meme_isolated")),
+            "wti_brent_haircut": 0.5,
+            "open_n": corr.get("open_n"),
+            "label": corr.get("note"),
+        },
+        "daily_r": {
+            "pass": r_ok,
+            "sports": r_sports,
+            "btc": r_btc,
+            "commodity": r_cmd,
+            "expected": {"sports-gap": 1.5, "btc15m": 2.0, "commodity-15m": 2.0},
+        },
+        "profit_lock": {
+            "pass": pl_ok,
+            "target_usd": float(PROFIT_LOCK_TARGET_USD),
+            "size_mult_safe": float(PROFIT_LOCK_SIZE_MULT),
+            "safe_mode": bool(pl.get("safe_mode")),
+            "size_mult": pl.get("size_mult"),
+            "week_pnl": pl.get("week_pnl"),
+        },
+        "incubation": {
+            "pass": inc_ok,
+            "min_n": int(INCUBATION_MIN_N),
+            "incubating_n": inc.get("incubating_n"),
+            "ready_n": inc.get("ready_n"),
+            "auto_promote": False,
+        },
+        "meme_retirement": {
+            "pass": meme_ok,
+            "recommend_pause": bool(meme.get("recommend_pause")),
+            "retired": bool(meme.get("retired")),
+            "expand_volume": bool(meme.get("expand_volume")),
+            "path_tested": retire_path_ok,
+            "auto_retire": False,
+            "window_days": meme.get("window_days"),
+        },
+        "green_or_gone": {
+            "pass": gog_ok,
+            "board_pass": bool(gog.get("pass")),
+            "flagged_n": gog.get("flagged_n"),
+            "label": gog.get("label"),
+        },
+        "barbell": {
+            "pass": barbell_ok,
+            "meme_max": float(BARBELL_MEME_MAX),
+            "fee_clear_min": float(BARBELL_FEE_CLEAR_MIN),
+            "label": barbell.get("label") if isinstance(barbell, dict) else None,
+        },
+        "firm_m1": {
+            "expectancy_taxed": m1_exp,
+            "active_towers_n": len(active_towers),
+            "weeks_n": len(firm_weeks),
+            "weeks_ok": weeks_ok,
+            "week_labels": [str(c.get("label") or "") for c in firm_weeks],
+        },
+        "label": (
+            f"P7 portfolio-gate {'PASS' if gate_pass else 'FAIL'} "
+            f"infra={gate_pass} economic={economic_pass} "
+            f"corr={corr_ok} cmd_R={r_cmd} "
+            f"pl={PROFIT_LOCK_TARGET_USD:g}/{PROFIT_LOCK_SIZE_MULT:g} "
+            f"incub≥{INCUBATION_MIN_N}"
+        ),
+        "note": (
+            "Phase 7 firm portfolio gate — correlation veto/haircut; daily R; "
+            "profit-lock $40→0.5×; incubation n≥50; meme pause path tested; "
+            "barbell + green-or-gone. Economic exit (firm M1≥0 ×2w, ≥3 towers) "
+            "is economic_pass (ops). Never softens floors; never arms LIVE_ORDERS; "
+            "never invents fills; never force-arms or staff-clears; never "
+            "auto-transfers Kalshi paper wins into meme cash."
+        ),
+        "decision": (
+            "phase7_portfolio_gate_pass"
+            if gate_pass
+            else "phase7_portfolio_gate_fail"
+        ),
+    }
+
+
 def _exit_kind(text: str | None) -> str:
     t = str(text or "").lower()
     if "scale" in t:
@@ -14302,6 +14583,7 @@ def plan_summary(
         "phase4_calib": phase4_calib_gate(root, bots=bots),
         "phase5_throughput": phase5_throughput_gate(root, bots=bots),
         "phase6_graduation": phase6_graduation_gate(root, bots=bots),
+        "phase7_portfolio": phase7_portfolio_gate(root, bots=bots, cfg=cfg),
         "weekly_scorecard": latest_weekly_scorecard(root),
         "graduation": graduation_board(root, bots=bots),
         # Prefer live bots whenever provided (#488 profit_lock twin).

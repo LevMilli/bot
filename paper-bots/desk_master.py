@@ -700,6 +700,12 @@ def master_summary(
         except Exception:
             plan["phase6_graduation"] = None
         try:
+            plan["phase7_portfolio"] = desk_roi_plan.phase7_portfolio_gate(
+                root, bots=bots, cfg=cfg,
+            )
+        except Exception:
+            plan["phase7_portfolio"] = None
+        try:
             plan["exit_quality"] = desk_roi_plan.exit_quality_observe(root, bots=bots)
         except Exception:
             plan["exit_quality"] = None

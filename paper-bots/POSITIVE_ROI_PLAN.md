@@ -2008,6 +2008,25 @@ Phase 5 selective throughput is **COMPLETE** for paper observe. Weekday buys ≥
 
 Phase 6 Master graduation is **COMPLETE** for paper observe. Economic exit (≥3 Masters + meme Master\|paused) is `economic_pass` on the gate — ops proof on the live board; do not invent graduation weeks or declare Master on volume alone.
 
+### Phase 7 firm portfolio gate — COMPLETE
+
+| Ticket | Where |
+| --- | --- |
+| Formal portfolio-gate certifier | `desk_roi_plan.phase7_portfolio_gate` |
+| Correlation veto / haircut | `desk_profit.correlation_matrix` — BTC↔INX hard veto; WTI↔Brent 0.5×; meme isolated |
+| Daily R budgets | sports 1.5R / BTC+commodity **2.0R** · `daily_r_blocks` |
+| Profit-lock harvest | `$40` → `0.5×` size · `profit_lock_status` |
+| Incubation lane | n≥50 fee-aware settles · `incubation_board` (`auto_promote=False`) |
+| Meme retirement path | `meme_retirement_clock` — pause recommend; never auto-retire / expand |
+| Barbell + green-or-gone | meme ≤15% desk / fee-clear ≥70% open · `green_or_gone_status` |
+| Masters | `roi_plan.phase7_portfolio` (+ correlation / capital_os / profit_lock / …) |
+| CLI / Makefile | `make living-phase7-gate` · `staff_living_status phase7-gate` |
+| Money pulse | `phase7_portfolio` on `living-money-pulse` |
+| Tests | `test_phase7_portfolio_gate.py` |
+| Floors / LIVE | never softens floors; never arms `LIVE_ORDERS`; never invents fills; never auto-transfers Kalshi→meme cash |
+
+Phase 7 firm portfolio is **COMPLETE** for paper observe. Economic exit (firm M1≥0 × 2 weeks with ≥3 active towers + retirement path tested) is `economic_pass` — ops proof on the live board.
+
 ### Bulk E3–E7 engineerable (Nov 7)
 
 | Ticket | Where |
