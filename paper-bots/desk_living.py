@@ -993,7 +993,7 @@ def living_compact_card(
         green = green_day_board(root, bots=bots)
         bleed = bleed_chip(root, bots=bots)
         quiet = feature_store_quiet_alert(root)
-        expand = betting_expand_gate(root)
+        expand = betting_expand_gate(root, bots=bots)
         src = {
             "insight_swarm": swarm,
             "timer_heartbeat": timer,
@@ -1595,10 +1595,10 @@ def living_compact_card(
     }
 
 
-def ritual_observe_chip(root: str | None = None) -> dict:
+def ritual_observe_chip(root: str | None = None, bots: list | None = None) -> dict:
     """Observe-only weekly ritual readiness (never records doctor / never auto-posts)."""
     floors = fee_floors_assert(root)
-    expand = betting_expand_gate(root)
+    expand = betting_expand_gate(root, bots=bots)
     age = doctor_age_chip(root)
     floors_ok = bool(floors.get("all_ok"))
     expand_ok = not bool(expand.get("blocked"))
@@ -3018,9 +3018,9 @@ def living_upgrade_board(root: str | None = None, bots: list | None = None) -> d
         "feature_coverage": feature_coverage_chip(root),
         "phase2_pulse": phase2_pulse_chip(root),
         "ruin_drill_page": ruin_drill_page(root),
-        "betting_expand_gate": betting_expand_gate(root),
+        "betting_expand_gate": betting_expand_gate(root, bots=bots),
         "doctor_age": doctor_age_chip(root),
-        "ritual_observe": ritual_observe_chip(root),
+        "ritual_observe": ritual_observe_chip(root, bots=bots),
         "insight_helper_digests": helpers,
         "insight_helpers_present": int(swarm.get("insight_n") or 0),
         "chicago_today": chicago_today_iso(),
@@ -5046,10 +5046,15 @@ def doctor_age_chip(root: str | None = None) -> dict:
     }
 
 
-def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
+def living_doctor(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+    record: bool = True,
+) -> dict:
     """One-shot staff doctor: floors + expand + selfcheck + quiet/timer."""
     floors = fee_floors_assert(root)
-    expand = betting_expand_gate(root)
+    expand = betting_expand_gate(root, bots=bots)
     health = living_self_check(root)
     quiet = feature_store_quiet_alert(root)
     timer = timer_heartbeat_chip(root)
@@ -5209,31 +5214,104 @@ def living_doctor(root: str | None = None, *, record: bool = True) -> dict:
     return doc
 
 
-def betting_expand_gate(root: str | None = None, *, remember: bool = False) -> dict:
-    """Insight-first hire blocker: refuse betting expand while swarm < 3:1."""
+def betting_expand_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+    remember: bool = False,
+) -> dict:
+    """Insight-first hire blocker (#881–887).
+
+    Refuse new betting expand until:
+      • insight:betting swarm ≥ 3:1 (+ digest inventory)
+      • firm taxed M1 ≥ 0 with n≥10
+      • ≥1 fee-clear tower Master (sports/btc/commodity) with n≥10 M1≥0
+    Never softens floors. Never LIVE. Staff/paper only even when allowed.
+    """
     swarm = insight_swarm_ratio(root)
     inv = digest_inventory(root)
-    ok = bool(swarm.get("pass")) and bool(inv.get("pass") or swarm.get("pass"))
-    reason = (
-        "insight swarm meets ≥3:1 — betting expand still staff/paper only"
-        if ok
-        else (
-            f"BLOCK betting expand: insight swarm "
-            f"{swarm.get('insight_n')}:{swarm.get('betting_n')} "
-            f"(need ≥{swarm.get('min_ratio') or INSIGHT_BETTING_MIN_RATIO}:1). "
-            "Hire observe clerks / seed digests first."
+    swarm_ok = bool(swarm.get("pass")) and bool(inv.get("pass") or swarm.get("pass"))
+
+    # Never call pimp_desk.snapshot here — snapshot embeds betting_expand_gate
+    # and that recursion hangs the desk. Callers (snapshot / living board)
+    # must pass bots when M1/Master gates matter; missing bots ⇒ M1 fail-closed.
+    bots_list = bots if isinstance(bots, list) else []
+
+    m1_ok = False
+    m1_n = 0
+    m1_exp = None
+    fee_clear_master = False
+    fee_clear_masters: list[str] = []
+    meme_retire_recommend = False
+    try:
+        import desk_roi_plan
+        m1 = desk_roi_plan.firm_taxed_m1(bots_list) or {}
+        m1_n = int(m1.get("n") or 0)
+        m1_exp = m1.get("expectancy_taxed")
+        try:
+            m1_exp_f = float(m1_exp) if m1_exp is not None else None
+        except (TypeError, ValueError):
+            m1_exp_f = None
+        m1_ok = bool(
+            m1_n >= 10
+            and m1_exp_f is not None
+            and m1_exp_f + 1e-12 >= 0.0
         )
-    )
-    label = (
-        "betting expand allowed (paper)"
-        if ok
-        else "betting expand BLOCKED — insight swarm thin"
-    )
-    soft_copy = (
-        f"{label} — {reason}"
-        if not ok
-        else f"{label} — {reason}"
-    )
+        for row in m1.get("by_tower") or []:
+            if not isinstance(row, dict):
+                continue
+            bid = str(row.get("bot") or "")
+            if bid not in ("sports-gap", "btc15m", "commodity-15m"):
+                continue
+            tn = int(row.get("n") or 0)
+            te = row.get("expectancy_taxed")
+            try:
+                te_f = float(te) if te is not None else None
+            except (TypeError, ValueError):
+                te_f = None
+            if tn >= 10 and te_f is not None and te_f + 1e-12 >= 0.0:
+                fee_clear_master = True
+                fee_clear_masters.append(bid)
+        meme_bot = next(
+            (
+                b for b in bots_list
+                if isinstance(b, dict) and str(b.get("id") or "") == "memecoin"
+            ),
+            None,
+        )
+        if meme_bot is not None:
+            retire = desk_roi_plan.meme_retirement_clock(meme_bot) or {}
+            meme_retire_recommend = bool(retire.get("recommend_pause"))
+    except Exception:
+        pass
+
+    blocks: list[str] = []
+    if not swarm_ok:
+        blocks.append(
+            f"insight swarm {swarm.get('insight_n')}:{swarm.get('betting_n')} "
+            f"(need ≥{swarm.get('min_ratio') or INSIGHT_BETTING_MIN_RATIO}:1)"
+        )
+    if not m1_ok:
+        blocks.append(f"firm M1 n={m1_n} ev={m1_exp} (need n≥10 and ev≥0)")
+    if not fee_clear_master:
+        blocks.append("no fee-clear Master (sports/btc/commodity n≥10 M1≥0)")
+
+    ok = bool(swarm_ok and m1_ok and fee_clear_master)
+    if ok:
+        reason = (
+            "swarm≥3:1 + firm M1≥0 + fee-clear Master — "
+            "betting expand still staff/paper only"
+            + (
+                "; meme retirement recommended — refuse new meme sleeves"
+                if meme_retire_recommend
+                else ""
+            )
+        )
+        label = "betting expand allowed (paper)"
+    else:
+        reason = "BLOCK betting expand: " + "; ".join(blocks)
+        label = "betting expand BLOCKED — money/swarm gates"
+    soft_copy = f"{label} — {reason}"
     if remember and not ok:
         try:
             import teller_memory
@@ -5256,10 +5334,21 @@ def betting_expand_gate(root: str | None = None, *, remember: bool = False) -> d
         "swarm_ratio": swarm.get("ratio"),
         "min_ratio": swarm.get("min_ratio") or INSIGHT_BETTING_MIN_RATIO,
         "digest_pass": inv.get("pass"),
+        "m1_pass": m1_ok,
+        "m1_n": m1_n,
+        "m1": m1_exp,
+        "fee_clear_master": fee_clear_master,
+        "fee_clear_masters": fee_clear_masters,
+        "meme_retire_recommend": meme_retire_recommend,
+        "refuse_new_meme_sleeve": bool(meme_retire_recommend),
+        "blocks": blocks,
         "reason": reason,
         "soft_copy": soft_copy,
         "label": label,
-        "note": "Insight-first living hire order. Never softens venue floors.",
+        "note": (
+            "Insight-first living hire order (#881–887): swarm≥3:1 + firm M1≥0 "
+            "+ ≥1 fee-clear Master. Never softens venue floors. Never LIVE."
+        ),
     }
 
 

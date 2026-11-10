@@ -1723,6 +1723,8 @@ def main() -> int:
             "edge08-status", "edge08-promote", "edge08-promote-ready",
             "edge08-export", "green-boost-export",
             "helper-gate-a", "helper-arm", "helper-backfill",
+            "gate-a-pilots", "gate-a-pilot-sports-clv",
+            "helper-advice-log", "helper-advice-accept", "helper-advice-reject",
             "clv-repair", "clv-completeness",
             "shadow-catchup", "shadow-tick", "shadow-ops",
             "inx-research", "inx-status",
@@ -1776,7 +1778,12 @@ def main() -> int:
     parser.add_argument(
         "--helper",
         default="calendar_scanner",
-        help="Helper id for helper-arm (default calendar_scanner).",
+        help="Helper id for helper-arm / advice log (default calendar_scanner).",
+    )
+    parser.add_argument(
+        "--bot",
+        default="",
+        help="Bot id for helper-advice-accept/reject logs.",
     )
     parser.add_argument(
         "--soft",
@@ -3647,6 +3654,39 @@ def main() -> int:
         out = desk_roi_plan.helper_promote_status(root)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if not out.get("evidence_thin") else 2
+    if args.action == "gate-a-pilots":
+        out = desk_roi_plan.gate_a_pilots_board(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("any_ready") else 2
+    if args.action == "gate-a-pilot-sports-clv":
+        out = desk_roi_plan.gate_a_pilot_sports_clv(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ready") else 2
+    if args.action == "helper-advice-log":
+        out = desk_roi_plan.helper_advice_log_board(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "helper-advice-accept":
+        out = desk_roi_plan.record_helper_advice_decision(
+            root,
+            helper=str(getattr(args, "helper", None) or "calendar_scanner"),
+            bot=str(getattr(args, "bot", None) or ""),
+            decision="accept",
+            reason=str(getattr(args, "note", None) or "staff accept"),
+            advice={"floors_locked": True, "ttl": 60},
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "helper-advice-reject":
+        out = desk_roi_plan.record_helper_advice_decision(
+            root,
+            helper=str(getattr(args, "helper", None) or "calendar_scanner"),
+            bot=str(getattr(args, "bot", None) or ""),
+            decision="reject",
+            reason=str(getattr(args, "note", None) or "staff reject"),
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
     if args.action == "helper-arm":
         # Arm only when Gate A ready — no force on money-path CLI (helpers stay gated).
         out = desk_roi_plan.staff_set_helper_autonomy(

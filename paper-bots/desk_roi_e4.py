@@ -26,8 +26,11 @@ TIP_FUNNEL_STAGES = (
 FEE_CLEAR = ("sports-gap", "btc15m", "commodity-15m")
 HELPER_GATE_A_MIN_N = 20
 HELPER_FILLS_NAME = "desk_helper_fills.json"
+HELPER_ADVICE_LOG_NAME = "desk_helper_advice_log.json"
 FILL_TAX_DEFAULT = 0.01
 FIT_JOURNAL = "desk_fit_journal.json"
+MAX_ADVICE_LOG_ROWS = 4000
+ADVICE_DECISIONS = frozenset({"accept", "reject"})
 
 LOCKED_VENUE_FLOORS = {
     "kalshi_sports": 0.06,
@@ -446,6 +449,206 @@ def gate_a_pilot_btc_calendar(root: str | None = None) -> dict:
         "note": (
             "Gate A pilot densify on btc15m calendar_scanner tags. "
             "Observe only — never staff-arms autonomy."
+        ),
+    }
+
+
+def gate_a_pilot_sports_clv(root: str | None = None) -> dict:
+    """Second Gate A pilot densify (#892): clv_closer tags on sports-gap.
+
+    Observe only — never staff-arms autonomy. Floors locked.
+    """
+    try:
+        import desk_roi_plan as drp
+        gate = drp.helper_gate_a(root, "clv_closer")
+    except Exception:
+        gate = {"ready": False, "n": 0, "n_to_ready": HELPER_GATE_A_MIN_N}
+    store = _load(_path(HELPER_FILLS_NAME, root), {"paper_only": True, "rows": []})
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    clv_sports = [
+        r for r in rows
+        if str(r.get("helper") or "") in ("clv_closer", "clv", "sports_clv")
+        and str(r.get("bot") or "") in ("sports-gap", "sports")
+    ]
+    taxed = []
+    for r in clv_sports:
+        pt = _finite(r.get("pnl_taxed"))
+        if pt is not None:
+            taxed.append(float(pt))
+            continue
+        pnl = _finite(r.get("pnl"))
+        if pnl is None:
+            continue
+        n_c = _finite(r.get("contracts")) or 1.0
+        taxed.append(float(pnl) - FILL_TAX_DEFAULT * max(1.0, n_c))
+    n = len(taxed)
+    exp = round(sum(taxed) / n, 4) if n else None
+    min_n = int(HELPER_GATE_A_MIN_N)
+    sports_all = [
+        r for r in rows
+        if str(r.get("bot") or "") in ("sports-gap", "sports")
+    ]
+    coverage = round(n / len(sports_all), 4) if sports_all else None
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "places_orders": False,
+        "staff_arm": False,
+        "helper": "clv_closer",
+        "bot": "sports-gap",
+        "n": n,
+        "n_to_ready": max(0, min_n - n),
+        "min_n": min_n,
+        "taxed_ev": exp,
+        "coverage_pct": None if coverage is None else round(coverage * 100.0, 2),
+        "coverage": coverage,
+        "gate_a": gate,
+        "ready": bool(n >= min_n and exp is not None and exp + 1e-12 >= 0.0),
+        "label": (
+            f"gate_a_pilot sports/clv n={n}/{min_n} ev={exp} "
+            f"cov={None if coverage is None else round(coverage * 100.0, 1)}% "
+            "(observe · no staff arm)"
+        ),
+        "note": (
+            "Gate A pilot densify on sports-gap clv_closer tags (#892). "
+            "Observe only — never staff-arms autonomy."
+        ),
+    }
+
+
+def gate_a_pilots_board(root: str | None = None) -> dict:
+    """Combined Gate A pilot board (btc/calendar + sports/clv)."""
+    btc = gate_a_pilot_btc_calendar(root)
+    sports = gate_a_pilot_sports_clv(root)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "staff_arm": False,
+        "btc_calendar": btc,
+        "sports_clv": sports,
+        "any_ready": bool(btc.get("ready") or sports.get("ready")),
+        "label": (
+            f"gate_a_pilots btc_ready={bool(btc.get('ready'))} "
+            f"sports_ready={bool(sports.get('ready'))}"
+        ),
+        "note": "Combined Gate A pilots — observe only; never auto-arm.",
+    }
+
+
+# ---- Helper advice accept/reject log (#897) --------------------------------
+
+def record_helper_advice_decision(
+    root: str | None,
+    *,
+    helper: str,
+    bot: str = "",
+    decision: str,
+    reason: str = "",
+    advice: dict | None = None,
+    ticker: str = "",
+) -> dict:
+    """Append one accept/reject of helper advice on a main (observe journal).
+
+    Rejects soften-floor advice via validate_helper_advice. Never places fills.
+    """
+    dec = str(decision or "").strip().lower()
+    if dec not in ADVICE_DECISIONS:
+        return {
+            "ok": False,
+            "reason": "decision must be accept|reject",
+            "paper_only": True,
+            "fee_floors_locked": True,
+        }
+    helper_id = str(helper or "").strip()
+    if not helper_id:
+        return {
+            "ok": False,
+            "reason": "helper required",
+            "paper_only": True,
+            "fee_floors_locked": True,
+        }
+    schema_ok = True
+    schema_reason = ""
+    if isinstance(advice, dict) and advice:
+        try:
+            from helpers.advice_schema import validate_helper_advice
+            schema_ok, schema_reason = validate_helper_advice(advice)
+        except Exception as exc:  # noqa: BLE001
+            schema_ok, schema_reason = False, type(exc).__name__
+        if not schema_ok and dec == "accept":
+            return {
+                "ok": False,
+                "reason": f"refuse accept — advice schema: {schema_reason}",
+                "paper_only": True,
+                "fee_floors_locked": True,
+                "schema_ok": False,
+            }
+    path = _path(HELPER_ADVICE_LOG_NAME, root)
+    store = _load(path, {"paper_only": True, "rows": [], "fee_floors_locked": True})
+    row = {
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "helper": helper_id[:64],
+        "bot": str(bot or "")[:32],
+        "ticker": str(ticker or "")[:64],
+        "decision": dec,
+        "reason": str(reason or "")[:200],
+        "schema_ok": schema_ok,
+        "schema_reason": str(schema_reason or "")[:120],
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "may_place_alone": False,
+    }
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    rows.append(row)
+    store["rows"] = rows[-MAX_ADVICE_LOG_ROWS:]
+    store["last_at"] = row["at"]
+    store["paper_only"] = True
+    store["fee_floors_locked"] = True
+    tmp = path + ".tmp"
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    import json
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(store, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.replace(tmp, path)
+    return {"ok": True, "row": row, "n": len(store["rows"]), "paper_only": True}
+
+
+def helper_advice_log_board(root: str | None = None) -> dict:
+    """Observe board for helper advice accept/reject journal (#897)."""
+    store = _load(
+        _path(HELPER_ADVICE_LOG_NAME, root),
+        {"paper_only": True, "rows": [], "fee_floors_locked": True},
+    )
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    accepts = sum(1 for r in rows if r.get("decision") == "accept")
+    rejects = sum(1 for r in rows if r.get("decision") == "reject")
+    by_helper: dict[str, dict] = {}
+    for r in rows:
+        h = str(r.get("helper") or "") or "?"
+        bucket = by_helper.setdefault(h, {"helper": h, "accept": 0, "reject": 0})
+        if r.get("decision") == "accept":
+            bucket["accept"] += 1
+        elif r.get("decision") == "reject":
+            bucket["reject"] += 1
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "n": len(rows),
+        "accept_n": accepts,
+        "reject_n": rejects,
+        "accept_rate": round(accepts / len(rows), 4) if rows else None,
+        "by_helper": sorted(by_helper.values(), key=lambda x: -(x["accept"] + x["reject"])),
+        "recent": rows[-12:],
+        "label": f"helper advice log n={len(rows)} accept={accepts} reject={rejects}",
+        "note": (
+            "Mains log accept/reject of helper advice (#897). "
+            "Accept requires floors_locked schema. Never places fills."
         ),
     }
 
