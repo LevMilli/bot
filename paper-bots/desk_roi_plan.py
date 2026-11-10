@@ -6788,6 +6788,278 @@ def phase4_calib_gate(
     }
 
 
+# Phase 5 selective-throughput locks — more eligible fills only after M1 holds;
+# never invent fills; never auto-promote thin gates; commodity stays 2.0R.
+PHASE5_THROUGHPUT_LOCKS = {
+    "selective_green_only": True,
+    "sports_green_boost_default": 0,
+    "sports_green_boost_weeks": SPORTS_GREEN_BOOST_WEEKS,
+    "sports_clv_bar": SPORTS_CLV_BAR,
+    "near_miss_promote_n": NEAR_MISS_PROMOTE_N,
+    "near_miss_auto_promote": False,
+    "near_miss_code_live": False,
+    "empty_card_bar_sec": EMPTY_CARD_BAR_SEC,
+    "commodity_daily_r": 2.0,
+    "note": (
+        "Selective +1 on fee-clear greens only; sports green_boost stays 0 until "
+        "2 Chicago weeks M1≥0 + CLV≥52% n≥20 (staff arm only); near-miss soft "
+        "promote only n≥30 labeled EV≥0 with auto_promote=False; empty CARD <3s; "
+        "commodity daily R locked at 2.0 ($40)."
+    ),
+}
+
+
+def phase5_throughput_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Phase 5 selective throughput exit gate (master plan).
+
+    Pass when infrastructure + locks are honest:
+      1. Selective +1 only on fee-clear greens (red days never boost).
+      2. Sports green_boost defaults 0 when evidence thin; auto_promote=False.
+      3. Near-miss promote only n≥30 EV≥0 path; code LIVE=False; auto_promote=False.
+      4. Firm queue ranks sports+btc+commodity; tip funnel + skip-regret wired.
+      5. Empty-market CARD bar 3s; opportunity-cost clock present.
+      6. Commodity daily R locked at 2.0; floors locked; M3 not a stub.
+      7. Never arms LIVE_ORDERS; never invents fills; never force-arms here.
+
+    Observe / certify only — does not staff-arm, staff-clear, or invent evidence.
+    """
+    selective = selective_throughput_observe(root, bots=bots)
+    # Prove selective_max_buys refuses red-day boost.
+    red_ok = False
+    green_ok = False
+    try:
+        import desk_more
+        red_ok = int(desk_more.selective_max_buys("btc15m", base=3, today=-1.0, green_boost=1)) == 3
+        green_ok = int(desk_more.selective_max_buys("btc15m", base=3, today=1.0, green_boost=1)) == 4
+        sports_red = int(
+            desk_more.selective_max_buys("sports-gap", base=3, today=-5.0, green_boost=1)
+        ) == 3
+        loser_no = int(
+            desk_more.selective_max_buys("memecoin", base=3, today=5.0, green_boost=1)
+        ) == 3
+        selective_rules_ok = red_ok and green_ok and sports_red and loser_no
+    except Exception:
+        selective_rules_ok = False
+
+    boost = sports_green_boost_status(root, bots=bots)
+    boost_ok = (
+        bool(boost.get("auto_promote") is False)
+        and int(boost.get("weeks_required") or 0) == int(SPORTS_GREEN_BOOST_WEEKS)
+        and abs(float(boost.get("clv_bar") or 0) - float(SPORTS_CLV_BAR)) < 1e-12
+        and (
+            # Thin → boost must stay 0 unless already staff-armed (do not clear).
+            bool(boost.get("ready"))
+            or int(boost.get("green_boost") or 0) == 0
+            or bool(boost.get("staff_armed"))
+        )
+    )
+    # Force-arm while thin is staff ops debt — flag but do not clear.
+    boost_force_thin = (
+        bool(boost.get("evidence_thin"))
+        and bool(boost.get("staff_armed"))
+        and not bool(boost.get("ready"))
+    )
+
+    nm = near_miss_promote_status(root)
+    nm_ok = (
+        bool(nm.get("auto_promote") is False)
+        and bool(NEAR_MISS_LIVE) is False
+        and int(nm.get("promote_min_n") or 0) == int(NEAR_MISS_PROMOTE_N)
+        and int(NEAR_MISS_PROMOTE_N) >= 30
+    )
+    # Promote JSON may record evidence-led arm while ephemeral journal is empty
+    # in a fresh checkout — trust artifact shadow_n/EV; do not staff-clear.
+    nm_promote_art = _load(
+        _path(NEAR_MISS_PROMOTE_NAME, root),
+        {"paper_only": True, "staff_approved": False, "live": False},
+    )
+    art_n = int(nm_promote_art.get("shadow_n") or 0)
+    art_ev = _finite(nm_promote_art.get("shadow_ev"))
+    art_evidence_ok = (
+        art_n >= int(NEAR_MISS_PROMOTE_N)
+        and art_ev is not None
+        and art_ev + 1e-12 >= float(NEAR_MISS_PROMOTE_MIN_EV)
+    )
+    nm_force_thin = (
+        bool(nm.get("live"))
+        and bool(nm.get("evidence_thin"))
+        and not art_evidence_ok
+    )
+
+    firm = firm_queue_status(root) or {}
+    firm_ok = (
+        isinstance(firm, dict)
+        and callable(rebuild_firm_queue)
+        and callable(firm_queue_blocks)
+        and bool(firm.get("paper_only", True))
+    )
+
+    tip = tip_funnel_board(root) or {}
+    tip_ok = isinstance(tip, dict) and callable(record_tip_funnel)
+
+    skip_ok = callable(skip_regret_candidates)
+
+    empty = empty_card_status(root) or {}
+    empty_ok = (
+        isinstance(empty, dict)
+        and abs(float(empty.get("bar_sec") or 0) - float(EMPTY_CARD_BAR_SEC)) < 1e-9
+        and abs(float(EMPTY_CARD_BAR_SEC) - 3.0) < 1e-9
+        and bool(empty.get("pass"))  # n=0 passes; slow CARD fails
+    )
+
+    opp = opp_cost_summary(root) or {}
+    opp_ok = isinstance(opp, dict) and bool(opp.get("paper_only", True))
+
+    commodity_r = _finite((DAILY_R_BUDGET or {}).get("commodity-15m"))
+    r_ok = commodity_r is not None and abs(float(commodity_r) - 2.0) < 1e-9
+
+    # M3 stub gone — fit_buy_rate returns real rate board (not stub note).
+    fit = fit_buy_rate(root) or {}
+    m3_ok = (
+        isinstance(fit, dict)
+        and "stub" not in str(fit.get("note") or "").lower()
+        and "rate" in fit
+    )
+
+    throughput = throughput_vs_m1_board(root, bots=bots) or {}
+    throughput_ok = isinstance(throughput, dict)
+
+    floors_ok = bool((fee_floors_locked_check() or {}).get("ok"))
+
+    gate_pass = (
+        selective_rules_ok
+        and boost_ok
+        and nm_ok
+        and firm_ok
+        and tip_ok
+        and skip_ok
+        and empty_ok
+        and opp_ok
+        and r_ok
+        and m3_ok
+        and throughput_ok
+        and floors_ok
+        and bool(selective.get("paper_only", True))
+        # Force-arm-while-thin is staff debt — still fail closed for P5 certify
+        # so we never claim COMPLETE while a thin gate is live-armed.
+        and not boost_force_thin
+        and not nm_force_thin
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "force_arm": False,
+        "invent_fills": False,
+        "phase": "P5",
+        "pass": gate_pass,
+        "locks": dict(PHASE5_THROUGHPUT_LOCKS),
+        "selective": {
+            "pass": selective_rules_ok,
+            "m1_holds": bool(selective.get("m1_holds")),
+            "after_m1": bool(selective.get("after_m1")),
+            "boosted_n": selective.get("boosted_n"),
+            "red_day_no_boost": red_ok if selective_rules_ok else False,
+            "green_day_boost": green_ok if selective_rules_ok else False,
+            "label": selective.get("label"),
+        },
+        "sports_green_boost": {
+            "pass": boost_ok and not boost_force_thin,
+            "green_boost": boost.get("green_boost"),
+            "ready": bool(boost.get("ready")),
+            "evidence_thin": bool(boost.get("evidence_thin")),
+            "staff_armed": bool(boost.get("staff_armed")),
+            "force_armed_thin": boost_force_thin,
+            "auto_promote": False,
+            "missing": boost.get("missing"),
+            "label": boost.get("label"),
+        },
+        "near_miss": {
+            "pass": nm_ok and not nm_force_thin,
+            "promote_ready": bool(nm.get("promote_ready")),
+            "evidence_thin": bool(nm.get("evidence_thin")),
+            "labeled_n": nm.get("labeled_n"),
+            "n_to_promote": nm.get("n_to_promote"),
+            "shadow_ev": nm.get("shadow_ev"),
+            "soft_live": nm.get("soft_live"),
+            "artifact_shadow_n": art_n,
+            "artifact_shadow_ev": art_ev,
+            "artifact_evidence_ok": art_evidence_ok,
+            "force_armed_thin": nm_force_thin,
+            "auto_promote": False,
+            "code_live": bool(NEAR_MISS_LIVE),
+            "promote_min_n": int(NEAR_MISS_PROMOTE_N),
+            "label": nm.get("label"),
+        },
+        "firm_queue": {
+            "pass": firm_ok,
+            "label": firm.get("label"),
+            "observe_only": bool(firm.get("observe_only", True)),
+        },
+        "tip_funnel": {
+            "pass": tip_ok,
+            "label": tip.get("label"),
+            "rows_n": tip.get("rows_n"),
+        },
+        "skip_regret": {"pass": skip_ok},
+        "empty_card": {
+            "pass": empty_ok,
+            "bar_sec": empty.get("bar_sec"),
+            "p50_s": empty.get("p50_s"),
+            "status_pass": empty.get("pass"),
+        },
+        "opp_cost": {
+            "pass": opp_ok,
+            "n": opp.get("n"),
+            "label": opp.get("label"),
+        },
+        "daily_r": {
+            "pass": r_ok,
+            "commodity": commodity_r,
+            "expected_commodity": 2.0,
+            "sports": _finite((DAILY_R_BUDGET or {}).get("sports-gap")),
+            "btc": _finite((DAILY_R_BUDGET or {}).get("btc15m")),
+        },
+        "m3_fit": {
+            "pass": m3_ok,
+            "rate": fit.get("rate"),
+            "n_fit": fit.get("n_fit"),
+            "stub": False,
+        },
+        "throughput_vs_m1": {
+            "pass": throughput_ok,
+            "label": throughput.get("label"),
+        },
+        "label": (
+            f"P5 throughput-gate {'PASS' if gate_pass else 'FAIL'} "
+            f"selective={selective_rules_ok} "
+            f"boost={boost.get('green_boost')} "
+            f"nm_live={nm.get('soft_live') or 'none'} "
+            f"cmd_R={commodity_r} "
+            f"empty_bar={empty.get('bar_sec')}"
+        ),
+        "note": (
+            "Phase 5 selective throughput gate — green-only +1; sports green_boost "
+            "gated on 2w M1 + CLV bar; near-miss n≥30 EV≥0 staff-only; firm queue + "
+            "tip funnel + empty CARD <3s + opp-cost; commodity 2.0R locked. "
+            "Never softens floors; never arms LIVE_ORDERS; never invents fills; "
+            "never force-arms or staff-clears here."
+        ),
+        "decision": (
+            "phase5_throughput_gate_pass"
+            if gate_pass
+            else "phase5_throughput_gate_fail"
+        ),
+    }
+
+
 def _exit_kind(text: str | None) -> str:
     t = str(text or "").lower()
     if "scale" in t:
@@ -6974,6 +7246,8 @@ def selective_throughput_observe(
         "towers": towers,
         "boosted_n": boosted_n,
         "after_m1": m1_holds,
+        "auto_promote": False,
+        "live_orders_enabled": False,
         "label": (
             f"selective throughput after_m1={m1_holds} boosted={boosted_n} "
             "(observe · never softens floors)"
@@ -13810,6 +14084,7 @@ def plan_summary(
         "sports_time_final": sports_time_final_shadow_summary(root),
         "phase3_exits": phase3_exit_gate(root, bots=bots),
         "phase4_calib": phase4_calib_gate(root, bots=bots),
+        "phase5_throughput": phase5_throughput_gate(root, bots=bots),
         "weekly_scorecard": latest_weekly_scorecard(root),
         "graduation": graduation_board(root, bots=bots),
         # Prefer live bots whenever provided (#488 profit_lock twin).

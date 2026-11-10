@@ -688,6 +688,12 @@ def master_summary(
         except Exception:
             plan["phase4_calib"] = None
         try:
+            plan["phase5_throughput"] = desk_roi_plan.phase5_throughput_gate(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["phase5_throughput"] = None
+        try:
             plan["exit_quality"] = desk_roi_plan.exit_quality_observe(root, bots=bots)
         except Exception:
             plan["exit_quality"] = None
@@ -695,6 +701,12 @@ def master_summary(
             plan["calib_clv"] = desk_roi_plan.calib_clv_observe(root, bots=bots)
         except Exception:
             plan["calib_clv"] = None
+        try:
+            plan["selective_throughput"] = desk_roi_plan.selective_throughput_observe(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["selective_throughput"] = None
         try:
             from datetime import datetime
             from zoneinfo import ZoneInfo
