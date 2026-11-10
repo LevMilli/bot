@@ -639,6 +639,13 @@ def master_summary(
         except Exception:
             plan["chaos_drills"] = None
         try:
+            import desk_roi_e9_doctrine
+            plan["doctrine_distance"] = desk_roi_e9_doctrine.doctrine_distance_board(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["doctrine_distance"] = None
+        try:
             plan["dual_control"] = desk_roi_plan.dual_control_status(root)
         except Exception:
             plan["dual_control"] = None

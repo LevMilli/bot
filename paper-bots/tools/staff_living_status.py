@@ -1773,6 +1773,7 @@ def main() -> int:
             "hillclimb-e9-week", "hillclimb-daily", "hillclimb-broadcast",
             "hillclimb-kill-postmortem", "hillclimb-lock-win", "hillclimb-discipline",
             "chaos-drills",
+            "doctrine-distance",
             "promote-ready-pack", "staff-promote-batch-ready",
             "disarm-thin", "staff-disarm-thin",
             "dual-control-status", "dual-control-observe",
@@ -4667,6 +4668,20 @@ def main() -> int:
     if args.action == "chaos-drills":
         import desk_roi_e9_chaos
         out = desk_roi_e9_chaos.run_chaos_drill_pack(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "doctrine-distance":
+        import desk_roi_e9_doctrine
+        bots = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_e9_doctrine.doctrine_distance_board(root, bots=bots)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0 if out.get("ok") else 2
     if args.action == "hillclimb-daily":
