@@ -77,6 +77,39 @@ class MemeFeeAwareEdgeTests(unittest.TestCase):
         self.assertIn("after_fee=", src)
         self.assertIn("refuse conf−0.5 residual", src)
 
+    def test_office_card_matches_live_exits(self):
+        """HUD shows the first five plan lines. Those lines must be the live rules.
+
+        The office used to print a −35% stop, a 40% liquidity drop, a 30% trail,
+        and a size-up. Config and the NVIDIA trail fill are −12 / 35 / 25 / 4h.
+        Copy only: this does not clear the residual refuse.
+        """
+        import pimp_desk
+
+        plan = pimp_desk.BOT_PLANS["memecoin"]
+        buy = " ".join(plan["buy"][:5])
+        sell = " ".join(plan["sell"][:5])
+        fails = " ".join(plan["failsafes"][:5])
+        shown = buy + " " + sell + " " + fails
+        self.assertIn("taxed EV ≥ 0", buy)
+        self.assertIn("−$5", buy)
+        self.assertIn("−12%", sell)
+        self.assertIn("35%", sell)
+        self.assertIn("25%", sell)
+        self.assertIn("4h", sell)
+        self.assertIn("−6%", sell)
+        self.assertNotIn("−35%", shown)
+        self.assertNotIn("40%", shown)
+        self.assertNotIn("Trail 30%", shown)
+        self.assertNotIn("12 entries", shown)
+        self.assertNotIn("Max open 4", shown)
+        self.assertIn("No size-up", buy)
+        self.assertNotIn("→ size-up", shown)
+        self.assertNotIn("settled hit", shown)
+        self.assertNotIn("≥6h", shown)
+        self.assertEqual(plan["stake"], "$10–$25")
+        self.assertTrue(plan["entry_gated"])
+
 
 if __name__ == "__main__":
     unittest.main()
