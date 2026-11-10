@@ -103,6 +103,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DESK_ROOT = os.path.dirname(HERE)
 ACCOUNT = os.path.join(HERE, "paper_account.json")
 PAPER_CASH = 100.0
+# Confidence buy-in. Entry gates do not move. A cleared 80% model risks $6
+# before haircuts; a cleared 90% model risks $15, the tower's open-risk share.
+# Linear in between. Vol, profit-lock, and the WTI↔Brent half still multiply
+# that target down. Never above the tower's remaining share or cash.
+CONF_STAKE_LO = 6.0
+CONF_STAKE_HI = 15.0
+CONF_P_LO = 0.80
+CONF_P_HI = 0.90
 
 
 def _desk():
@@ -762,6 +770,82 @@ def evaluate(m: dict, spot: float, edge_buf: float, book=None) -> dict:
     }
 
 
+def confidence_target(p: float) -> float:
+    """Dollars before haircuts. $6 at 80% and below, $15 at 90% and above."""
+    try:
+        chance = float(p)
+    except (TypeError, ValueError):
+        chance = 0.0
+    if chance >= CONF_P_HI:
+        return float(CONF_STAKE_HI)
+    if chance <= CONF_P_LO:
+        return float(CONF_STAKE_LO)
+    span = CONF_P_HI - CONF_P_LO
+    t = (chance - CONF_P_LO) / span
+    return round(CONF_STAKE_LO + t * (CONF_STAKE_HI - CONF_STAKE_LO), 2)
+
+
+def confidence_haircut_mult(plan: dict | None) -> float:
+    """Vol / cold / profit-lock / WTI↔Brent factors already decided by the desk."""
+    mult = 1.0
+    if not isinstance(plan, dict):
+        return mult
+    for key in ("mult", "profit_lock_mult"):
+        raw = plan.get(key)
+        if raw is None:
+            continue
+        try:
+            factor = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if factor > 0:
+            mult *= factor
+    hair = plan.get("series_corr_haircut")
+    if isinstance(hair, dict) and hair.get("apply"):
+        try:
+            mult *= float(hair.get("mult") or 1.0)
+        except (TypeError, ValueError):
+            pass
+    return mult
+
+
+def commodity_confidence_stake(
+    p,
+    plan: dict | None,
+    tower_left: float,
+    cash: float,
+) -> tuple[float, str]:
+    """Size a cleared ticket by model confidence, then re-apply the haircuts.
+
+    Does not relax the fee floor, the ask band, or the daily budget. A zero
+    room or a sub-$1 result buys nothing.
+    """
+    target = confidence_target(p)
+    mult = confidence_haircut_mult(plan)
+    raw = round(float(target) * float(mult), 2)
+    try:
+        left = float(tower_left)
+    except (TypeError, ValueError):
+        left = 0.0
+    try:
+        cash_n = float(cash)
+    except (TypeError, ValueError):
+        cash_n = 0.0
+    stake = round(max(0.0, min(raw, left, cash_n)), 2)
+    if 0 < stake < 1.0:
+        stake = 0.0
+    try:
+        chance = float(p)
+    except (TypeError, ValueError):
+        chance = 0.0
+    note = (
+        f"confidence buy-in p {chance:.2f} target ${target:.2f} "
+        f"× {mult:.2f} = ${raw:.2f} → ${stake:.2f} "
+        f"(80% ${CONF_STAKE_LO:.0f}, 90% ${CONF_STAKE_HI:.0f}, haircuts still apply)"
+    )
+    return stake, note
+
+
 def paper_buy(state: dict, ev: dict) -> str:
     none_msg = "No commodity paper buy."
     if ev.get("reasons"):
@@ -859,6 +943,25 @@ def paper_buy(state: dict, ev: dict) -> str:
                 plan["series_corr_haircut"] = hair
         except Exception:
             pass
+        tower_left = None
+        try:
+            import desk_more
+            tower_left = float(
+                desk_more.tower_budget_remaining(
+                    "commodity-15m", open_risk, cfg,
+                ).get("left")
+            )
+        except Exception:
+            tower_left = None
+        if tower_left is not None:
+            stake, conf_note = commodity_confidence_stake(
+                ev.get("p"), plan, tower_left, float(state.get("cash") or 0),
+            )
+            plan = dict(plan or {})
+            notes = list(plan.get("notes") or [])
+            notes.append(conf_note)
+            plan["notes"] = notes
+            plan["commodity_confidence_stake"] = stake
         contracts = desk.contracts_for_stake(per, stake)
     except Exception as exc:
         return f"Desk sizing failed: {type(exc).__name__}"
