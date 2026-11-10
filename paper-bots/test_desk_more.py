@@ -208,6 +208,12 @@ class DeskMoreTests(unittest.TestCase):
         self.assertEqual(desk_more.classify_skip(incomplete), "data")
         self.assertEqual(desk_more.classify_skip(starve), "budget")
         self.assertEqual(desk_more.classify_skip(selective), "budget")
+        self.assertEqual(desk_more.classify_skip("too late to enter"), "calendar")
+        self.assertEqual(desk_more.classify_skip("min left 4.2 < 10"), "calendar")
+        self.assertEqual(
+            desk_more.classify_skip("ruin drill active — entries off"),
+            "entry_gate",
+        )
 
 
 if __name__ == "__main__":

@@ -302,7 +302,13 @@ def classify_skip(reason: str | None, *, weekday: int | None = None) -> str:
     ):
         # Prefer-2: commodity family portfolio-corr must not invent DATA via other.
         return "correlation"
-    if "entry_gate" in text or "daily loss" in text or "max open risk is reached" in text:
+    if (
+        "entry_gate" in text
+        or "daily loss" in text
+        or "max open risk is reached" in text
+        or "ruin drill" in text
+        or "desk_block_entries" in text
+    ):
         return "entry_gate"
     if (
         "learning" in text
@@ -329,6 +335,8 @@ def classify_skip(reason: str | None, *, weekday: int | None = None) -> str:
         or "no tip window" in text
         or "no live or tip-soon" in text
         or "lanes clear" in text
+        or "too late" in text
+        or "min left" in text
     ):
         return "calendar"
     # Stale-world / clock-skew / feed-down are freshness — DATA, not capacity invent.
@@ -1645,6 +1653,9 @@ def self_check() -> None:
         "Selective +1 KILLED (5 green-day EV worsen) — base max_buys only",
         weekday=1,
     ) == "budget"
+    assert classify_skip("too late to enter", weekday=1) == "calendar"
+    assert classify_skip("min left 4.2 < 10", weekday=1) == "calendar"
+    assert classify_skip("ruin drill active — entries off", weekday=1) == "entry_gate"
     assert depth_adjusted_edge(0.10, 5, need=10) == round(0.05, 6)
     assert depth_adjusted_edge(0.10, 20, need=10) == round(0.10, 6)
     assert opportunity_score_v2(0.10, 0.8, 5, need=10) < opportunity_score_v2(0.10, 0.8, 20, need=10)

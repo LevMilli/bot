@@ -811,8 +811,18 @@ def main():
     manage(st)
     save_state(st)
     if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
-        print("2) scanning skipped — desk entry_gate blocked new paper buys (exits above still ran)")
-        print(f"CARD: Managed open paper positions. Desk gate blocked new buys ({len(st['open'])} still open).")
+        # Prefer-1: surface DESK_BLOCK_REASON — do not invent bland entry_gate (#531 twin).
+        gate_why = "Desk entry_gate blocked new paper buys (exits above still ran)"
+        try:
+            import desk_living
+            gate_why = desk_living.desk_block_entries_reason(gate_why) or gate_why
+        except Exception:
+            pass
+        print(f"2) scanning skipped — {gate_why}")
+        print(
+            f"CARD: Managed open paper positions. {gate_why} "
+            f"({len(st['open'])} still open)."
+        )
         print(f"  cash ${st['cash_usd']:.2f}, open {len(st['open'])}, realized pnl ${st['realized_pnl_usd']:+.2f}")
         return
     print("2) scanning for candidates")
