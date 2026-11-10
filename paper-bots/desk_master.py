@@ -857,6 +857,16 @@ def master_summary(
         except Exception:
             plan["helper_advice_log"] = None
         try:
+            plan["helper_advice_lift"] = desk_roi_plan.helper_advice_lift_board(root)
+        except Exception:
+            plan["helper_advice_lift"] = None
+        try:
+            plan["insight_helpers_execution_lock"] = (
+                desk_roi_plan.insight_helpers_execution_lock(root)
+            )
+        except Exception:
+            plan["insight_helpers_execution_lock"] = None
+        try:
             plan["eligible_fill_funnel"] = desk_roi_plan.eligible_fill_funnel(
                 root, bots=bots,
             )
