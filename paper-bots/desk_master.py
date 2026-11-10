@@ -706,6 +706,12 @@ def master_summary(
         except Exception:
             plan["phase7_portfolio"] = None
         try:
+            plan["phase8_helpers"] = desk_roi_plan.phase8_helpers_gate(
+                root, bots=bots,
+            )
+        except Exception:
+            plan["phase8_helpers"] = None
+        try:
             plan["exit_quality"] = desk_roi_plan.exit_quality_observe(root, bots=bots)
         except Exception:
             plan["exit_quality"] = None

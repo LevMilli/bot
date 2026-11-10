@@ -2027,6 +2027,27 @@ Phase 6 Master graduation is **COMPLETE** for paper observe. Economic exit (≥3
 
 Phase 7 firm portfolio is **COMPLETE** for paper observe. Economic exit (firm M1≥0 × 2 weeks with ≥3 active towers + retirement path tested) is `economic_pass` — ops proof on the live board.
 
+### Phase 8 helper evidence gate — COMPLETE
+
+| Ticket | Where |
+| --- | --- |
+| Formal helpers-gate certifier | `desk_roi_plan.phase8_helpers_gate` |
+| Helper Gate A | `helper_gate_a` / `helper_promote_status` — n≥20 taxed EV≥0; `auto_promote=False` |
+| Place-alone lock | `helper_may_place_alone` default False · `helper_autonomy_blocks` until Gate A + staff arm |
+| Insight exec lock | `insight_helpers_execution_lock` — no `paper_buy`/`paper_sell` / opens write |
+| Skip-regret twin | `skip_regret_candidates` · `staff_log_skip_regret_decision` — never auto-loosens |
+| Advice lift board | `helper_advice_lift_board` · Gate A path · observe only |
+| Gate A pilots | `gate_a_pilots_board` — btc/calendar + sports/clv; staff_arm=False |
+| ETH calib + ladder shadow | `eth_calibration_report` (no auto Φ) · `desk_phase3.LADDER_MIN_P=0.80` |
+| Daily R locks | sports **1.5R** · commodity **2.0R ($40)** |
+| Masters | `roi_plan.phase8_helpers` (+ helper_gate_a / skip_regret / advice boards) |
+| CLI / Makefile | `make living-phase8-gate` · `staff_living_status phase8-gate` |
+| Money pulse | `phase8_helpers` on `living-money-pulse` |
+| Tests | `test_phase8_helpers_gate.py` |
+| Floors / LIVE | never softens floors; never arms `LIVE_ORDERS`; never invents fills; never helper auto-buys |
+
+Phase 8 helper evidence is **COMPLETE** for paper observe. Economic exit (≥1 helper-proven promote **or** documented reject) is `economic_pass` — ops proof on the live board; do not invent helper fills or force-arm thin Gate A.
+
 ### Bulk E3–E7 engineerable (Nov 7)
 
 | Ticket | Where |
