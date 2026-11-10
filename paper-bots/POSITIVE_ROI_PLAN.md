@@ -1970,6 +1970,25 @@ Phase 3 exit quality is **COMPLETE** for paper observe. Remaining work is staff 
 
 Phase 4 calibration & CLV is **COMPLETE** for paper observe. Live beat-close ≥52% and INX research promote remain ops (need board n); do not invent evidence or change bands/floors to force a pretty backtest.
 
+### Phase 5 selective throughput gate — COMPLETE
+
+| Ticket | Where |
+| --- | --- |
+| Formal throughput-gate certifier | `desk_roi_plan.phase5_throughput_gate` |
+| Selective +1 green-only | `desk_more.selective_max_buys` (fee-clear; red never boosts) |
+| Sports green_boost lock | default 0 until 2w M1≥0 + CLV≥52%; `auto_promote=False` |
+| Near-miss promote lock | n≥30 labeled EV≥0; code `NEAR_MISS_LIVE=False`; no thin force-arm |
+| Firm queue + tip funnel + skip-regret | `rebuild_firm_queue` · `tip_funnel_board` · `skip_regret_candidates` |
+| Empty CARD &lt;3s + opp-cost | `empty_card_status` · `opp_cost_summary` |
+| Commodity daily R | locked **2.0R ($40)** via `DAILY_R_BUDGET` |
+| Masters | `roi_plan.phase5_throughput` + `roi_plan.selective_throughput` |
+| CLI / Makefile | `make living-phase5-gate` · `staff_living_status phase5-gate` |
+| Money pulse | `phase5_throughput` on `living-money-pulse` |
+| Tests | `test_phase5_throughput_gate.py` |
+| Floors / LIVE | never softens floors; never arms `LIVE_ORDERS`; never invents fills; never force-arms or staff-clears |
+
+Phase 5 selective throughput is **COMPLETE** for paper observe. Weekday buys ≥+25% vs W0 + taxed EV hold remain ops proof on the live board — do not invent fills or lower cushion/z/news to force volume.
+
 ### Bulk E3–E7 engineerable (Nov 7)
 
 | Ticket | Where |
