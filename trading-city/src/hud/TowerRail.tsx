@@ -7,11 +7,75 @@ import {
   pnlTone,
   statusLabel,
 } from '../data/format'
+import { isSupportTower } from '../data/floorMap'
 import type { BotRow } from '../types'
 
 type Props = {
   bots: BotRow[]
   onSelect: (id: string) => void
+}
+
+function TowerGroup({
+  label,
+  bots,
+  all,
+  onSelect,
+}: {
+  label: string
+  bots: BotRow[]
+  all: BotRow[]
+  onSelect: (id: string) => void
+}) {
+  if (!bots.length) return null
+  return (
+    <section className="tower-menu-group" aria-label={label}>
+      <h3 className="tower-menu-heading">{label}</h3>
+      <ul className="tower-menu-list">
+        {bots.map((bot) => (
+          <TowerTab key={bot.id} bot={bot} index={Math.max(0, all.indexOf(bot))} onSelect={onSelect} />
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+function TowerTab({
+  bot,
+  index,
+  onSelect,
+}: {
+  bot: BotRow
+  index: number
+  onSelect: (id: string) => void
+}) {
+  const color = beamColorFor(bot.id, index)
+  const offline = bot.present === false
+  const tone = offline ? 'flat' : pnlTone(hologramPnlValue(bot))
+  const status = statusLabel(bot)
+  return (
+    <li>
+      <button
+        type="button"
+        className={`tower-tab ${offline ? 'offline' : ''}`}
+        style={{ ['--tab-beam' as string]: color }}
+        onClick={() => onSelect(bot.id)}
+        title={status}
+      >
+        <span className="tower-tab-beam" aria-hidden />
+        <span className="tower-tab-body">
+          <span className="tower-tab-name">{bot.name}</span>
+          <span className="tower-tab-meta">
+            <span className={`tower-tab-pnl tone-${tone}`}>{offline ? 'offline' : hologramPnl(bot)}</span>
+            {!offline && bot.open_count != null && bot.open_count > 0 && (
+              <span className="tower-tab-open">open {bot.open_count}</span>
+            )}
+            {!offline && bot.cash != null && <span className="tower-tab-cash">{money(bot.cash)}</span>}
+          </span>
+          <span className="tower-tab-status">{status}</span>
+        </span>
+      </button>
+    </li>
+  )
 }
 
 /**
@@ -77,45 +141,24 @@ export function TowerRail({ bots, onSelect }: Props) {
 
       {open && (
         <nav className="tower-menu-panel" aria-label="Paper towers" id={listId}>
-          <ul className="tower-menu-list">
-            {bots.map((bot, i) => {
-              const color = beamColorFor(bot.id, i)
-              const offline = bot.present === false
-              const tone = offline ? 'flat' : pnlTone(hologramPnlValue(bot))
-              const status = statusLabel(bot)
-              return (
-                <li key={bot.id}>
-                  <button
-                    type="button"
-                    className={`tower-tab ${offline ? 'offline' : ''}`}
-                    style={{ ['--tab-beam' as string]: color }}
-                    onClick={() => {
-                      setOpen(false)
-                      onSelect(bot.id)
-                    }}
-                    title={status}
-                  >
-                    <span className="tower-tab-beam" aria-hidden />
-                    <span className="tower-tab-body">
-                      <span className="tower-tab-name">{bot.name}</span>
-                      <span className="tower-tab-meta">
-                        <span className={`tower-tab-pnl tone-${tone}`}>
-                          {offline ? 'offline' : hologramPnl(bot)}
-                        </span>
-                        {!offline && bot.open_count != null && bot.open_count > 0 && (
-                          <span className="tower-tab-open">open {bot.open_count}</span>
-                        )}
-                        {!offline && bot.cash != null && (
-                          <span className="tower-tab-cash">{money(bot.cash)}</span>
-                        )}
-                      </span>
-                      <span className="tower-tab-status">{status}</span>
-                    </span>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
+          <TowerGroup
+            label="Trading"
+            bots={bots.filter((bot) => !isSupportTower(bot.id))}
+            all={bots}
+            onSelect={(id) => {
+              setOpen(false)
+              onSelect(id)
+            }}
+          />
+          <TowerGroup
+            label="Support"
+            bots={bots.filter((bot) => isSupportTower(bot.id))}
+            all={bots}
+            onSelect={(id) => {
+              setOpen(false)
+              onSelect(id)
+            }}
+          />
         </nav>
       )}
     </div>
