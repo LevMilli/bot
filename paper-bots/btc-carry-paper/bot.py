@@ -263,6 +263,14 @@ def archive_urls(now: dt.datetime, symbol: str = "BTCUSDT") -> list[tuple[str, s
             "funding",
             f"{VISION}/daily/fundingRate/{sym}/{sym}-fundingRate-{stamp}.zip",
         ))
+    # Daily funding zips are not on the archive. Daily 8h premium klines are.
+    # They mark basis on the open hold. They do not open another leg.
+    for delta in range(1, 11):
+        stamp = (day - dt.timedelta(days=delta)).isoformat()
+        urls.append((
+            "premium",
+            f"{VISION}/daily/premiumIndexKlines/{sym}/8h/{sym}-8h-{stamp}.zip",
+        ))
     return urls
 
 

@@ -771,7 +771,10 @@ def bot_gates_hit(view: dict, desk_gate: str = "") -> list:
         hits.append("state read error")
     if (view.get("last_run") or {}).get("blocked"):
         hits.append("run blocked")
-    if view.get("skip"):
+    skip = str(view.get("skip") or "")
+    # A carry HOLD is the trade. The skip chip is for a check that bought nothing.
+    low = skip.lower()
+    if skip and "signal: hold" not in low and not low.startswith("holding unlevered"):
         hits.append("skip")
     plans = view.get("plans") or {}
     if desk_gate and plans.get("entry_gated"):
@@ -1834,16 +1837,29 @@ def _btc_skip_card_body(summary: str) -> str:
 
 
 def _btc_skip(summary: str) -> str:
-    """Tower skip strip for BTC/commodity (kind=btc). Prefer SIGNAL, else densified CARD."""
+    """Tower skip strip for BTC/commodity/carry. A HOLD is the trade, not a skip."""
     if not summary:
         return "No check yet. Skip and news status show up after a run."
     lines = [_clean(line, 240) for line in summary.splitlines()]
     news = next((line for line in lines if line.lower().startswith("news")), "")
-    signal = next((line for line in lines if line.upper().startswith("SIGNAL:")), "")
+    signals = [line for line in lines if line.upper().startswith("SIGNAL:")]
+    skips = [line for line in signals if "SKIP" in line.upper()]
+    holds = [
+        line for line in signals
+        if "HOLD" in line.upper() and "SKIP" not in line.upper()
+    ]
+    if skips:
+        picked = [line for line in (news, *skips) if line]
+        return " ".join(picked)[:400]
+    if holds:
+        return ""
+    signal = signals[0] if signals else ""
     picked = [line for line in (news, signal) if line]
     if picked:
         return " ".join(picked)[:400]
     card_skip = _btc_skip_card_body(summary)
+    if card_skip and card_skip.lower().startswith("holding unlevered"):
+        return ""
     if card_skip:
         return card_skip[:400]
     # No-window / ladder-only lines beat bland CARD + "did not include a skip
@@ -4663,6 +4679,11 @@ def tower_doing_good(bot: dict) -> bool:
     if not isinstance(bot, dict) or not bot.get("present"):
         return True
     bot_id = str(bot.get("id") or "")
+    # Carry pays the 0.15% entry leg once ($499.25 of a $500 sleeve). That is the
+    # hold, not a broke book. A midnight reload would flatten it and the next
+    # check would pay the fee again.
+    if bot_id == "btc-carry":
+        return True
     starter = float(TOWER_STARTER_CASH.get(bot_id) or 100.0)
     min_ammo = float(TOWER_MIN_AMMO.get(bot_id) or 10.0)
     if int(bot.get("open_count") or 0) > 0:
@@ -4687,11 +4708,13 @@ def tower_needs_midnight_reload(bot: dict) -> bool:
     """Out of ammo and/or blew the paper book — flat towers only."""
     if not isinstance(bot, dict) or not bot.get("present"):
         return False
+    bot_id = str(bot.get("id") or "")
+    if bot_id == "btc-carry":
+        return False
     if int(bot.get("open_count") or 0) > 0:
         return False
     if tower_doing_good(bot):
         return False
-    bot_id = str(bot.get("id") or "")
     starter = float(TOWER_STARTER_CASH.get(bot_id) or 100.0)
     min_ammo = float(TOWER_MIN_AMMO.get(bot_id) or 10.0)
     cash = _num(bot.get("cash"))
