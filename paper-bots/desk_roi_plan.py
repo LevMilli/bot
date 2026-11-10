@@ -166,34 +166,83 @@ MEME_RETIRE_MIN_N = 10
 # Phase 11: hillclimb kill — M3↑ with M1↓ for 2 Chicago weeks → revert lever.
 HILLCLIMB_KILL_WEEKS = 2
 # Phase 11: one lever per Chicago week from allowlist (raise-only on fee floors).
+# E9 #903–922: evidence template fields (success / kill / dry-run) on each lever.
+_HILLCLIMB_SUCCESS = "M1 non-worse vs prior Chicago week; optional eligible fills up"
+_HILLCLIMB_KILL = "M3↑ with M1↓ over 2 Chicago weeks → revert lever"
+_HILLCLIMB_DRY = {
+    "mode": "shadow_paper",
+    "writes_venue_params": False,
+    "applies_live": False,
+    "live_orders_enabled": False,
+    "fee_floors_locked": True,
+}
+
 HILLCLIMB_ALLOWLIST = {
     "VOL_SAFE": {
         "kind": "adapt_threshold",
         "raise_only": False,
         "note": "desk_adapt VOL_SAFE play-safe threshold experiment",
+        "success_metrics": _HILLCLIMB_SUCCESS,
+        "kill_metrics": _HILLCLIMB_KILL,
+        "dry_run": {
+            **_HILLCLIMB_DRY,
+            "target": "desk_adapt.VOL_SAFE",
+            "proposed": {"play_safe": True, "observe_only": True},
+        },
     },
     "HIT_FOR_BIG": {
         "kind": "adapt_threshold",
         "raise_only": False,
         "note": "desk_adapt HIT_FOR_BIG proven-80 threshold experiment",
+        "success_metrics": _HILLCLIMB_SUCCESS,
+        "kill_metrics": _HILLCLIMB_KILL,
+        "dry_run": {
+            **_HILLCLIMB_DRY,
+            "target": "desk_adapt.HIT_FOR_BIG",
+            "proposed": {"proven_80": True, "observe_only": True},
+        },
     },
     "venue_min_edge_btc": {
         "kind": "venue_floor",
         "raise_only": True,
         "venue": "kalshi_btc15m",
         "note": "BTC venue min_edge — raise only, never soften floor",
+        "success_metrics": _HILLCLIMB_SUCCESS,
+        "kill_metrics": _HILLCLIMB_KILL,
+        "dry_run": {
+            **_HILLCLIMB_DRY,
+            "target": "venue_min_edge.kalshi_btc15m",
+            "proposed": {"min_edge": 0.06, "floor_locked": 0.05, "raise_only": True},
+        },
     },
     "min_cushion_btc": {
         "kind": "btc_gate",
         "raise_only": True,
         "note": "BTC min cushion — raise only",
+        "success_metrics": _HILLCLIMB_SUCCESS,
+        "kill_metrics": _HILLCLIMB_KILL,
+        "dry_run": {
+            **_HILLCLIMB_DRY,
+            "target": "btc.min_cushion",
+            "proposed": {"min_cushion": "raise_only", "observe_only": True},
+        },
     },
     "kelly_fraction": {
         "kind": "sizing",
         "raise_only": False,
         "note": "Kelly fraction within desk bounds (0.05–1.0)",
+        "success_metrics": _HILLCLIMB_SUCCESS,
+        "kill_metrics": _HILLCLIMB_KILL,
+        "dry_run": {
+            **_HILLCLIMB_DRY,
+            "target": "sizing.kelly_fraction",
+            "proposed": {"kelly_fraction": 0.25, "bounds": [0.05, 1.0]},
+        },
     },
 }
+
+HILLCLIMB_NONE_LEVER = "NONE"
+HILLCLIMB_RITUAL_NAME = "desk_hillclimb_ritual.json"
 
 # Phase 10: profit-lock harvest paper analog — hit weekly target → 0.5× size.
 PROFIT_LOCK_TARGET_USD = 40.0
@@ -12007,11 +12056,164 @@ def hillclimb_allowlist() -> dict:
         "levers": {
             k: dict(v, name=k) for k, v in HILLCLIMB_ALLOWLIST.items()
         },
+        "none_lever": HILLCLIMB_NONE_LEVER,
         "note": (
-            "One lever per Chicago week. venue_min_edge_btc / min_cushion_btc "
-            "are raise-only. Midweek thrash banned."
+            "One lever per Chicago week (or NONE). venue_min_edge_btc / min_cushion_btc "
+            "are raise-only. Midweek thrash banned. Sunday packet review required (#901)."
         ),
     }
+
+
+def hillclimb_lever_evidence_templates() -> dict:
+    """E9 #903–922: evidence pack templates per allowlisted lever (observe only)."""
+    templates = {}
+    for name, meta in HILLCLIMB_ALLOWLIST.items():
+        templates[name] = {
+            "lever": name,
+            "kind": meta.get("kind"),
+            "raise_only": bool(meta.get("raise_only")),
+            "success_metrics": meta.get("success_metrics") or _HILLCLIMB_SUCCESS,
+            "kill_metrics": meta.get("kill_metrics") or _HILLCLIMB_KILL,
+            "dry_run": dict(meta.get("dry_run") or _HILLCLIMB_DRY),
+            "writes_venue_params": False,
+            "applies_live": False,
+            "note": meta.get("note"),
+        }
+    templates[HILLCLIMB_NONE_LEVER] = {
+        "lever": HILLCLIMB_NONE_LEVER,
+        "kind": "observe",
+        "raise_only": False,
+        "success_metrics": "Observation continues; no param change (#923)",
+        "kill_metrics": "N/A — no lever active",
+        "dry_run": {
+            **_HILLCLIMB_DRY,
+            "target": "none",
+            "proposed": {"lever": "NONE", "observation_continues": True},
+        },
+        "writes_venue_params": False,
+        "applies_live": False,
+        "note": "Valid pick — document why observation continues.",
+    }
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_apply": False,
+        "templates": templates,
+        "levers": sorted(HILLCLIMB_ALLOWLIST.keys()) + [HILLCLIMB_NONE_LEVER],
+        "label": f"hillclimb evidence templates n={len(templates)}",
+        "note": (
+            "E9 evidence templates (#903–922) + NONE (#923). "
+            "Dry-run is shadow/paper only — never writes venue params."
+        ),
+    }
+
+
+def hillclimb_dry_run_board(lever: str | None = None) -> dict:
+    """Dry-run config for one lever (or all) — shadow/paper only (#906+)."""
+    templates = hillclimb_lever_evidence_templates()["templates"]
+    name = str(lever or "").strip()
+    if name:
+        row = templates.get(name)
+        if not row:
+            return {
+                "ok": False,
+                "reason": f"unknown lever {name}",
+                "allowlist": sorted(templates.keys()),
+                "paper_only": True,
+                "fee_floors_locked": True,
+            }
+        return {
+            "ok": True,
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "observe_only": True,
+            "auto_apply": False,
+            "lever": name,
+            "dry_run": row.get("dry_run"),
+            "success_metrics": row.get("success_metrics"),
+            "kill_metrics": row.get("kill_metrics"),
+            "label": f"hillclimb dry-run {name} (shadow/paper · no param write)",
+            "note": "Dry-run only — never applies LIVE or softens floors.",
+        }
+    return {
+        "ok": True,
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_apply": False,
+        "by_lever": {
+            k: v.get("dry_run") for k, v in templates.items()
+        },
+        "label": "hillclimb dry-run board (all levers · shadow/paper)",
+        "note": "Dry-run only — never applies LIVE or softens floors.",
+    }
+
+
+def sunday_packet_review_status(root: str | None = None) -> dict:
+    """#901 — Chicago week Sunday packet review gate for new hillclimb levers."""
+    week = _chicago_week_id()
+    store = _load(
+        _path(HILLCLIMB_RITUAL_NAME, root),
+        {"paper_only": True, "reviews": {}, "latest": None},
+    )
+    reviews = store.get("reviews") if isinstance(store.get("reviews"), dict) else {}
+    row = reviews.get(week) if isinstance(reviews.get(week), dict) else None
+    reviewed = bool(row and row.get("reviewed"))
+    packet_present = False
+    try:
+        from helpers.sunday_packet import packet_path
+        packet_present = os.path.isfile(packet_path(root))
+    except Exception:
+        packet_present = False
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "week": week,
+        "reviewed": reviewed,
+        "packet_present": packet_present,
+        "latest": row,
+        "gate_ok": reviewed,
+        "label": (
+            f"sunday_review week={week} reviewed={reviewed} "
+            f"packet={'yes' if packet_present else 'no'}"
+        ),
+        "note": (
+            "No new hillclimb lever until Sunday packet reviewed this Chicago week (#901). "
+            "NONE remains valid without review. force=True for tests only."
+        ),
+    }
+
+
+def staff_mark_sunday_packet_reviewed(
+    root: str | None,
+    *,
+    who: str = "",
+    note: str = "",
+) -> dict:
+    """Staff marks Sunday packet reviewed for this Chicago week (#901)."""
+    week = _chicago_week_id()
+    path = _path(HILLCLIMB_RITUAL_NAME, root)
+    store = _load(path, {"paper_only": True, "reviews": {}, "latest": None})
+    reviews = store.get("reviews") if isinstance(store.get("reviews"), dict) else {}
+    row = {
+        "week": week,
+        "reviewed": True,
+        "at": _now(),
+        "who": str(who or "")[:40],
+        "note": str(note or "sunday packet reviewed")[:200],
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_promote": False,
+    }
+    reviews[week] = row
+    store["reviews"] = reviews
+    store["latest"] = row
+    store["paper_only"] = True
+    store["fee_floors_locked"] = True
+    _save(path, store)
+    return {"ok": True, "row": row, "paper_only": True, "fee_floors_locked": True}
 
 
 def active_hillclimb_lever(root: str | None = None) -> dict | None:
@@ -12038,11 +12240,12 @@ def hillclimb_lever_status(root: str | None = None) -> dict:
         "observe_only": True,
         "process_only": True,  # TC-151 — staff must pick; no auto
         "ticket": "TC-151",
-        "allowlist": sorted(HILLCLIMB_ALLOWLIST.keys()),
+        "allowlist": sorted(HILLCLIMB_ALLOWLIST.keys()) + [HILLCLIMB_NONE_LEVER],
         "active": active,
         "week": week,
         "active_this_week": same_week,
         "needs_staff_pick": needs_staff_pick,
+        "sunday_review": sunday_packet_review_status(root),
         "evidence_thin": needs_staff_pick or kill_flag,
         "kill": kill_flag,
         "kill_action": (kill.get("status") or {}).get("action") if isinstance(kill.get("status"), dict) else kill.get("action"),
@@ -12078,20 +12281,45 @@ def staff_pick_hillclimb_lever(
 ) -> dict:
     """Staff picks the single hillclimb lever for this Chicago week.
 
+    #901: new non-NONE lever requires Sunday packet reviewed (unless force).
+    #902/#923: NONE is a valid pick (observation continues).
     Midweek thrash banned unless force=True (tests) or demote first.
     Raise-only levers reject proposed_value below locked floor.
+    Never writes venue params / never LIVE.
     """
     name = str(lever or "").strip()
-    meta = HILLCLIMB_ALLOWLIST.get(name)
+    is_none = name.upper() == HILLCLIMB_NONE_LEVER
+    if is_none:
+        name = HILLCLIMB_NONE_LEVER
+        meta = {
+            "kind": "observe",
+            "raise_only": False,
+            "note": "NONE — observation continues (#923)",
+        }
+    else:
+        meta = HILLCLIMB_ALLOWLIST.get(name)
     if not meta:
         return {
             "ok": False,
             "reason": f"lever not on allowlist: {name}",
-            "allowlist": sorted(HILLCLIMB_ALLOWLIST.keys()),
+            "allowlist": sorted(HILLCLIMB_ALLOWLIST.keys()) + [HILLCLIMB_NONE_LEVER],
             "auto_promote": False,
             "fee_floors_locked": True,
         }
     week = _chicago_week_id()
+    if not is_none and not force:
+        ritual = sunday_packet_review_status(root)
+        if not ritual.get("reviewed"):
+            return {
+                "ok": False,
+                "reason": (
+                    "Sunday packet not reviewed this Chicago week (#901) — "
+                    "mark reviewed or pick NONE"
+                ),
+                "sunday_review": ritual,
+                "auto_promote": False,
+                "fee_floors_locked": True,
+            }
     path = _path(HILLCLIMB_LEVER_NAME, root)
     store = _load(path, {"paper_only": True, "active": None, "history": []})
     active = store.get("active") if isinstance(store.get("active"), dict) else None
@@ -12138,8 +12366,11 @@ def staff_pick_hillclimb_lever(
         "at": _now(),
         "note": str(note or "")[:200] or str(meta.get("note") or "")[:200],
         "staff_approved": True,
+        "observation_continues": bool(is_none),
         "auto_promote": False,
+        "auto_apply": False,
         "fee_floors_locked": True,
+        "writes_venue_params": False,
     }
     hist = [h for h in (store.get("history") or []) if isinstance(h, dict)]
     if active:
@@ -12154,8 +12385,13 @@ def staff_pick_hillclimb_lever(
         "ok": True,
         "active": row,
         "auto_promote": False,
+        "auto_apply": False,
         "fee_floors_locked": True,
-        "reason": f"picked {name} for {week}",
+        "reason": (
+            f"picked NONE for {week} — observation continues"
+            if is_none
+            else f"picked {name} for {week}"
+        ),
     }
 
 
@@ -13119,6 +13355,9 @@ def self_check() -> None:
         al = hillclimb_allowlist()
         assert "VOL_SAFE" in al["levers"]
         assert al["levers"]["venue_min_edge_btc"]["raise_only"] is True
+        blocked_sun = staff_pick_hillclimb_lever(tmp, "VOL_SAFE", note="week experiment")
+        assert blocked_sun["ok"] is False
+        staff_mark_sunday_packet_reviewed(tmp, who="selftest")
         pick = staff_pick_hillclimb_lever(tmp, "VOL_SAFE", note="week experiment")
         assert pick["ok"] is True
         thrash = staff_pick_hillclimb_lever(tmp, "HIT_FOR_BIG")
@@ -13131,6 +13370,12 @@ def self_check() -> None:
         dem = staff_demote_hillclimb_lever(tmp, note="sunday")
         assert dem["ok"] is True
         assert active_hillclimb_lever(tmp) is None
+        none = staff_pick_hillclimb_lever(tmp, "NONE", note="observe")
+        assert none["ok"] is True
+        assert none["active"]["observation_continues"] is True
+        templates = hillclimb_lever_evidence_templates()
+        assert "VOL_SAFE" in templates["templates"]
+        assert templates["templates"]["VOL_SAFE"]["dry_run"]["writes_venue_params"] is False
         # Dual-control stub: two staff + all items; live stays False.
         assert LIVE_ORDERS_ENABLED is False
         for iid, _ in DUAL_CONTROL_ITEMS:

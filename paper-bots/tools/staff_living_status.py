@@ -1769,6 +1769,7 @@ def main() -> int:
             "firm-tower-m1", "m5-idle-budget", "distance-stance",
             # Staff SLA pack — observe / no-force; never tip invent; LIVE off.
             "hillclimb-pack", "hillclimb-pick", "hillclimb-pick-log",
+            "hillclimb-sunday-review", "hillclimb-dry-run", "hillclimb-evidence",
             "promote-ready-pack", "staff-promote-batch-ready",
             "disarm-thin", "staff-disarm-thin",
             "dual-control-status", "dual-control-observe",
@@ -4621,6 +4622,24 @@ def main() -> int:
         return 0 if not (out.get("needs_staff_pick") or out.get("kill")) else 2
     if args.action == "hillclimb-pick-log":
         out = desk_roi_plan.staff_hillclimb_pick_journal(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "hillclimb-sunday-review":
+        out = desk_roi_plan.staff_mark_sunday_packet_reviewed(
+            root,
+            who=str(getattr(args, "who", None) or "staff-cli"),
+            note=str(getattr(args, "note", None) or "sunday packet reviewed"),
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "hillclimb-dry-run":
+        lever = str(getattr(args, "soft", None) or getattr(args, "note", None) or "")
+        # Prefer explicit lever via leftover note field when empty → all levers.
+        out = desk_roi_plan.hillclimb_dry_run_board(lever or None)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "hillclimb-evidence":
+        out = desk_roi_plan.hillclimb_lever_evidence_templates()
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
     if args.action == "promote-ready-pack":
