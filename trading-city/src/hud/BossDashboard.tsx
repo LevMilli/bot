@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { BotRow, Desk, RoiSystem, Snapshot, TradeOrHistory } from '../types'
 import { money, statusLabel } from '../data/format'
-import { isResearchTower } from '../data/floorMap'
+import { isResearchTower, isStaffSupport } from '../data/floorMap'
 
 const NOTES_KEY = 'apex-city-boss-notes-v1'
 const AUTO_LEARN_KEY = 'apex-city-auto-learn-v1'
 
 type StaffNotes = Record<string, string>
 type Tab = 'floor' | 'history' | 'learn'
-type FloorFilter = 'all' | 'trading' | 'research' | 'open' | 'paused'
+type FloorFilter = 'all' | 'trading' | 'research' | 'support' | 'open' | 'paused'
 type HistoryLoad = '60' | '100' | '200' | 'all'
 
 type HistRow = {
@@ -175,8 +175,9 @@ export function BossDashboard({ bots, desk, roi, snap, onClose, onFocusBot }: Pr
 
   const floorBots = useMemo(() => {
     return bots.filter((bot) => {
-      if (floorFilter === 'trading') return !isResearchTower(bot.id)
+      if (floorFilter === 'trading') return !isResearchTower(bot.id) && !isStaffSupport(bot.id)
       if (floorFilter === 'research') return isResearchTower(bot.id)
+      if (floorFilter === 'support') return isStaffSupport(bot.id)
       if (floorFilter === 'open') return (bot.open_count ?? 0) > 0
       if (floorFilter === 'paused') return Boolean(bot.paused)
       return true
@@ -265,6 +266,7 @@ export function BossDashboard({ bots, desk, roi, snap, onClose, onFocusBot }: Pr
                     <option value="all">All towers</option>
                     <option value="trading">Trading</option>
                     <option value="research">Research</option>
+                    <option value="support">Support</option>
                     <option value="open">Open paper</option>
                     <option value="paused">Paused</option>
                   </select>
@@ -331,7 +333,11 @@ export function BossDashboard({ bots, desk, roi, snap, onClose, onFocusBot }: Pr
                 <h3>{selected.name}</h3>
                 <p className="boss-muted">
                   {selected.id}
-                  {isResearchTower(selected.id) ? ' · research' : ' · trading'}
+                  {isStaffSupport(selected.id)
+                    ? ' · support'
+                    : isResearchTower(selected.id)
+                      ? ' · research'
+                      : ' · trading'}
                   {selected.paused ? ' · paused' : ''}
                   {' · '}
                   {selected.feed || 'feed'}

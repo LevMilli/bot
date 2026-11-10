@@ -94,9 +94,8 @@ function TradeTower({ bot, index, position, selected, onSelect, vista = false }:
   const color = beamColorFor(bot.id, index)
   const offline = bot.present === false
   const closed = towerClosed(bot)
-  const street = bot.id === 'wall-street'
-  const height = street ? 10.8 : offline ? 5.4 : 7.6 + (index % 3) * 1.35 + (index === 0 ? 1.2 : 0)
-  const width = street ? 2.25 : 1.9 + (index % 2) * 0.28
+  const height = offline ? 5.4 : 7.6 + (index % 3) * 1.35 + (index === 0 ? 1.2 : 0)
+  const width = 1.9 + (index % 2) * 0.28
   const hero = index === 0 && !offline
 
   useFrame(({ clock }) => {
@@ -182,13 +181,6 @@ function TradeTower({ bot, index, position, selected, onSelect, vista = false }:
           emissiveIntensity={closed ? 0 : 0.7}
         />
       </mesh>
-      {street && !closed && (
-        <mesh position={[0, height + 0.32, 0]}>
-          <boxGeometry args={[width + 0.46, 0.18, width + 0.46]} />
-          <meshStandardMaterial color="#1a1408" emissive="#c6a15b" emissiveIntensity={1.15} />
-        </mesh>
-      )}
-
       {/* neon beam + halo rings — dark when the tower is closed */}
       {!closed && (
       <group ref={beamGroup} position={[0, height + 0.2, 0]}>
@@ -357,7 +349,110 @@ function SupportRelay({ bot, index, position, selected, onSelect, vista = false 
   )
 }
 
+const STREET = '#c6a15b'
+
+/**
+ * Wall Street is a staff floor, not a trading tower and not a research relay.
+ * Wide hall, gold cornice, no sky beam — the book does not send orders.
+ */
+function WallStreetHall({ bot, index, position, selected, onSelect, vista = false }: Props) {
+  const closed = towerClosed(bot)
+  const gold = closed ? '#000000' : STREET
+  const glow = closed ? 0 : selected ? 0.85 : 0.55
+  const podiumW = 2.55
+  const podiumD = 1.72
+  const podiumH = 2.25
+  const crownW = 1.62
+  const crownD = 1.12
+  const crownH = 1.35
+  const roofY = podiumH + crownH
+  const pick = vista
+    ? {}
+    : {
+        onClick: (e: { stopPropagation: () => void }) => {
+          e.stopPropagation()
+          onSelect(bot.id)
+        },
+        onPointerOver: () => {
+          document.body.style.cursor = 'pointer'
+        },
+        onPointerOut: () => {
+          document.body.style.cursor = 'default'
+        },
+      }
+  const columns = [-0.9, -0.3, 0.3, 0.9]
+  const windowCols = [-0.72, -0.24, 0.24, 0.72]
+  const windowRows = [0.55, 1.15, 1.7]
+
+  return (
+    <group position={position}>
+      <mesh position={[0, 0.04, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[podiumW + 0.7, podiumD + 0.55]} />
+        <meshStandardMaterial color="#050510" emissive={gold} emissiveIntensity={closed ? 0 : 0.12} />
+      </mesh>
+      {!closed && (
+        <mesh position={[0, 0.055, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[1.15, 1.32, 4]} />
+          <meshBasicMaterial color={STREET} transparent opacity={0.55} toneMapped={false} />
+        </mesh>
+      )}
+
+      <mesh position={[0, podiumH / 2, 0]} castShadow {...pick}>
+        <boxGeometry args={[podiumW, podiumH, podiumD]} />
+        <meshStandardMaterial
+          color="#07060f"
+          emissive={selected ? STREET : '#080814'}
+          emissiveIntensity={selected ? 0.22 : 0.05}
+          roughness={0.84}
+          metalness={0.16}
+        />
+      </mesh>
+      <mesh position={[0, podiumH + crownH / 2, 0]} castShadow>
+        <boxGeometry args={[crownW, crownH, crownD]} />
+        <meshStandardMaterial
+          color="#09080f"
+          emissive={selected ? STREET : '#080814'}
+          emissiveIntensity={selected ? 0.16 : 0.04}
+          roughness={0.8}
+          metalness={0.2}
+        />
+      </mesh>
+
+      <mesh position={[0, podiumH, 0]}>
+        <boxGeometry args={[podiumW + 0.16, 0.1, podiumD + 0.14]} />
+        <meshStandardMaterial color="#1a1408" emissive={gold} emissiveIntensity={glow} />
+      </mesh>
+      <mesh position={[0, roofY, 0]}>
+        <boxGeometry args={[crownW + 0.14, 0.1, crownD + 0.12]} />
+        <meshStandardMaterial color="#1a1408" emissive={gold} emissiveIntensity={closed ? 0 : 0.9} />
+      </mesh>
+      <mesh position={[0, roofY + 0.28, 0]}>
+        <coneGeometry args={[0.26, 0.46, 4]} />
+        <meshStandardMaterial color="#1a1408" emissive={gold} emissiveIntensity={closed ? 0 : 1.05} />
+      </mesh>
+
+      {columns.map((x) => (
+        <mesh key={x} position={[x, podiumH * 0.46, podiumD / 2 + 0.05]}>
+          <boxGeometry args={[0.08, podiumH * 0.78, 0.08]} />
+          <meshStandardMaterial color="#14110c" emissive={gold} emissiveIntensity={closed ? 0 : 0.45} />
+        </mesh>
+      ))}
+      {windowCols.map((x) =>
+        windowRows.map((y) => (
+          <mesh key={`${x}-${y}`} position={[x, y, podiumD / 2 + 0.02]}>
+            <boxGeometry args={[0.16, 0.22, 0.03]} />
+            <meshBasicMaterial color={closed ? '#2a3348' : '#f4f0d4'} toneMapped={false} />
+          </mesh>
+        )),
+      )}
+
+      {!vista && <TowerHologram bot={bot} index={index} height={roofY + 0.35} onSelect={onSelect} />}
+    </group>
+  )
+}
+
 export function Tower(props: Props) {
+  if (props.bot.id === 'wall-street') return <WallStreetHall {...props} />
   if (isSupportTower(props.bot.id)) return <SupportRelay {...props} />
   return <TradeTower {...props} />
 }

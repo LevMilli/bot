@@ -8,7 +8,7 @@ import {
   pnlTone,
   statusLabel,
 } from '../data/format'
-import { isResearchTower, isSupportTower } from '../data/floorMap'
+import { isResearchTower, isStaffSupport, isSupportTower } from '../data/floorMap'
 import type { BotRow } from '../types'
 
 type Props = {
@@ -75,9 +75,17 @@ function TowerTab({
   const color = beamColorFor(bot.id, index)
   const closed = towerClosed(bot)
   const status = statusLabel(bot)
-  const supportIdle = isResearchTower(bot.id) && !closed && !bookPnlApplies(bot)
+  const staff = isStaffSupport(bot.id)
+  const supportIdle = (isResearchTower(bot.id) || staff) && !closed && !bookPnlApplies(bot)
   const tone = closed || supportIdle ? 'flat' : pnlTone(hologramPnlValue(bot))
-  const figure = supportIdle ? supportHeadline(bot) : closed ? 'closed' : hologramPnl(bot)
+  const desks = bot.traders && bot.traders >= 100 ? bot.traders : 120
+  const figure = closed
+    ? 'closed'
+    : staff
+      ? `6 desks · ${desks}`
+      : supportIdle
+        ? supportHeadline(bot)
+        : hologramPnl(bot)
   return (
     <li>
       <button
@@ -102,6 +110,7 @@ function TowerTab({
             )}
           </span>
           {!supportIdle && <span className="tower-tab-status">{status}</span>}
+          {staff && !closed && <span className="tower-tab-status">One book. It does not trade.</span>}
         </span>
       </button>
     </li>
@@ -137,11 +146,9 @@ export function TowerRail({ bots, onSelect }: Props) {
   if (!bots.length) return null
 
   const live = bots.filter((b) => !towerClosed(b)).length
-  const research = [
-    ...bots.filter((bot) => isSupportTower(bot.id)),
-    ...bots.filter((bot) => bot.id === 'wall-street'),
-  ]
-  const trading = bots.filter((bot) => !isResearchTower(bot.id))
+  const research = bots.filter((bot) => isSupportTower(bot.id))
+  const support = bots.filter((bot) => isStaffSupport(bot.id))
+  const trading = bots.filter((bot) => !isResearchTower(bot.id) && !isStaffSupport(bot.id))
 
   return (
     <div className={`tower-menu ${open ? 'open' : ''}`} ref={rootRef}>
@@ -191,6 +198,15 @@ export function TowerRail({ bots, onSelect }: Props) {
           <TowerGroup
             label="Research"
             bots={research}
+            all={bots}
+            onSelect={(id) => {
+              setOpen(false)
+              onSelect(id)
+            }}
+          />
+          <TowerGroup
+            label="Support"
+            bots={support}
             all={bots}
             onSelect={(id) => {
               setOpen(false)
