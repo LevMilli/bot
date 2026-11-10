@@ -4,6 +4,7 @@ import * as THREE from 'three'
 import type { Group, InstancedMesh, Mesh } from 'three'
 import type { BotRow } from '../types'
 import { beamColorFor } from '../data/format'
+import { isSupportTower } from '../data/floorMap'
 import { TowerHologram } from '../hud/Holograms'
 
 type Props = {
@@ -87,7 +88,7 @@ function WindowInstances({
   )
 }
 
-export function Tower({ bot, index, position, selected, onSelect, vista = false }: Props) {
+function TradeTower({ bot, index, position, selected, onSelect, vista = false }: Props) {
   const beamGroup = useRef<Group>(null)
   const beamCore = useRef<Mesh>(null)
   const color = beamColorFor(bot.id, index)
@@ -221,6 +222,116 @@ export function Tower({ bot, index, position, selected, onSelect, vista = false 
       )}
     </group>
   )
+}
+
+/**
+ * Support sleeves stay in the plaza palette — black mass, their own neon —
+ * but the silhouette is a short relay drum and dish, not a square beam tower.
+ */
+function SupportRelay({ bot, index, position, selected, onSelect, vista = false }: Props) {
+  const halo = useRef<Mesh>(null)
+  const dish = useRef<Group>(null)
+  const color = beamColorFor(bot.id, index)
+  const offline = bot.present === false
+  const height = offline ? 3.15 : 4.5
+  const radius = 1.05
+  const bands = [0.32, 0.58, 0.84]
+
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime()
+    if (dish.current) dish.current.rotation.y = t * 0.28 + index
+    if (halo.current) {
+      halo.current.rotation.z = t * 0.45 + index
+      const mat = halo.current.material as { opacity?: number }
+      if (mat.opacity != null) mat.opacity = offline ? 0.12 : 0.55 + Math.sin(t * 1.7 + index) * 0.28
+    }
+  })
+
+  const pick = vista
+    ? {}
+    : {
+        onClick: (e: { stopPropagation: () => void }) => {
+          e.stopPropagation()
+          onSelect(bot.id)
+        },
+        onPointerOver: () => {
+          document.body.style.cursor = 'pointer'
+        },
+        onPointerOut: () => {
+          document.body.style.cursor = 'default'
+        },
+      }
+
+  return (
+    <group position={position}>
+      <mesh position={[0, 0.04, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[radius + 0.62, 8]} />
+        <meshStandardMaterial color="#050510" emissive={color} emissiveIntensity={0.16} />
+      </mesh>
+      <mesh position={[0, 0.055, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[radius + 0.28, radius + 0.5, 8]} />
+        <meshBasicMaterial color={color} transparent opacity={0.7} toneMapped={false} />
+      </mesh>
+
+      <mesh position={[0, height / 2, 0]} castShadow {...pick}>
+        <cylinderGeometry args={[radius, radius * 1.06, height, 8]} />
+        <meshStandardMaterial
+          color={offline ? '#06050c' : '#07060f'}
+          emissive={selected ? color : '#080814'}
+          emissiveIntensity={selected ? 0.34 : offline ? 0.03 : 0.07}
+          roughness={0.72}
+          metalness={0.28}
+        />
+      </mesh>
+
+      {bands.map((t) => (
+        <mesh key={t} position={[0, height * t, 0]}>
+          <cylinderGeometry args={[radius + 0.045, radius + 0.045, 0.07, 8]} />
+          <meshBasicMaterial
+            color={offline ? '#2a3348' : color}
+            transparent
+            opacity={offline ? 0.35 : 0.92}
+            toneMapped={false}
+          />
+        </mesh>
+      ))}
+
+      <mesh position={[0, height + 0.08, 0]}>
+        <cylinderGeometry args={[radius * 0.42, radius * 0.72, 0.18, 8]} />
+        <meshStandardMaterial color="#0c0c14" emissive={color} emissiveIntensity={offline ? 0.15 : 0.65} />
+      </mesh>
+
+      <group ref={dish} position={[0, height + 0.72, 0]}>
+        <mesh rotation={[Math.PI, 0, 0]} position={[0, 0.16, 0]}>
+          <coneGeometry args={[0.78, 0.28, 8, 1, true]} />
+          <meshStandardMaterial
+            color="#101018"
+            emissive={color}
+            emissiveIntensity={offline ? 0.12 : 0.55}
+            metalness={0.45}
+            roughness={0.32}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+        <mesh position={[0, 0.02, 0]}>
+          <cylinderGeometry args={[0.045, 0.045, 0.55, 8]} />
+          <meshBasicMaterial color={offline ? '#2a3348' : '#f4f7ff'} toneMapped={false} />
+        </mesh>
+      </group>
+
+      <mesh ref={halo} position={[0, height + 1.28, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.92, 0.03, 8, 28]} />
+        <meshBasicMaterial color={color} transparent opacity={0.8} depthWrite={false} toneMapped={false} />
+      </mesh>
+
+      {!vista && <TowerHologram bot={bot} index={index} height={height + 1.15} onSelect={onSelect} />}
+    </group>
+  )
+}
+
+export function Tower(props: Props) {
+  if (isSupportTower(props.bot.id)) return <SupportRelay {...props} />
+  return <TradeTower {...props} />
 }
 
 /** Dense filler skyscraper without hologram / click — packs the plaza like the refs. */

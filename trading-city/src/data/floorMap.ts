@@ -91,6 +91,11 @@ export function floorForBot(botId: string): FloorDef | null {
   return FLOORS.find((f) => f.offices.some((o) => o.botId === botId)) || null
 }
 
+/** Research-helpers floor. These sit in the same tower menu, under the trading book. */
+export function isSupportTower(botId: string): boolean {
+  return floorForBot(botId)?.id === '4'
+}
+
 export function parseCityHash(hash: string): {
   view: 'plaza' | 'bank' | 'floor' | 'office' | 'boss'
   floorId?: FloorId

@@ -7,11 +7,104 @@ import {
   pnlTone,
   statusLabel,
 } from '../data/format'
+import { isSupportTower } from '../data/floorMap'
 import type { BotRow } from '../types'
 
 type Props = {
   bots: BotRow[]
   onSelect: (id: string) => void
+}
+
+/** A zero or missing realized figure is an empty book, not a result. */
+function bookPnlApplies(bot: BotRow): boolean {
+  if ((bot.open_count || 0) > 0) return true
+  if (bot.history?.length || bot.trades?.length) return true
+  if (bot.today != null && Number(bot.today) !== 0) return true
+  if (bot.realized != null && Number(bot.realized) !== 0) return true
+  return false
+}
+
+/** Support sleeves often have no paper book. Say what they are waiting on. */
+function supportHeadline(bot: BotRow): string {
+  const raw = statusLabel(bot)
+  const low = raw.toLowerCase()
+  if (low.includes('sharp')) return 'Waiting on sharp quotes'
+  if (low.includes('fedwatch') || low.includes('fed watch')) return 'Waiting on FedWatch quotes'
+  const cleaned = raw
+    .replace(/\s*\(no invent\)\s*/gi, '')
+    .replace(/\.json\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return cleaned || 'No paper book yet'
+}
+
+function TowerGroup({
+  label,
+  bots,
+  all,
+  onSelect,
+}: {
+  label: string
+  bots: BotRow[]
+  all: BotRow[]
+  onSelect: (id: string) => void
+}) {
+  if (!bots.length) return null
+  return (
+    <section className="tower-menu-group" aria-label={label}>
+      <h3 className="tower-menu-heading">{label}</h3>
+      <ul className="tower-menu-list">
+        {bots.map((bot) => (
+          <TowerTab key={bot.id} bot={bot} index={Math.max(0, all.indexOf(bot))} onSelect={onSelect} />
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+function TowerTab({
+  bot,
+  index,
+  onSelect,
+}: {
+  bot: BotRow
+  index: number
+  onSelect: (id: string) => void
+}) {
+  const color = beamColorFor(bot.id, index)
+  const offline = bot.present === false
+  const status = statusLabel(bot)
+  const supportIdle = isSupportTower(bot.id) && !offline && !bookPnlApplies(bot)
+  const tone = offline || supportIdle ? 'flat' : pnlTone(hologramPnlValue(bot))
+  const figure = supportIdle ? supportHeadline(bot) : offline ? 'offline' : hologramPnl(bot)
+  return (
+    <li>
+      <button
+        type="button"
+        className={`tower-tab ${offline ? 'offline' : ''}`}
+        style={{ ['--tab-beam' as string]: color }}
+        onClick={() => onSelect(bot.id)}
+        title={status}
+      >
+        <span className="tower-tab-beam" aria-hidden />
+        <span className="tower-tab-body">
+          <span className="tower-tab-name">{bot.name}</span>
+          <span className="tower-tab-meta">
+            <span className={supportIdle ? 'tower-tab-pnl tower-tab-wait' : `tower-tab-pnl tone-${tone}`}>
+              {figure}
+            </span>
+            {!supportIdle && !offline && bot.open_count != null && bot.open_count > 0 && (
+              <span className="tower-tab-open">open {bot.open_count}</span>
+            )}
+            {!supportIdle && !offline && bot.cash != null && (
+              <span className="tower-tab-cash">{money(bot.cash)}</span>
+            )}
+          </span>
+          {!supportIdle && <span className="tower-tab-status">{status}</span>}
+        </span>
+      </button>
+    </li>
+  )
 }
 
 /**
@@ -77,45 +170,24 @@ export function TowerRail({ bots, onSelect }: Props) {
 
       {open && (
         <nav className="tower-menu-panel" aria-label="Paper towers" id={listId}>
-          <ul className="tower-menu-list">
-            {bots.map((bot, i) => {
-              const color = beamColorFor(bot.id, i)
-              const offline = bot.present === false
-              const tone = offline ? 'flat' : pnlTone(hologramPnlValue(bot))
-              const status = statusLabel(bot)
-              return (
-                <li key={bot.id}>
-                  <button
-                    type="button"
-                    className={`tower-tab ${offline ? 'offline' : ''}`}
-                    style={{ ['--tab-beam' as string]: color }}
-                    onClick={() => {
-                      setOpen(false)
-                      onSelect(bot.id)
-                    }}
-                    title={status}
-                  >
-                    <span className="tower-tab-beam" aria-hidden />
-                    <span className="tower-tab-body">
-                      <span className="tower-tab-name">{bot.name}</span>
-                      <span className="tower-tab-meta">
-                        <span className={`tower-tab-pnl tone-${tone}`}>
-                          {offline ? 'offline' : hologramPnl(bot)}
-                        </span>
-                        {!offline && bot.open_count != null && bot.open_count > 0 && (
-                          <span className="tower-tab-open">open {bot.open_count}</span>
-                        )}
-                        {!offline && bot.cash != null && (
-                          <span className="tower-tab-cash">{money(bot.cash)}</span>
-                        )}
-                      </span>
-                      <span className="tower-tab-status">{status}</span>
-                    </span>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
+          <TowerGroup
+            label="Trading"
+            bots={bots.filter((bot) => !isSupportTower(bot.id))}
+            all={bots}
+            onSelect={(id) => {
+              setOpen(false)
+              onSelect(id)
+            }}
+          />
+          <TowerGroup
+            label="Support"
+            bots={bots.filter((bot) => isSupportTower(bot.id))}
+            all={bots}
+            onSelect={(id) => {
+              setOpen(false)
+              onSelect(id)
+            }}
+          />
         </nav>
       )}
     </div>
