@@ -2068,6 +2068,27 @@ Phase 8 helper evidence is **COMPLETE** for paper observe. Economic exit (≥1 h
 
 Phase 10 ruin drills & harvest is **COMPLETE** for paper observe. Economic exit (one full disaster drill practiced this Chicago month + harvest rule visible) is `economic_pass` — ops proof on the live board; do not invent drills or force harvest on red weeks. **P9 LIVE stays blocked.**
 
+### Phase 11 continuous hillclimb gate — COMPLETE
+
+| Ticket | Where |
+| --- | --- |
+| Formal hillclimb-gate certifier | `desk_roi_plan.phase11_hillclimb_gate` |
+| Allowlist + NONE | `HILLCLIMB_ALLOWLIST` · `VOL_SAFE` / `HIT_FOR_BIG` / `venue_min_edge_btc` / `min_cushion_btc` / `kelly_fraction` |
+| Raise-only floors | `venue_min_edge_btc` · `min_cushion_btc` refuse soften |
+| One-lever discipline | `hillclimb_one_lever_discipline` · midweek thrash blocked |
+| Sunday review gate | `sunday_packet_review_status` (#901) before non-NONE pick |
+| Kill → staff demote | `hillclimb_kill_status` · `staff_hillclimb_kill_postmortem` (`auto_revert=False`) |
+| Idea review 90d | `idea_review_status` · `IDEA_REVIEW_DAYS=90` |
+| Quarterly W rebaseline | `quarterly_rebaseline_status` |
+| Daily R locks | sports **1.5R** · commodity **2.0R ($40)** |
+| Masters | `roi_plan.phase11_hillclimb` (+ hillclimb lever / kill / sunday) |
+| CLI / Makefile | `make living-phase11-gate` · `staff_living_status phase11-gate` |
+| Money pulse | `phase11_hillclimb` on `living-money-pulse` |
+| Tests | `test_phase11_hillclimb_gate.py` |
+| Floors / LIVE | never softens floors; never arms `LIVE_ORDERS`; never auto-picks / auto-reverts; never parallel levers |
+
+Phase 11 continuous hillclimb is **COMPLETE** for paper observe. Plan exit gate is **None** (forever steady state). `economic_pass` = active lever (or NONE) this Chicago week — ops forever. **P9 LIVE stays blocked.**
+
 ### Bulk E3–E7 engineerable (Nov 7)
 
 | Ticket | Where |
