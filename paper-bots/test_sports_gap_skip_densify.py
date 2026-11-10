@@ -236,13 +236,16 @@ class SportsGapSkipDensify(unittest.TestCase):
         src = GAP.read_text(encoding="utf-8")
         cool_idx = src.find('adverse_cool_blocks(DESK_ROOT, "sports-gap")')
         self.assertGreater(cool_idx, 0)
-        gate_chunk = src[cool_idx:cool_idx + 2200]
+        gate_chunk = src[cool_idx:cool_idx + 3200]
         self.assertIn("sports adverse-cool densify", gate_chunk)
         self.assertIn("sports stale-world densify", gate_chunk)
+        self.assertIn("sports entry-gate densify", gate_chunk)
         self.assertIn("_densify_gate_skip", gate_chunk)
         self.assertIn("gate_lock", gate_chunk)
         self.assertIn("adverse cool", gate_chunk)
         self.assertIn("stale-world", gate_chunk)
+        self.assertIn("entry_gate", gate_chunk)
+        self.assertIn("daily loss", gate_chunk)
         # CARD prepend: cool/stale beat evaluate noise.
         gap = _load_gap()
         cool_card = gap._card_line({
@@ -277,6 +280,21 @@ class SportsGapSkipDensify(unittest.TestCase):
         self.assertIn("settle-only", msg.lower())
         self.assertEqual(desk_more.classify_skip(msg), "budget")
         self.assertEqual(desk_more.stable_skip_code("budget"), "BUDGET")
+
+    def test_entry_gate_card_densify_beats_gap_noise(self):
+        """#531 twin: sports entry_gate / daily-loss must densify CARD ahead of gap noise."""
+        gap = _load_gap()
+        card = gap._card_line({
+            "trades": [],
+            "skips": [
+                "Daily loss stop is hit ($150.00 against $150.00).",
+                "gap < 6 (accurate) - no trade",
+            ],
+            "live_games": 3,
+            "matched": 3,
+        })
+        self.assertIn("daily loss", card.lower())
+        self.assertNotIn("gap < 6", card)
 
     def test_cool_stale_classify_not_capacity_other(self):
         """Cool→LEARN and stale→DATA so fee-clear zero-buy taxonomy stays honest."""

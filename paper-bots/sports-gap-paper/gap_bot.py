@@ -2029,11 +2029,16 @@ def run():
             # Prepend so CARD densifies stale ahead of evaluate noise (#519 leftover).
             _densify_gate_skip(stale, note="sports stale-world densify")
             max_buys_eff = 0
+        # Prefer-1: densify real entry_gate / daily-loss reason (BTC/CMD #531 twin).
+        if entries_off:
+            lines.append(f"| {ts} | | | | | | | | {entries_off} |")
+            _densify_gate_skip(entries_off, note="sports entry-gate densify")
+            max_buys_eff = 0
         r_block = desk_roi_plan.daily_r_blocks("sports-gap", red_pnl)
         if r_block:
             lines.append(f"| {ts} | | | | | | | | {r_block} |")
             # Prepend so CARD/why densify settle-only ahead of evaluate/cool noise (#482 twin).
-            # Settle-only insert last so it stays skips[0] over cool/stale.
+            # Settle-only insert last so it stays skips[0] over cool/stale/entry.
             _densify_gate_skip(r_block, note="sports daily-r densify")
             max_buys_eff = 0
     except Exception:
@@ -2043,9 +2048,12 @@ def run():
         row, gtxt = c["row"], c["gtxt"]
         reason = None
         if buys_this_check >= max_buys_eff:
-            # Prefer-1: gate (settle-only / cool / stale) zeroed the cap — do not
-            # invent capacity skip into brain/Learning while CARD names the gate.
-            gate_keys = ("settle-only", "adverse cool", "stale-world", "clock-skew")
+            # Prefer-1: gate (settle-only / cool / stale / entry) zeroed the cap —
+            # do not invent capacity skip into brain while CARD names the gate.
+            gate_keys = (
+                "settle-only", "adverse cool", "stale-world", "clock-skew",
+                "entry_gate", "daily loss", "max open risk", "max open positions",
+            )
             gate_hits = [
                 str(s)
                 for s in (summary_out.get("skips") or [])
