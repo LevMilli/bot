@@ -351,13 +351,21 @@ BOTS = (
         "folder": "wall-street-paper",
         "script": "bot.py",
         "blurb": (
-            "One paper floor with 120 traders. They are staff, not 120 books. "
-            "The floor does not buy and spends no desk cash."
+            "One paper floor. Six desks, 120 staff, one book. "
+            "The desks do not buy and spend no desk cash."
         ),
         "state": "paper_account.json",
         "kind": "floor",
         "log": "",
         "traders": 120,
+        "departments": (
+            {"id": "quote", "name": "Quote", "seats": 20, "job": "No client flow arrives, so this desk does not quote."},
+            {"id": "research", "name": "Research", "seats": 20, "job": "Writes the skip in one sentence a person can check."},
+            {"id": "risk", "name": "Risk", "seats": 20, "job": "Holds the veto. A buy on this floor is a mistake."},
+            {"id": "ledger", "name": "Ledger", "seats": 20, "job": "Cash stays at 0 and the position list stays empty."},
+            {"id": "control", "name": "Control", "seats": 20, "job": "Paper only. Keeps a key off this floor."},
+            {"id": "book", "name": "The book", "seats": 20, "job": "The only book on the floor, and it stays flat."},
+        ),
         "empty": "No paper account yet. A check writes paper_account.json.",
         "shadow_only": True,
     },
@@ -545,7 +553,7 @@ BOT_PLANS = {
     },
     "wall-street": {
         "buy": [
-            "The floor does not buy. 120 traders are staff on one book, not 120 strategies",
+            "The floor does not buy. Six desks and 120 staff share one book, not 120 strategies",
             "Shadow display only — spends no desk cash and takes no tower risk share",
             "A check always skips",
         ],
@@ -1898,7 +1906,8 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
             view["empty"] = spec["empty"]
             view["traders"] = traders
         view["skip"] = "floor does not trade"
-        line = f"{view['traders']} traders on the floor. One book. It does not trade."
+        view["departments"] = [dict(row) for row in (spec.get("departments") or ())]
+        line = f"{view['traders']} traders on six desks. One book. It does not trade."
         view["why"] = card_copy(summary) or line
         return _finish_bot(view, spec, root)
     if spec["kind"] in ("btc", "spot"):
@@ -5636,7 +5645,8 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
     if spec.get("id") == "wall-street":
         n = int(view.get("traders") or spec.get("traders") or 120)
         view["traders"] = n
-        view["idle_copy"] = f"{n} traders on the floor. One book. It does not trade."
+        view["departments"] = [dict(row) for row in (spec.get("departments") or ())]
+        view["idle_copy"] = f"{n} traders on six desks. One book. It does not trade."
         if not view.get("why"):
             view["why"] = view["idle_copy"]
         view["skip"] = view.get("skip") or "floor does not trade"

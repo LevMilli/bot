@@ -24,7 +24,14 @@ class WallStreetTests(unittest.TestCase):
         self.assertEqual(row["action"], "skip")
         self.assertEqual(row["traders"], 120)
         self.assertIn("120 traders", row["reason"])
+        self.assertIn("six desks", row["reason"])
         self.assertIn("does not trade", row["reason"])
+        desks = row["departments"]
+        self.assertEqual([d["id"] for d in desks], ["quote", "research", "risk", "ledger", "control", "book"])
+        self.assertEqual(sum(d["seats"] for d in desks), 120)
+        for desk in desks:
+            self.assertTrue(str(desk["job"]).strip())
+            self.assertNotIn("strategy", desk["job"].lower())
 
     def test_desk_row_is_shadow_and_flat(self):
         import pimp_desk
@@ -50,5 +57,12 @@ class WallStreetTests(unittest.TestCase):
         self.assertIsNone(row["venue_min_edge"])
         self.assertEqual(row["sizing_mode"], "none")
         self.assertEqual(row["capital_weight"], 0)
+        desks = row["departments"]
+        self.assertEqual(sum(d["seats"] for d in desks), 120)
+        self.assertEqual(
+            [(d["id"], d["seats"], d["job"]) for d in desks],
+            [(d["id"], d["seats"], d["job"]) for d in spec["departments"]],
+        )
+        self.assertIn("six desks", row["why"])
         desk_ids = [b["id"] for b in snap["bots"] if not b.get("shadow_only")]
         self.assertNotIn("wall-street", desk_ids)

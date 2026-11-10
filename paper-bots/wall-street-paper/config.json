@@ -3,5 +3,6 @@
   "live_orders": false,
   "shadow_only": true,
   "traders": 120,
-  "note": "Display floor. One book. The 120 traders are staff, not strategies. A check always skips."
+  "desks": 6,
+  "note": "Display floor. Six desks, 120 staff, one book. A check always skips."
 }

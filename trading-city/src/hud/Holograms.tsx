@@ -29,7 +29,7 @@ export function TowerHologram({
   const pnlToneClass = offline ? 'flat' : pnlTone(hologramPnlValue(bot))
   const floorLabel =
     bot.id === 'wall-street'
-      ? `${bot.traders && bot.traders >= 100 ? bot.traders : 120} traders`
+      ? `6 desks · ${bot.traders && bot.traders >= 100 ? bot.traders : 120}`
       : null
 
   return (

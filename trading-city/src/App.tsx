@@ -480,7 +480,7 @@ export default function App() {
               <div className="office-title">
                 <span className="screen-hint">
                   {selected.id === 'wall-street'
-                    ? `${selected.traders && selected.traders >= 100 ? selected.traders : 120} traders · one book · paper only · drag to look`
+                    ? `${selected.departments?.length || 6} desks · ${selected.traders && selected.traders >= 100 ? selected.traders : 120} staff · one book · paper only · drag to look`
                     : walkHint || 'W/S walk · A/D turn · Space jump · mouse look'}
                 </span>
               </div>
