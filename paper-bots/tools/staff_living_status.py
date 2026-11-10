@@ -1770,6 +1770,8 @@ def main() -> int:
             # Staff SLA pack — observe / no-force; never tip invent; LIVE off.
             "hillclimb-pack", "hillclimb-pick", "hillclimb-pick-log",
             "hillclimb-sunday-review", "hillclimb-dry-run", "hillclimb-evidence",
+            "hillclimb-e9-week", "hillclimb-daily", "hillclimb-broadcast",
+            "hillclimb-kill-postmortem", "hillclimb-lock-win", "hillclimb-discipline",
             "promote-ready-pack", "staff-promote-batch-ready",
             "disarm-thin", "staff-disarm-thin",
             "dual-control-status", "dual-control-observe",
@@ -4642,6 +4644,43 @@ def main() -> int:
         out = desk_roi_plan.hillclimb_lever_evidence_templates()
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
+    if args.action == "hillclimb-e9-week":
+        out = desk_roi_plan.hillclimb_e9_week_board(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "hillclimb-daily":
+        out = desk_roi_plan.hillclimb_lever_daily_check(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "hillclimb-broadcast":
+        out = desk_roi_plan.hillclimb_lever_masters_broadcast(root)
+        if args.discord:
+            print(out.get("discord") or out.get("soft_copy") or "")
+        else:
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0
+    if args.action == "hillclimb-discipline":
+        out = desk_roi_plan.hillclimb_one_lever_discipline(root)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "hillclimb-kill-postmortem":
+        out = desk_roi_plan.staff_hillclimb_kill_postmortem(
+            root,
+            who=str(getattr(args, "who", None) or "staff-cli"),
+            note=str(getattr(args, "note", None) or "kill postmortem"),
+            demote=True,
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
+    if args.action == "hillclimb-lock-win":
+        out = desk_roi_plan.staff_hillclimb_lock_win(
+            root,
+            who=str(getattr(args, "who", None) or "staff-cli"),
+            note=str(getattr(args, "note", None) or "lock win"),
+            lever=str(getattr(args, "soft", None) or ""),
+        )
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("ok") else 2
     if args.action == "promote-ready-pack":
         bots = []
         try:

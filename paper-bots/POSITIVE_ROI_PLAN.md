@@ -2034,6 +2034,18 @@ Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers/chi
 | NONE lever (observation continues) | `staff_pick_hillclimb_lever(..., "NONE")` |
 | Pack surfaces | `hillclimb_pick_evidence_pack` includes sunday_review + templates |
 
+### E9 lever-week activate / broadcast / daily (#924–931)
+
+| Ticket | Where |
+| --- | --- |
+| Single-entry activation assert | `hillclimb_lever_activation_board` (#924) |
+| Masters broadcast soft_copy | `hillclimb_lever_masters_broadcast` · `make living-hillclimb-broadcast` (#925) |
+| Daily M1/M3/fills + week-2 kill | `hillclimb_lever_daily_check` · `make living-hillclimb-daily` (#926/#927) |
+| Kill postmortem + demote | `staff_hillclimb_kill_postmortem` · `make living-hillclimb-kill-postmortem` (#928) |
+| Win lock journal | `staff_hillclimb_lock_win` · `make living-hillclimb-lock-win` (#929) |
+| One-lever / allowlist discipline | `hillclimb_one_lever_discipline` (#930/#931) |
+| Combined board | `hillclimb_e9_week_board` · Masters `roi_plan.hillclimb_e9_week` |
+
 ### Next
 
 | Ticket | Where |
