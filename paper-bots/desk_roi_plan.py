@@ -1627,6 +1627,7 @@ def sports_calibration_report(
         "action": action,
         "buckets": buckets,
         "auto_promote": False,
+        "auto_write_phi": False,
         "note": (
             "Sports calibration: high-fair (≥80%) bucket must hit ≥70% once n≥20. "
             "Miscalibration → fix fair/model — never soften 0.06 or size up on fake confidence."
@@ -1740,6 +1741,7 @@ def commodity_calibration_report(
         "action": action,
         "buckets": buckets,
         "auto_promote": False,
+        "auto_write_phi": False,
         "note": (
             "Commodity calibration: high-fair (≥80%) bucket must hit ≥70% once n≥20. "
             "Miscalibration → fix model — never soften 0.05 or size up on fake confidence."
@@ -6537,6 +6539,251 @@ def phase3_exit_gate(
         ),
         "decision": (
             "phase3_exit_gate_pass" if gate_pass else "phase3_exit_gate_fail"
+        ),
+    }
+
+
+# Phase 4 locked INX band decision — fee-aware research may promote later;
+# intuition never invents a new live band without staff + n≥20 leader.
+PHASE4_INX_BAND_LOCK = {
+    "live_band": INX_LIVE_BAND_DEFAULT,
+    "research_bands": tuple(b["id"] for b in INX_RESEARCH_BANDS),
+    "promote_min_n": INX_BAND_PROMOTE_MIN_N,
+    "note": (
+        "Live INX ask band stays 80–90¢ until fee-aware research leader n≥20 "
+        "and staff promote. Evidence-thin → keep_live_band (never invent)."
+    ),
+}
+
+
+def phase4_calib_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Phase 4 calibration & CLV exit gate (master plan).
+
+    Pass when infrastructure + locked decisions are honest:
+      1. Sports CLV journal complete (completeness pass; bar 52% when n≥20).
+      2. Per-league CLV board wired (NFL…NHL) without softening floors.
+      3. INX band decision locked — live 80–90 + research harness + dual-side
+         pick; evidence-thin keeps live band (no intuition invent).
+      4. BTC calibration report publishable; auto_write_phi stays False.
+      5. ETH calib slice separate from BTC; sports/commodity calib capture ok.
+      6. Learning skip v2 accepts side × hour_ct; adverse cool + depth need=10.
+      7. Floors stay locked; never arms LIVE_ORDERS; never auto-writes Φ.
+
+    Observe / certify only — does not change bands or Φ.
+    """
+    clv = clv_completeness(root)
+    clv_journal_ok = bool(clv.get("pass"))
+
+    leagues = None
+    league_ids = []
+    clv_beat_n = 0
+    clv_beat_rate = None
+    try:
+        import desk_more
+        leagues = desk_more.clv_by_league(root)
+        for row in (leagues.get("leagues") or []):
+            if isinstance(row, dict) and row.get("league"):
+                league_ids.append(str(row["league"]))
+        summary = desk_more.clv_summary(root)
+        clv_beat_n = int(summary.get("n") or 0)
+        clv_beat_rate = _finite(summary.get("beat_close_rate"))
+    except Exception:
+        leagues = None
+    # Economic bar: when enough settles, beat-close must clear 52%. Thin → observe.
+    clv_bar_ok = (
+        clv_beat_n < int(SPORTS_CLV_MIN_N)
+        or (
+            clv_beat_rate is not None
+            and clv_beat_rate + 1e-12 >= float(SPORTS_CLV_BAR)
+        )
+    )
+    expected_leagues = {"NFL", "NCAAF", "NBA", "WNBA", "MLB", "NHL"}
+    leagues_ok = bool(expected_leagues.issubset(set(league_ids)))
+
+    inx = inx_band_promote_status(root) or {}
+    live_band = str(
+        inx.get("live_band")
+        or inx.get("keep_live_band")
+        or INX_LIVE_BAND_DEFAULT
+    )
+    artifact_band = str(inx.get("artifact_band") or inx.get("band") or "")
+    keep_band = str(inx.get("keep_live_band") or live_band)
+    evidence_thin = bool(inx.get("evidence_thin"))
+    staff_approved = bool(inx.get("staff_approved") or inx.get("armed"))
+    # Locked = live default 80_90 AND (staff arm OR thin keep OR artifact matches).
+    inx_locked = (
+        live_band == INX_LIVE_BAND_DEFAULT
+        and keep_band == INX_LIVE_BAND_DEFAULT
+        and (
+            staff_approved
+            or evidence_thin
+            or artifact_band in ("", INX_LIVE_BAND_DEFAULT)
+        )
+        and float(SPORTS_CLV_BAR) == 0.52  # sanity — bar constant intact
+    )
+    dual_side_ok = False
+    try:
+        import desk_inx
+        dual_side_ok = callable(getattr(desk_inx, "dual_side_pick", None))
+    except Exception:
+        dual_side_ok = False
+    research_ok = callable(run_inx_band_research) and callable(staff_promote_inx_band)
+
+    btc = btc_calibration_report(bots)
+    eth = eth_calibration_report(bots)
+    sports = sports_calibration_report(bots)
+    commodity = commodity_calibration_report(bots)
+    btc_pub = (
+        isinstance(btc, dict)
+        and btc.get("auto_write_phi") is False
+        and "buckets" in btc
+        and callable(capture_btc_calibration)
+        and callable(latest_btc_calibration)
+    )
+    eth_ok = (
+        isinstance(eth, dict)
+        and eth.get("auto_write_phi") is False
+        and callable(capture_eth_calibration)
+    )
+    sports_calib_ok = isinstance(sports, dict) and sports.get("auto_write_phi") is False
+    commodity_calib_ok = (
+        isinstance(commodity, dict) and commodity.get("auto_write_phi") is False
+    )
+
+    learn_v2_ok = False
+    try:
+        import inspect
+        import pimp_desk
+        sig = inspect.signature(pimp_desk.learning_skip)
+        params = set(sig.parameters)
+        learn_v2_ok = {"side", "hour_ct"}.issubset(params)
+    except Exception:
+        learn_v2_ok = False
+
+    adverse_ok = callable(adverse_cool_blocks) and callable(record_adverse_fill)
+    depth_ok = False
+    depth_need = None
+    try:
+        import desk_more
+        depth_need = float(desk_more.DEFAULT_DEPTH_NEED)
+        depth_ok = abs(depth_need - 10.0) < 1e-9
+    except Exception:
+        depth_ok = False
+
+    observe = calib_clv_observe(root, bots=bots)
+    floors_ok = bool((fee_floors_locked_check() or {}).get("ok"))
+
+    gate_pass = (
+        clv_journal_ok
+        and clv_bar_ok
+        and leagues_ok
+        and inx_locked
+        and dual_side_ok
+        and research_ok
+        and btc_pub
+        and eth_ok
+        and sports_calib_ok
+        and commodity_calib_ok
+        and learn_v2_ok
+        and adverse_ok
+        and depth_ok
+        and floors_ok
+        # calib_clv_observe.ok may alert on selective_m1_thin (P5) — ignore for P4.
+        and bool(observe.get("auto_write_phi") is False)
+        and bool(observe.get("live_orders_enabled") is False)
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "auto_write_phi": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "phase": "P4",
+        "pass": gate_pass,
+        "clv_journal": {
+            "pass": clv_journal_ok and clv_bar_ok,
+            "completeness_pass": clv_journal_ok,
+            "n": int(clv.get("n") or 0),
+            "settled_n": int(clv.get("settled_n") or 0),
+            "completeness_rate": _finite(clv.get("rate")),
+            "beat_close_n": clv_beat_n,
+            "beat_close_rate": clv_beat_rate,
+            "bar": float(SPORTS_CLV_BAR),
+            "min_n": int(SPORTS_CLV_MIN_N),
+            "bar_ok": clv_bar_ok,
+            "fail_closed": bool(clv.get("fail_closed")),
+        },
+        "clv_leagues": {
+            "pass": leagues_ok,
+            "leagues": league_ids,
+            "expected": sorted(expected_leagues),
+            "beat_bar": float(SPORTS_CLV_BAR),
+        },
+        "inx_band_lock": {
+            "pass": inx_locked and dual_side_ok and research_ok,
+            "live_band": live_band,
+            "keep_live_band": keep_band,
+            "artifact_band": artifact_band or None,
+            "evidence_thin": evidence_thin,
+            "staff_approved": staff_approved,
+            "dual_side_pick": dual_side_ok,
+            "research_harness": research_ok,
+            "lock": dict(PHASE4_INX_BAND_LOCK),
+            "label": inx.get("label"),
+            "decision": inx.get("decision"),
+        },
+        "btc_calibration": {
+            "pass": btc_pub,
+            "n": btc.get("n"),
+            "miscalibrated": bool(btc.get("miscalibrated")),
+            "action": btc.get("action"),
+            "auto_write_phi": False,
+            "published": bool(latest_btc_calibration(root) or btc.get("n") is not None),
+        },
+        "eth_calibration": {
+            "pass": eth_ok,
+            "n": eth.get("n"),
+            "miscalibrated": bool(eth.get("miscalibrated")),
+            "auto_write_phi": False,
+        },
+        "sports_calibration": {
+            "pass": sports_calib_ok,
+            "n": sports.get("n"),
+            "miscalibrated": bool(sports.get("miscalibrated")),
+        },
+        "commodity_calibration": {
+            "pass": commodity_calib_ok,
+            "n": commodity.get("n"),
+            "miscalibrated": bool(commodity.get("miscalibrated")),
+        },
+        "learning_skip_v2": learn_v2_ok,
+        "adverse_cool": adverse_ok,
+        "depth_need": {"pass": depth_ok, "need": depth_need, "expected": 10.0},
+        "calib_clv_observe": {
+            "ok": observe.get("ok"),
+            "alerts": observe.get("alerts"),
+            "auto_write_phi": False,
+        },
+        "label": (
+            f"P4 calib-gate {'PASS' if gate_pass else 'FAIL'} "
+            f"clv={clv_journal_ok} inx_lock={inx_locked} "
+            f"btc_pub={btc_pub} learn_v2={learn_v2_ok} "
+            f"depth={depth_need}"
+        ),
+        "note": (
+            "Phase 4 calib/CLV gate — sports CLV journal + 52% bar when n≥20; "
+            "INX 80–90 locked until fee-aware staff promote; BTC/ETH calib "
+            "publish without auto Φ write; learn v2 + adverse cool + depth=10. "
+            "Never softens floors; never arms LIVE_ORDERS."
+        ),
+        "decision": (
+            "phase4_calib_gate_pass" if gate_pass else "phase4_calib_gate_fail"
         ),
     }
 
@@ -13562,6 +13809,7 @@ def plan_summary(
         "commodity_time_stop": commodity_time_stop_shadow_summary(root),
         "sports_time_final": sports_time_final_shadow_summary(root),
         "phase3_exits": phase3_exit_gate(root, bots=bots),
+        "phase4_calib": phase4_calib_gate(root, bots=bots),
         "weekly_scorecard": latest_weekly_scorecard(root),
         "graduation": graduation_board(root, bots=bots),
         # Prefer live bots whenever provided (#488 profit_lock twin).

@@ -684,9 +684,17 @@ def master_summary(
         except Exception:
             plan["phase3_exits"] = None
         try:
+            plan["phase4_calib"] = desk_roi_plan.phase4_calib_gate(root, bots=bots)
+        except Exception:
+            plan["phase4_calib"] = None
+        try:
             plan["exit_quality"] = desk_roi_plan.exit_quality_observe(root, bots=bots)
         except Exception:
             plan["exit_quality"] = None
+        try:
+            plan["calib_clv"] = desk_roi_plan.calib_clv_observe(root, bots=bots)
+        except Exception:
+            plan["calib_clv"] = None
         try:
             from datetime import datetime
             from zoneinfo import ZoneInfo
