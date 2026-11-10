@@ -103,13 +103,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DESK_ROOT = os.path.dirname(HERE)
 ACCOUNT = os.path.join(HERE, "paper_account.json")
 PAPER_CASH = 100.0
-# Dollar buy-in floor once the sleeve is ahead of its $100 start.
-# Kelly-lite, vol, the firm profit-lock, and the WTI↔Brent haircut were
-# printing ~$3.75 tickets on a book that is already green. Lift a cleared
-# ticket toward this floor. Never above this tower's open-risk share,
-# never above cash, and never in an extreme-vol regime. The 0.05 fee
-# floor and the 2.0R daily budget are not touched.
-GREEN_STAKE_MIN = 8.0
 
 
 def _desk():
@@ -769,60 +762,6 @@ def evaluate(m: dict, spot: float, edge_buf: float, book=None) -> dict:
     }
 
 
-def commodity_sleeve_equity(state: dict) -> float:
-    cash = float(state.get("cash") or 0)
-    open_cost = 0.0
-    for pos in state.get("open") or []:
-        if isinstance(pos, dict):
-            open_cost += float(pos.get("cost") or 0)
-    return round(cash + open_cost, 2)
-
-
-def commodity_green_stake(
-    stake: float,
-    state: dict,
-    plan: dict | None = None,
-    tower_left: float | None = None,
-) -> tuple[float, str]:
-    """Lift a cleared commodity ticket toward GREEN_STAKE_MIN when the sleeve is ahead.
-
-    Vol haircuts and the WTI↔Brent cut still run first. This floor does not
-    raise them past the tower's remaining open-risk share or past cash, and
-    it stays off when equity is back under the $100 start or vol is extreme.
-    """
-    try:
-        stake_n = float(stake)
-    except (TypeError, ValueError):
-        return 0.0, ""
-    if stake_n <= 0 or tower_left is None:
-        return round(max(0.0, stake_n), 2), ""
-    regime = ""
-    if isinstance(plan, dict):
-        regime = str((plan.get("vol") or {}).get("regime") or "")
-    if regime == "extreme":
-        return round(stake_n, 2), ""
-    equity = commodity_sleeve_equity(state)
-    if equity + 1e-9 < PAPER_CASH:
-        return round(stake_n, 2), ""
-    try:
-        left = float(tower_left)
-    except (TypeError, ValueError):
-        return round(stake_n, 2), ""
-    cash = float(state.get("cash") or 0)
-    target = min(max(stake_n, float(GREEN_STAKE_MIN)), left, cash)
-    if target + 1e-9 < stake_n:
-        target = stake_n
-    target = round(max(0.0, target), 2)
-    if target <= stake_n + 1e-9:
-        return round(stake_n, 2), ""
-    note = (
-        f"green sleeve ${equity:.2f} ≥ ${PAPER_CASH:.0f} "
-        f"→ buy-in ${stake_n:.2f} lifted to ${target:.2f} "
-        f"(floor ${GREEN_STAKE_MIN:.0f}, tower room ${left:.2f})"
-    )
-    return target, note
-
-
 def paper_buy(state: dict, ev: dict) -> str:
     none_msg = "No commodity paper buy."
     if ev.get("reasons"):
@@ -920,23 +859,6 @@ def paper_buy(state: dict, ev: dict) -> str:
                 plan["series_corr_haircut"] = hair
         except Exception:
             pass
-        tower_left = None
-        try:
-            import desk_more
-            tower_left = float(
-                desk_more.tower_budget_remaining(
-                    "commodity-15m", open_risk, cfg,
-                ).get("left")
-            )
-        except Exception:
-            tower_left = None
-        stake, press_note = commodity_green_stake(stake, state, plan, tower_left)
-        if press_note:
-            plan = dict(plan or {})
-            notes = list(plan.get("notes") or [])
-            notes.append(press_note)
-            plan["notes"] = notes
-            plan["commodity_green_stake"] = stake
         contracts = desk.contracts_for_stake(per, stake)
     except Exception as exc:
         return f"Desk sizing failed: {type(exc).__name__}"
