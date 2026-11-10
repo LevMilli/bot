@@ -96,6 +96,8 @@ def hillclimb_pick_evidence_pack(root: str | None = None) -> dict:
     needs = bool(status.get("needs_staff_pick"))
     kill_flag = bool(status.get("kill") or kill.get("kill"))
     thin = needs or kill_flag
+    sunday = plan.sunday_packet_review_status(root)
+    templates = plan.hillclimb_lever_evidence_templates()
     return {
         "paper_only": True,
         "fee_floors_locked": True,
@@ -106,11 +108,16 @@ def hillclimb_pick_evidence_pack(root: str | None = None) -> dict:
         "auto_apply": False,
         "auto_promote": False,
         "live_orders_enabled": False,
-        "allowlist": sorted(plan.HILLCLIMB_ALLOWLIST.keys()),
+        "allowlist": sorted(plan.HILLCLIMB_ALLOWLIST.keys()) + [plan.HILLCLIMB_NONE_LEVER],
         "allowlist_detail": allow.get("levers"),
         "raise_only": [
             k for k, v in plan.HILLCLIMB_ALLOWLIST.items() if v.get("raise_only")
         ],
+        "evidence_templates": templates.get("templates"),
+        "dry_run_board": plan.hillclimb_dry_run_board(),
+        "sunday_review": sunday,
+        "sunday_reviewed": bool(sunday.get("reviewed")),
+        "none_ok": True,
         "active": status.get("active"),
         "week": status.get("week"),
         "needs_staff_pick": needs,
@@ -132,6 +139,10 @@ def hillclimb_pick_evidence_pack(root: str | None = None) -> dict:
             "status": "python3 tools/staff_hillclimb_pick.py status",
             "pack": "python3 tools/staff_hillclimb_pick.py pack",
             "pick": "python3 tools/staff_hillclimb_pick.py pick <lever> [--note ...]",
+            "pick_none": "python3 tools/staff_hillclimb_pick.py pick NONE --note why",
+            "sunday_review": (
+                "python3 tools/staff_living_status.py hillclimb-sunday-review"
+            ),
             "clear": "python3 tools/staff_hillclimb_pick.py clear",
             "log_accept": (
                 "python3 tools/staff_hillclimb_pick.py log accept "
@@ -145,7 +156,8 @@ def hillclimb_pick_evidence_pack(root: str | None = None) -> dict:
             "make_ready": "make living-hillclimb-pick-ready",
         },
         "note": (
-            "TC-151 evidence pack — staff picks one allowlisted lever per Chicago week. "
+            "TC-151 / E9 evidence pack — Sunday review (#901) before non-NONE pick; "
+            "templates + dry-run (#903–922); NONE valid (#923). "
             "Agent never auto-picks / auto-applies. Floors locked. LIVE off."
         ),
     }

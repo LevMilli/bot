@@ -2025,14 +2025,23 @@ Paper only. Floors locked. Soft-max tip invent EXHAUSTED — no tip wrappers/chi
 
 **Still ops-only:** labeled_n→30 needs market fills over tick loops — code densifies record/label/durability/surfaces only.
 
+### E9 hillclimb ritual + evidence templates (#901–923)
+
+| Ticket | Where |
+| --- | --- |
+| Sunday packet review gate before non-NONE pick | `staff_mark_sunday_packet_reviewed` / `sunday_packet_review_status` · `make living-hillclimb-sunday-review` |
+| Evidence templates + success/kill + dry-run | `hillclimb_lever_evidence_templates` / `hillclimb_dry_run_board` · `make living-hillclimb-evidence` |
+| NONE lever (observation continues) | `staff_pick_hillclimb_lever(..., "NONE")` |
+| Pack surfaces | `hillclimb_pick_evidence_pack` includes sunday_review + templates |
+
 ### Next
 
 | Ticket | Where |
 | --- | --- |
-| Staff pick hillclimb lever this Chicago week | TC-151 process — use evidence pack + `make living-hillclimb-pick HILLCLIMB_LEVER=…` |
+| Staff pick hillclimb lever this Chicago week | TC-151 process — Sunday review then `make living-hillclimb-pick HILLCLIMB_LEVER=…` (or NONE) |
 | Dual-control / LIVE_ORDERS (deferred) | observe scaffolding shipped; live arm still staff-gated off |
 | Force-armed evidence catch-up (deferred) | hard-stop / near-miss / INX n bars — prefer `*-promote-ready` |
-| E8–E9 staff/LIVE path | deferred — paper green + staff first |
+| E9 staff/LIVE path | deferred — paper green + staff first |
 
 ### INX research no-force path
 

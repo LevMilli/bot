@@ -24,6 +24,12 @@ class HillclimbLever(unittest.TestCase):
 
     def test_pick_and_midweek_thrash_ban(self):
         with tempfile.TemporaryDirectory() as tmp:
+            gate = desk_roi_plan.staff_pick_hillclimb_lever(
+                tmp, "kelly_fraction", note="test", proposed_value=0.30,
+            )
+            self.assertFalse(gate["ok"])
+            self.assertIn("Sunday packet", gate["reason"])
+            desk_roi_plan.staff_mark_sunday_packet_reviewed(tmp, who="test")
             out = desk_roi_plan.staff_pick_hillclimb_lever(
                 tmp, "kelly_fraction", note="test", proposed_value=0.30,
             )
@@ -40,6 +46,7 @@ class HillclimbLever(unittest.TestCase):
 
     def test_reject_soften_btc_floor(self):
         with tempfile.TemporaryDirectory() as tmp:
+            desk_roi_plan.staff_mark_sunday_packet_reviewed(tmp, who="test")
             soft = desk_roi_plan.staff_pick_hillclimb_lever(
                 tmp, "venue_min_edge_btc", proposed_value=0.04,
             )
@@ -54,8 +61,29 @@ class HillclimbLever(unittest.TestCase):
             out = desk_roi_plan.staff_pick_hillclimb_lever(tmp, "LOWER_FLOORS")
             self.assertFalse(out["ok"])
 
+    def test_none_and_evidence_templates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            none = desk_roi_plan.staff_pick_hillclimb_lever(
+                tmp, "NONE", note="observe week",
+            )
+            self.assertTrue(none["ok"])
+            self.assertEqual(none["active"]["lever"], "NONE")
+            self.assertTrue(none["active"]["observation_continues"])
+            templates = desk_roi_plan.hillclimb_lever_evidence_templates()
+            self.assertIn("VOL_SAFE", templates["templates"])
+            self.assertIn("NONE", templates["templates"])
+            self.assertIn("success_metrics", templates["templates"]["VOL_SAFE"])
+            self.assertIn("kill_metrics", templates["templates"]["VOL_SAFE"])
+            dry = desk_roi_plan.hillclimb_dry_run_board("VOL_SAFE")
+            self.assertTrue(dry["ok"])
+            self.assertFalse(dry["dry_run"]["writes_venue_params"])
+            pack = desk_roi_plan.hillclimb_pick_evidence_pack(tmp)
+            self.assertIn("sunday_review", pack)
+            self.assertIn("evidence_templates", pack)
+
     def test_demote_clears(self):
         with tempfile.TemporaryDirectory() as tmp:
+            desk_roi_plan.staff_mark_sunday_packet_reviewed(tmp, who="test")
             desk_roi_plan.staff_pick_hillclimb_lever(tmp, "HIT_FOR_BIG")
             dem = desk_roi_plan.staff_demote_hillclimb_lever(tmp, note="sunday")
             self.assertTrue(dem["ok"])
@@ -71,6 +99,7 @@ class HillclimbLever(unittest.TestCase):
 
     def test_capture_week_reads_active_lever(self):
         with tempfile.TemporaryDirectory() as tmp:
+            desk_roi_plan.staff_mark_sunday_packet_reviewed(tmp, who="test")
             desk_roi_plan.staff_pick_hillclimb_lever(tmp, "VOL_SAFE")
             out = desk_roi_plan.capture_hillclimb_week(
                 tmp,
