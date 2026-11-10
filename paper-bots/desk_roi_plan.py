@@ -6300,6 +6300,14 @@ def default_exit_plan(bot: str) -> dict:
                 "model-flip when z flips, 24h time stop. Shadow sleeve. No auto-promote."
             ),
         }
+    if b in ("wall-street", "wall_street"):
+        return {
+            "kind": "no_position",
+            "shadow_only": True,
+            "auto_promote": False,
+            "fee_floors_locked": True,
+            "note": "Wall Street houses 120 traders on one floor. The book does not open a position.",
+        }
     if b in ("memecoin", "meme"):
         return {
             "kind": "stop+model_flip+ladder+settle",

@@ -29,6 +29,7 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'btc-carry': '#ff4fd8',
   'sports-sharp-lag': '#7cf5c0',
   'fed-watch': '#c4a35a',
+  'wall-street': '#c6a15b',
 }
 
 function hashBotId(id: string): number {

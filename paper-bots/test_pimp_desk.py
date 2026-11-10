@@ -108,7 +108,7 @@ class PimpDeskTests(unittest.TestCase):
         self.assertTrue(snap["paper_only"])
         self.assertIn("PAPER ONLY", snap["banner"])
         self.assertEqual([b["id"] for b in snap["bots"]],
-                         ["sports-gap", "kalshi-sp", "btc15m", "commodity-15m", "memecoin", "kalshi-sized", "coinbase-spot", "btc-carry"])
+                         ["sports-gap", "kalshi-sp", "btc15m", "commodity-15m", "memecoin", "kalshi-sized", "coinbase-spot", "btc-carry", "sports-sharp-lag", "fed-watch", "wall-street"])
         sized = next(b for b in snap["bots"] if b["id"] == "kalshi-sized")
         coinbase = next(b for b in snap["bots"] if b["id"] == "coinbase-spot")
         self.assertTrue(coinbase["shadow_only"])
@@ -124,6 +124,9 @@ class PimpDeskTests(unittest.TestCase):
             "kalshi-sized": 500.0,
             "coinbase-spot": 500.0,
             "btc-carry": 500.0,
+            "sports-sharp-lag": None,
+            "fed-watch": None,
+            "wall-street": 0.0,
         }
         for bot in snap["bots"]:
             self.assertTrue(bot["present"], bot["id"])

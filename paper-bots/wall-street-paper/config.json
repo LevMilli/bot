@@ -1,0 +1,8 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "traders": 120,
+  "desks": 6,
+  "note": "Display floor. Six desks, 120 staff, one book. A check always skips."
+}

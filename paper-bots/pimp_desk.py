@@ -153,6 +153,7 @@ ACCOUNT_FILES = {
     "btc-carry": "paper_account.json",
     "sports-sharp-lag": "paper_account.json",
     "fed-watch": "paper_account.json",
+    "wall-street": "paper_account.json",
 }
 
 # Closed paper settlements and the logs that record them. These are the files a
@@ -195,6 +196,7 @@ SETTLEMENT_FILES = (
     "btc-carry-paper/paper_account.json",
     "sports-sharp-lag-paper/paper_account.json",
     "fed-watch-paper/paper_account.json",
+    "wall-street-paper/paper_account.json",
     "pimp-learning.json",
     "pimp-good.json",
 )
@@ -242,6 +244,10 @@ ACTIONS = {
     "fed-watch": {
         # Shadow sleeve. CME FedWatch fair vs Kalshi ask. Econ floor 0.05. Idea-bank.
         "run": {"argv": ("bot.py",), "entry": True, "timeout": 45, "label": "Run one check"},
+    },
+    "wall-street": {
+        # Display floor. The script skips. It is not on the timer.
+        "run": {"argv": ("bot.py",), "entry": False, "timeout": 15, "label": "Show the floor"},
     },
 }
 
@@ -413,6 +419,30 @@ BOTS = (
         "state": "paper_account.json",
         "kind": "macro",
         "log": "",
+        "empty": "No paper account yet. A check writes paper_account.json.",
+        "shadow_only": True,
+    },
+    {
+        "id": "wall-street",
+        "name": "Wall Street",
+        "folder": "wall-street-paper",
+        "script": "bot.py",
+        "blurb": (
+            "One paper floor. Six desks, 120 staff, one book. "
+            "The desks do not buy and spend no desk cash."
+        ),
+        "state": "paper_account.json",
+        "kind": "floor",
+        "log": "",
+        "traders": 120,
+        "departments": (
+            {"id": "quote", "name": "Quote", "seats": 20, "job": "No client flow arrives, so this desk does not quote."},
+            {"id": "research", "name": "Research", "seats": 20, "job": "Writes the skip in one sentence a person can check."},
+            {"id": "risk", "name": "Risk", "seats": 20, "job": "Holds the veto. A buy on this floor is a mistake."},
+            {"id": "ledger", "name": "Ledger", "seats": 20, "job": "Cash stays at 0 and the position list stays empty."},
+            {"id": "control", "name": "Control", "seats": 20, "job": "Paper only. Keeps a key off this floor."},
+            {"id": "book", "name": "The book", "seats": 20, "job": "The only book on the floor, and it stays flat."},
+        ),
         "empty": "No paper account yet. A check writes paper_account.json.",
         "shadow_only": True,
     },
@@ -597,6 +627,25 @@ BOT_PLANS = {
         "exit_quality": "partial",
         "entry_gated": True,
         "stake": "fixed-25",
+    },
+    "wall-street": {
+        "buy": [
+            "The floor does not buy. Six desks and 120 staff share one book, not 120 strategies",
+            "Shadow display only — spends no desk cash and takes no tower risk share",
+            "A check always skips",
+        ],
+        "sell": [
+            "Nothing is open, so there is nothing to sell",
+            "A position found on this book is a mistake and stays unfilled",
+        ],
+        "failsafes": [
+            "Paper only. No key, no wallet, no desk cash",
+            "Not on the auto timer",
+            "Pause file",
+        ],
+        "exit_quality": "partial",
+        "entry_gated": True,
+        "stake": "none",
     },
     "sports-sharp-lag": {
         "buy": [
@@ -799,6 +848,7 @@ ROI_POLICY = {
         "btc-carry": ["shadow_only"],
         "sports-sharp-lag": ["fixed_ticket_25", "shadow_only"],
         "fed-watch": ["fixed_ticket_25", "shadow_only"],
+        "wall-street": ["shadow_only"],
     },
     "target_exit_quality": {
         "sports-gap": "partial",
@@ -810,6 +860,7 @@ ROI_POLICY = {
         "btc-carry": "partial",
         "sports-sharp-lag": "partial",
         "fed-watch": "partial",
+        "wall-street": "partial",
     },
 }
 
@@ -2106,6 +2157,33 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
         view["why"] = "That script is not on this checkout, so this check bought nothing."
         return _finish_bot(view, spec, root)
     run = view["last_run"] or {}
+    if spec["kind"] == "floor":
+        summary = str(run.get("summary") or "")
+        if run.get("at"):
+            view["last_check"] = str(run.get("at"))
+        state_path = _under(root, spec["folder"], spec["state"]) if spec.get("state") else ""
+        state, _problem = _read_state(state_path) if state_path else (None, "")
+        traders = int(spec.get("traders") or 120)
+        if isinstance(state, dict):
+            view["has_state"] = True
+            view["empty"] = ""
+            view["cash"] = 0.0
+            try:
+                n = int(state.get("traders"))
+            except (TypeError, ValueError):
+                n = traders
+            view["traders"] = n if n >= 100 else traders
+            view["last_epoch"] = _mtime(state_path) or 0
+            if not view["last_check"]:
+                view["last_check"] = _fmt_epoch(view["last_epoch"])
+        else:
+            view["empty"] = spec["empty"]
+            view["traders"] = traders
+        view["skip"] = "floor does not trade"
+        view["departments"] = [dict(row) for row in (spec.get("departments") or ())]
+        line = f"{view['traders']} traders on six desks. One book. It does not trade."
+        view["why"] = card_copy(summary) or line
+        return _finish_bot(view, spec, root)
     if spec["kind"] in ("btc", "spot", "carry"):
         summary = str(run.get("summary") or "")
         view["skip"] = _btc_skip(summary)
@@ -2690,6 +2768,13 @@ def _enrich_bot_profit_fields(bot: dict, cfg: dict, capital: dict) -> dict:
     bot["gate_a"] = gate
     bot["capital_weight"] = float((capital.get("weights") or {}).get(bot.get("id"), 0) or 0)
     bot["venue_min_edge"] = desk_profit.bot_venue_edge(str(bot.get("id") or ""), cfg)
+    if bot.get("id") == "wall-street":
+        # A staffed floor has no market and no stake. Do not borrow the desk edge.
+        bot["venue_min_edge"] = None
+        bot["sizing_mode"] = "none"
+        bot["capital_weight"] = 0
+        bot["risk_factors_open"] = []
+        return bot
     mode = str(cfg.get("sizing") or "kelly_lite")
     stake = (bot.get("plans") or {}).get("stake") or ""
     if stake.startswith("fixed"):
@@ -3521,7 +3606,14 @@ def _paper_ok(root: str, bot_id: str) -> str:
         return "Coinbase spot config is not paper-only. This desk will not start it."
     if bot_id == "btc-carry" and not _btc_carry_paper(root):
         return "BTC carry config is not paper-only. This desk will not start it."
+    if bot_id == "wall-street" and not _wall_street_paper(root):
+        return "Wall Street config is not paper-only. This desk will not start it."
     return ""
+
+
+def _wall_street_paper(root: str) -> bool:
+    cfg = _read_json(_under(root, "wall-street-paper", "config.json")) or {}
+    return cfg.get("paper_only") is True and cfg.get("live_orders") is not True
 
 
 def _coinbase_paper(root: str) -> bool:
@@ -4542,6 +4634,7 @@ TOWER_STARTER_CASH = {
     "btc-carry": 500.0,
     "sports-sharp-lag": 500.0,
     "fed-watch": 500.0,
+    "wall-street": 0.0,
 }
 TOWER_MIN_AMMO = {
     "sports-gap": 10.0,
@@ -4554,6 +4647,7 @@ TOWER_MIN_AMMO = {
     "btc-carry": 500.0,
     "sports-sharp-lag": 25.0,
     "fed-watch": 25.0,
+    "wall-street": 0.0,
 }
 
 
@@ -4848,6 +4942,16 @@ def _account_body(bot_id: str) -> dict:
             "shadow_only": True,
             "live_orders": False,
             "entry_fees": 0,
+        }
+    if bot_id == "wall-street":
+        return {
+            "cash": 0.0,
+            "open": [],
+            "closed": [],
+            "paper_only": True,
+            "shadow_only": True,
+            "live_orders": False,
+            "traders": 120,
         }
     if bot_id == "memecoin":
         return {
@@ -6017,6 +6121,7 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
     view["book_id"] = {
         "sports": "sports", "kalshi": "kalshi", "btc": "bitcoin", "meme": "meme", "spot": "coinbase",
         "carry": "btc-carry",
+        "floor": "wallstreet",
     }.get(spec.get("kind"), "kalshi")
     view["shadow_only"] = bool(spec.get("shadow_only"))
     view["paused"] = bot_paused(root, spec["id"])
@@ -6055,7 +6160,15 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
         if any(word in low for word in ("max open", "not enough paper cash", "loss stop", "would buy")):
             would.append({"what": _clean(line, 180), "why": "A limit blocked a paper buy.", "bot": spec["id"]})
     view["would_have"] = would[:12]
-    if not view.get("positions") and not view.get("trades"):
+    if spec.get("id") == "wall-street":
+        n = int(view.get("traders") or spec.get("traders") or 120)
+        view["traders"] = n
+        view["departments"] = [dict(row) for row in (spec.get("departments") or ())]
+        view["idle_copy"] = f"{n} traders on six desks. One book. It does not trade."
+        if not view.get("why"):
+            view["why"] = view["idle_copy"]
+        view["skip"] = view.get("skip") or "floor does not trade"
+    elif not view.get("positions") and not view.get("trades"):
         view["idle_copy"] = f"No paper trades yet. Last check {view['central_check']}. No edge."
     else:
         view["idle_copy"] = ""

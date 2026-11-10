@@ -521,9 +521,15 @@
       "has_state": true,
       "blurb": "Shadow Coinbase spot paper tower. Public candles. Spends no desk cash.",
       "plans": {
-        "buy": ["ETH-USD / SOL-USD only when edge after the 0.90% taker clears 0.05"],
-        "sell": ["Stop −1.5%, take-profit, model-flip, 24h time stop"],
-        "failsafes": ["Shadow only. Floor locked. No API key."],
+        "buy": [
+          "ETH-USD / SOL-USD only when edge after the 0.90% taker clears 0.05"
+        ],
+        "sell": [
+          "Stop \u22121.5%, take-profit, model-flip, 24h time stop"
+        ],
+        "failsafes": [
+          "Shadow only. Floor locked. No API key."
+        ],
         "exit_quality": "partial",
         "entry_gated": true,
         "stake": "fixed-25"
@@ -558,9 +564,15 @@
       "has_state": true,
       "blurb": "Shadow BTC spot-long / perp-short carry. Held and unlevered. Spends no desk cash.",
       "plans": {
-        "buy": ["Open the unlevered pair once when public funding and premium marks exist"],
-        "sell": ["Hold through a red month. A monthly flip is a reject"],
-        "failsafes": ["Shadow only. Round trip 0.30%. No key."],
+        "buy": [
+          "Open the unlevered pair once when public funding and premium marks exist"
+        ],
+        "sell": [
+          "Hold through a red month. A monthly flip is a reject"
+        ],
+        "failsafes": [
+          "Shadow only. Round trip 0.30%. No key."
+        ],
         "exit_quality": "partial",
         "entry_gated": true,
         "stake": "sleeve-500"
@@ -568,6 +580,91 @@
       "gates_hit": [],
       "venue_min_edge": 0.02,
       "sizing_mode": "fixed",
+      "shadow": null,
+      "risk_factors_open": []
+    },
+    {
+      "id": "wall-street",
+      "name": "Wall Street",
+      "present": true,
+      "status": "skipped",
+      "cash": 0.0,
+      "realized": 0.0,
+      "today": 0.0,
+      "open_count": 0,
+      "open_risk": 0.0,
+      "traders": 120,
+      "departments": [
+        {
+          "id": "quote",
+          "name": "Quote",
+          "seats": 20,
+          "job": "No client flow arrives, so this desk does not quote."
+        },
+        {
+          "id": "research",
+          "name": "Research",
+          "seats": 20,
+          "job": "Writes the skip in one sentence a person can check."
+        },
+        {
+          "id": "risk",
+          "name": "Risk",
+          "seats": 20,
+          "job": "Holds the veto. A buy on this floor is a mistake."
+        },
+        {
+          "id": "ledger",
+          "name": "Ledger",
+          "seats": 20,
+          "job": "Cash stays at 0 and the position list stays empty."
+        },
+        {
+          "id": "control",
+          "name": "Control",
+          "seats": 20,
+          "job": "Paper only. Keeps a key off this floor."
+        },
+        {
+          "id": "book",
+          "name": "The book",
+          "seats": 20,
+          "job": "The only book on the floor, and it stays flat."
+        }
+      ],
+      "paused": false,
+      "shadow_only": true,
+      "feed": null,
+      "why": "120 traders on six desks. One book. It does not trade.",
+      "skip": "floor does not trade",
+      "idle_copy": "120 traders on six desks. One book. It does not trade.",
+      "empty": "",
+      "last_check": "",
+      "positions": [],
+      "trades": [],
+      "history": [],
+      "has_state": true,
+      "blurb": "One paper floor. Six desks, 120 staff, one book. The desks do not buy.",
+      "plans": {
+        "buy": [
+          "The floor does not buy. Six desks share one book."
+        ],
+        "sell": [
+          "Nothing is open."
+        ],
+        "failsafes": [
+          "Paper only. No desk cash."
+        ],
+        "exit_quality": "partial",
+        "entry_gated": true,
+        "stake": "none"
+      },
+      "gates_hit": [
+        "skip"
+      ],
+      "venue_min_edge": null,
+      "sizing_mode": "none",
+      "capital_weight": 0,
       "shadow": null,
       "risk_factors_open": []
     }

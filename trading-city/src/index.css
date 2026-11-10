@@ -465,6 +465,95 @@ a {
   font-size: 0.62rem;
 }
 
+.wall-street-sign {
+  min-width: 220px;
+  padding: 8px 14px 10px;
+  text-align: center;
+  color: #f6e7b4;
+  background: rgba(12, 9, 4, 0.82);
+  border: 1px solid #c6a15b;
+  box-shadow: 0 0 16px #c6a15b55;
+  letter-spacing: 0.14em;
+}
+.wall-street-sign strong {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+}
+.wall-street-sign span {
+  display: block;
+  margin-top: 4px;
+  letter-spacing: 0.02em;
+  font-size: 11px;
+  color: #f4f0d4;
+  text-transform: none;
+}
+
+.wall-street-flag {
+  min-width: 72px;
+  padding: 3px 8px;
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  background: rgba(10, 8, 6, 0.82);
+  border: 1px solid #c6a15b;
+}
+.wall-street-flag span {
+  display: block;
+  margin-top: 1px;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  color: #f4f0d4;
+}
+
+.wall-street-board {
+  width: 210px;
+  padding: 6px 8px 7px;
+  text-align: left;
+  color: #f6e7b4;
+  background: rgba(12, 9, 4, 0.9);
+  border: 1px solid #c6a15b;
+  box-shadow: 0 0 18px #c6a15b44;
+}
+.wall-street-board strong {
+  display: block;
+  letter-spacing: 0.18em;
+  font-size: 12px;
+  text-align: center;
+}
+.wall-street-board em {
+  display: block;
+  margin: 3px 0 6px;
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 0.02em;
+  text-align: center;
+  color: #f4f0d4;
+}
+.wall-street-board ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wall-street-board li {
+  margin-top: 4px;
+}
+.wall-street-board b {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #e7c98a;
+}
+.wall-street-board li span {
+  display: block;
+  font-size: 9px;
+  line-height: 1.2;
+  letter-spacing: 0;
+  color: #f4f0d4;
+}
+
 .tower-holo-compact .holo-pnl {
   font-size: 0.58rem;
 }
