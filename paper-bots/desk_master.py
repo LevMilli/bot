@@ -624,6 +624,16 @@ def master_summary(
         except Exception:
             plan["hillclimb_lever"] = None
         try:
+            plan["hillclimb_e9_week"] = desk_roi_plan.hillclimb_e9_week_board(
+                root, bots=bots,
+            )
+            plan["hillclimb_broadcast"] = desk_roi_plan.hillclimb_lever_masters_broadcast(
+                root,
+            )
+        except Exception:
+            plan["hillclimb_e9_week"] = None
+            plan["hillclimb_broadcast"] = None
+        try:
             plan["dual_control"] = desk_roi_plan.dual_control_status(root)
         except Exception:
             plan["dual_control"] = None
@@ -1186,6 +1196,16 @@ def master_summary(
         ),
         "ritual_soft_copy": ritual_soft_copy,
         "ritual_discord": ritual_soft_copy,
+        "hillclimb_soft_copy": (
+            ((plan or {}).get("hillclimb_broadcast") or {}).get("soft_copy")
+            if isinstance(plan, dict)
+            else None
+        ),
+        "hillclimb_discord": (
+            ((plan or {}).get("hillclimb_broadcast") or {}).get("discord")
+            if isinstance(plan, dict)
+            else None
+        ),
         "doctor_soft_copy": doctor_soft_copy,
         "doctor_fresh": doctor_fresh,
         "dual_control": dual_control,

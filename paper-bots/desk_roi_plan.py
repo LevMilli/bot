@@ -243,6 +243,10 @@ HILLCLIMB_ALLOWLIST = {
 
 HILLCLIMB_NONE_LEVER = "NONE"
 HILLCLIMB_RITUAL_NAME = "desk_hillclimb_ritual.json"
+HILLCLIMB_POSTMORTEM_NAME = "desk_hillclimb_postmortem.json"
+HILLCLIMB_WIN_LOCK_NAME = "desk_hillclimb_win_lock.json"
+MAX_HILLCLIMB_POSTMORTEM = 200
+MAX_HILLCLIMB_WIN_LOCK = 200
 
 # Phase 10: profit-lock harvest paper analog — hit weekly target → 0.5× size.
 PROFIT_LOCK_TARGET_USD = 40.0
@@ -12430,6 +12434,389 @@ def staff_clear_hillclimb_lever(
     }
 
 
+# ---- E9 #924–931: activate / broadcast / daily / kill postmortem / win lock -
+
+def hillclimb_lever_activation_board(root: str | None = None) -> dict:
+    """#924 — assert desk_hillclimb_lever.json has at most one active entry."""
+    store = _load(
+        _path(HILLCLIMB_LEVER_NAME, root),
+        {"paper_only": True, "active": None, "history": []},
+    )
+    active = store.get("active") if isinstance(store.get("active"), dict) else None
+    hist = [h for h in (store.get("history") or []) if isinstance(h, dict)]
+    # Guard: refuse silently-stacked actives if a buggy writer ever set a list.
+    raw_active = store.get("active")
+    stacked = isinstance(raw_active, list)
+    n_active = 1 if active and not stacked else (len(raw_active) if stacked else 0)
+    ok = (not stacked) and n_active <= 1
+    lever = str(active.get("lever") or "") if active else None
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_apply": False,
+        "writes_venue_params": False,
+        "ok": ok,
+        "pass": ok,
+        "single_entry": bool(ok and n_active <= 1),
+        "activated": bool(active),
+        "n_active": n_active,
+        "lever": lever,
+        "week": (active or {}).get("week") if active else None,
+        "history_n": len(hist),
+        "label": (
+            f"hillclimb_activation ok={ok} lever={lever or 'none'} "
+            f"single={ok} (#924)"
+        ),
+        "note": (
+            "Activation is the single active row in desk_hillclimb_lever.json. "
+            "Never writes venue params. Never LIVE."
+        ),
+    }
+
+
+def hillclimb_lever_masters_broadcast(root: str | None = None) -> dict:
+    """#925 — Masters soft_copy for the active lever (staff paste · never auto-post)."""
+    status = hillclimb_lever_status(root)
+    active = status.get("active") if isinstance(status.get("active"), dict) else None
+    kill = bool(status.get("kill"))
+    week = status.get("week")
+    lever = str((active or {}).get("lever") or "none")
+    soft = (
+        f"**Hillclimb lever** (paper · floors locked · live=False)\n"
+        f"week={week} active={lever} kill={kill} "
+        f"sunday_reviewed={(status.get('sunday_review') or {}).get('reviewed')}\n"
+        f"{status.get('label') or 'hillclimb observe'}\n"
+        f"_staff paste only · never auto-posts · never auto-applies_"
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_publish": False,
+        "auto_apply": False,
+        "live_orders_enabled": False,
+        "week": week,
+        "lever": lever if active else None,
+        "kill": kill,
+        "soft_copy": soft,
+        "discord": soft,
+        "label": f"hillclimb_broadcast week={week} lever={lever} (#925)",
+        "note": "Masters broadcast — observe/paste only; never auto-posts Discord.",
+    }
+
+
+def hillclimb_lever_daily_check(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """#926/#927 — daily M1/M3/fills during lever week + week-2 kill surface."""
+    week = _chicago_week_id()
+    active = active_hillclimb_lever(root)
+    kill = hillclimb_kill_status(root)
+    latest = kill.get("latest") if isinstance(kill.get("latest"), dict) else None
+    # Prefer live bots snapshot when provided; else last captured card.
+    m1 = None
+    m3 = None
+    fills_n = None
+    if bots is not None:
+        try:
+            snap = capture_hillclimb_week(root, bots=bots, label=_chicago_day())
+            card = snap.get("card") if isinstance(snap, dict) else None
+            if isinstance(card, dict):
+                latest = card
+        except Exception:
+            pass
+    if isinstance(latest, dict):
+        m1 = latest.get("m1")
+        m3 = latest.get("m3")
+        fills_n = latest.get("fills_n")
+    weeks = []
+    try:
+        store = _load(
+            _path(HILLCLIMB_KILL, root),
+            {"paper_only": True, "weeks": []},
+        )
+        weeks = [w for w in (store.get("weeks") or []) if isinstance(w, dict)]
+    except Exception:
+        weeks = []
+    # Cards attributed to current active lever (same Chicago week id on active).
+    lever = str((active or {}).get("lever") or "") if active else ""
+    lever_cards = [
+        w for w in weeks
+        if str(w.get("lever") or "") == lever and lever
+    ]
+    week2_ready = len(lever_cards) >= HILLCLIMB_KILL_WEEKS or bool(kill.get("kill"))
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_apply": False,
+        "auto_revert": False,
+        "week": week,
+        "lever": lever or None,
+        "active": bool(active),
+        "m1": m1,
+        "m3": m3,
+        "fills_n": fills_n,
+        "lever_cards_n": len(lever_cards),
+        "kill": bool(kill.get("kill")),
+        "kill_action": kill.get("action"),
+        "week2_check_ready": week2_ready,
+        "latest_card": latest,
+        "label": (
+            f"hillclimb_daily week={week} lever={lever or 'none'} "
+            f"m1={m1} m3={m3} fills={fills_n} kill={bool(kill.get('kill'))} "
+            f"(#926/#927)"
+        ),
+        "note": (
+            "Daily lever health during the Chicago week. Week-2 kill via "
+            "evaluate_hillclimb_kill — flag only, never auto-reverts."
+        ),
+    }
+
+
+def hillclimb_one_lever_discipline(root: str | None = None) -> dict:
+    """#930/#931 — never stack two allowlist levers; never invent off-allowlist."""
+    activation = hillclimb_lever_activation_board(root)
+    active = active_hillclimb_lever(root)
+    lever = str((active or {}).get("lever") or "") if active else ""
+    off = bool(
+        lever
+        and lever != HILLCLIMB_NONE_LEVER
+        and lever not in HILLCLIMB_ALLOWLIST
+    )
+    ok = bool(activation.get("ok")) and not off
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "ok": ok,
+        "pass": ok,
+        "single_entry": bool(activation.get("single_entry")),
+        "off_allowlist": off,
+        "lever": lever or None,
+        "allowlist": sorted(HILLCLIMB_ALLOWLIST.keys()) + [HILLCLIMB_NONE_LEVER],
+        "label": (
+            f"hillclimb_discipline ok={ok} single={activation.get('single_entry')} "
+            f"off_allowlist={off} (#930/#931)"
+        ),
+        "note": (
+            "One allowlisted lever (or NONE) per Chicago week. "
+            "Off-allowlist invent forbidden without plan amend."
+        ),
+    }
+
+
+def staff_hillclimb_kill_postmortem(
+    root: str | None,
+    *,
+    who: str = "",
+    note: str = "",
+    demote: bool = True,
+) -> dict:
+    """#928 — on kill flag: staff revert same day + write postmortem journal.
+
+    Never auto-reverts params. Floors locked. LIVE off.
+    """
+    kill = hillclimb_kill_status(root)
+    if not kill.get("kill") and not note:
+        return {
+            "ok": False,
+            "reason": "no kill flag — refuse empty postmortem",
+            "paper_only": True,
+            "fee_floors_locked": True,
+            "auto_revert": False,
+        }
+    active = active_hillclimb_lever(root)
+    demoted = None
+    if demote and active:
+        dem = staff_demote_hillclimb_lever(
+            root,
+            note=note or "kill postmortem",
+            reason="kill_rule_revert",
+        )
+        demoted = dem.get("demoted")
+    path = _path(HILLCLIMB_POSTMORTEM_NAME, root)
+    store = _load(
+        path,
+        {"paper_only": True, "rows": [], "fee_floors_locked": True},
+    )
+    row = {
+        "at": _now(),
+        "week": _chicago_week_id(),
+        "who": str(who or "")[:40],
+        "lever": str((active or {}).get("lever") or demoted or ""),
+        "kill": bool(kill.get("kill")),
+        "kill_action": kill.get("action"),
+        "kill_reason": (kill.get("status") or {}).get("reason")
+        if isinstance(kill.get("status"), dict)
+        else kill.get("reason"),
+        "note": str(note or "kill postmortem — reverted")[:240],
+        "demoted": demoted,
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_revert": False,
+        "auto_apply": False,
+    }
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    rows.append(row)
+    store["rows"] = rows[-MAX_HILLCLIMB_POSTMORTEM:]
+    store["latest"] = row
+    store["paper_only"] = True
+    store["fee_floors_locked"] = True
+    _save(path, store)
+    return {
+        "ok": True,
+        "row": row,
+        "n": len(store["rows"]),
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_revert": False,
+    }
+
+
+def hillclimb_postmortem_board(root: str | None = None) -> dict:
+    """Observe board for kill postmortems (#928)."""
+    store = _load(
+        _path(HILLCLIMB_POSTMORTEM_NAME, root),
+        {"paper_only": True, "rows": []},
+    )
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "n": len(rows),
+        "latest": store.get("latest") if isinstance(store.get("latest"), dict) else (
+            rows[-1] if rows else None
+        ),
+        "recent": rows[-8:],
+        "label": f"hillclimb_postmortem n={len(rows)} (#928)",
+        "note": "Kill postmortems — staff revert same day; never auto-reverts params.",
+    }
+
+
+def staff_hillclimb_lock_win(
+    root: str | None,
+    *,
+    who: str = "",
+    note: str = "",
+    lever: str = "",
+) -> dict:
+    """#929 — lock a successful lever week with an observe journal (no param write).
+
+    Still one-lever discipline — does not stack or auto-apply.
+    """
+    active = active_hillclimb_lever(root)
+    name = str(lever or (active or {}).get("lever") or "").strip()
+    if not name:
+        return {
+            "ok": False,
+            "reason": "lever required",
+            "paper_only": True,
+            "fee_floors_locked": True,
+        }
+    if name != HILLCLIMB_NONE_LEVER and name not in HILLCLIMB_ALLOWLIST:
+        return {
+            "ok": False,
+            "reason": f"off-allowlist invent forbidden: {name}",
+            "paper_only": True,
+            "fee_floors_locked": True,
+        }
+    path = _path(HILLCLIMB_WIN_LOCK_NAME, root)
+    store = _load(
+        path,
+        {"paper_only": True, "rows": [], "fee_floors_locked": True},
+    )
+    row = {
+        "at": _now(),
+        "week": _chicago_week_id(),
+        "who": str(who or "")[:40],
+        "lever": name[:64],
+        "note": str(note or "lock win — one lever discipline")[:240],
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_apply": False,
+        "one_lever_discipline": True,
+    }
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    rows.append(row)
+    store["rows"] = rows[-MAX_HILLCLIMB_WIN_LOCK:]
+    store["latest"] = row
+    store["paper_only"] = True
+    store["fee_floors_locked"] = True
+    _save(path, store)
+    return {
+        "ok": True,
+        "row": row,
+        "n": len(store["rows"]),
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "auto_apply": False,
+    }
+
+
+def hillclimb_win_lock_board(root: str | None = None) -> dict:
+    """Observe board for locked lever wins (#929)."""
+    store = _load(
+        _path(HILLCLIMB_WIN_LOCK_NAME, root),
+        {"paper_only": True, "rows": []},
+    )
+    rows = [r for r in (store.get("rows") or []) if isinstance(r, dict)]
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_apply": False,
+        "n": len(rows),
+        "latest": store.get("latest") if isinstance(store.get("latest"), dict) else (
+            rows[-1] if rows else None
+        ),
+        "recent": rows[-8:],
+        "label": f"hillclimb_win_lock n={len(rows)} (#929)",
+        "note": "Win locks are journal-only — still one lever/week; never auto-applies.",
+    }
+
+
+def hillclimb_e9_week_board(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Combined E9 #924–931 observe board."""
+    activation = hillclimb_lever_activation_board(root)
+    broadcast = hillclimb_lever_masters_broadcast(root)
+    daily = hillclimb_lever_daily_check(root, bots=bots)
+    discipline = hillclimb_one_lever_discipline(root)
+    post = hillclimb_postmortem_board(root)
+    wins = hillclimb_win_lock_board(root)
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_apply": False,
+        "auto_revert": False,
+        "live_orders_enabled": False,
+        "activation": activation,
+        "broadcast": broadcast,
+        "daily": daily,
+        "discipline": discipline,
+        "postmortem": post,
+        "win_lock": wins,
+        "soft_copy": broadcast.get("soft_copy"),
+        "label": (
+            f"e9_week act={activation.get('lever')} "
+            f"daily_kill={daily.get('kill')} disc={discipline.get('ok')}"
+        ),
+        "note": (
+            "E9 lever-week pack (#924–931): single activation, Masters broadcast, "
+            "daily M1/M3/fills, kill postmortem, win lock, one-lever discipline."
+        ),
+    }
+
+
 def dual_control_status(root: str | None = None) -> dict:
     """Paper dual-control checklist. Live orders stay hard-disabled."""
     store = _load(
@@ -13053,6 +13440,8 @@ def plan_summary(
             else cold_harvest_status(root)
         ),
         "hillclimb_lever": hillclimb_lever_status(root),
+        "hillclimb_e9_week": hillclimb_e9_week_board(root, bots=bots),
+        "hillclimb_broadcast": hillclimb_lever_masters_broadcast(root),
         "dual_control": dual_control_status(root),
         "quarterly_rebaseline": quarterly_rebaseline_status(root),
         "capital_os": capital_os_status(root, bots=bots, cfg=cfg),

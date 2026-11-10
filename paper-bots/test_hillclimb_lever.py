@@ -125,6 +125,56 @@ class HillclimbLever(unittest.TestCase):
         self.assertTrue(floors["locked"])
         self.assertTrue(floors["all_ok"])
 
+    def test_e9_week_activation_broadcast_discipline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            act0 = desk_roi_plan.hillclimb_lever_activation_board(tmp)
+            self.assertTrue(act0["ok"])
+            self.assertFalse(act0["activated"])
+            desk_roi_plan.staff_mark_sunday_packet_reviewed(tmp, who="test")
+            desk_roi_plan.staff_pick_hillclimb_lever(tmp, "VOL_SAFE")
+            act = desk_roi_plan.hillclimb_lever_activation_board(tmp)
+            self.assertTrue(act["activated"])
+            self.assertTrue(act["single_entry"])
+            self.assertEqual(act["lever"], "VOL_SAFE")
+            bc = desk_roi_plan.hillclimb_lever_masters_broadcast(tmp)
+            self.assertIn("VOL_SAFE", bc["soft_copy"])
+            self.assertFalse(bc["auto_publish"])
+            disc = desk_roi_plan.hillclimb_one_lever_discipline(tmp)
+            self.assertTrue(disc["ok"])
+            self.assertFalse(disc["off_allowlist"])
+            daily = desk_roi_plan.hillclimb_lever_daily_check(tmp, bots=[])
+            self.assertEqual(daily["lever"], "VOL_SAFE")
+            self.assertFalse(daily["auto_revert"])
+            win = desk_roi_plan.staff_hillclimb_lock_win(
+                tmp, who="test", note="hold", lever="VOL_SAFE",
+            )
+            self.assertTrue(win["ok"])
+            self.assertFalse(win["auto_apply"])
+            # Kill postmortem without kill flag needs note override path —
+            # force a kill store then postmortem demotes.
+            path = desk_roi_plan._path(desk_roi_plan.HILLCLIMB_KILL, tmp)
+            desk_roi_plan._save(path, {
+                "paper_only": True,
+                "weeks": [
+                    {"label": "2026-11-01", "m1": 1.0, "m3": 0.2, "fills_n": 5, "lever": "VOL_SAFE"},
+                    {"label": "2026-11-08", "m1": 0.5, "m3": 0.4, "fills_n": 8, "lever": "VOL_SAFE"},
+                ],
+                "status": desk_roi_plan.evaluate_hillclimb_kill([
+                    {"label": "2026-11-01", "m1": 1.0, "m3": 0.2, "fills_n": 5},
+                    {"label": "2026-11-08", "m1": 0.5, "m3": 0.4, "fills_n": 8},
+                ]),
+            })
+            pm = desk_roi_plan.staff_hillclimb_kill_postmortem(
+                tmp, who="test", note="revert after kill",
+            )
+            self.assertTrue(pm["ok"])
+            self.assertEqual(pm["row"]["demoted"], "VOL_SAFE")
+            self.assertIsNone(desk_roi_plan.active_hillclimb_lever(tmp))
+            board = desk_roi_plan.hillclimb_e9_week_board(tmp)
+            self.assertIn("activation", board)
+            self.assertIn("broadcast", board)
+            self.assertFalse(board["auto_apply"])
+
 
 if __name__ == "__main__":
     unittest.main()
