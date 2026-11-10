@@ -319,19 +319,35 @@ def classify_skip(reason: str | None, *, weekday: int | None = None) -> str:
         return "learning"
     if "news" in text or "blackout" in text or "fomc" in text or "cpi" in text:
         return "news"
-    if "calendar" in text or "forexfactory" in text or "ff event" in text:
+    if (
+        "calendar" in text
+        or "forexfactory" in text
+        or "ff event" in text
+        # Prefer-2: correct idle (no window / no tip / lanes clear) is CALENDAR,
+        # not other→DATA invent that looks like a broken feed.
+        or "no open" in text and "window" in text
+        or "no tip window" in text
+        or "no live or tip-soon" in text
+        or "lanes clear" in text
+    ):
         return "calendar"
-    # Stale-world / clock-skew are feed freshness — not capacity invent (DATA).
+    # Stale-world / clock-skew / feed-down are freshness — DATA, not capacity invent.
     if (
         "stale-world" in text
         or "clock-skew" in text
         or ("data" in text and ("error" in text or "missing" in text or "unavailable" in text))
+        or "orderbook failed" in text
+        or "markets failed" in text
+        or "spot failed" in text
+        or "list incomplete" in text
+        or "list failed" in text
     ):
         return "data"
     # Daily-R settle-only is a budget lock (fee-clear profit target) — not DATA/other.
     # Keeps zero-buy / skip_board BUDGET taxonomy honest beside CARD densify.
     # Firm-queue deferral is desk risk-rank allocation (BUDGET), not DATA invent.
     # Speed-lane off on red day is risk posture (BUDGET), not DATA invent.
+    # Selective +1 kill / expectancy starve are BUDGET posture locks.
     if (
         "settle-only" in text
         or "daily r budget" in text
@@ -341,6 +357,8 @@ def classify_skip(reason: str | None, *, weekday: int | None = None) -> str:
         or "firm-queue" in text
         or "firm queue" in text
         or ("speed lane" in text and ("red" in text or "blocked" in text or "off" in text))
+        or "selective +1 killed" in text
+        or "expectancy starve" in text
     ):
         return "budget"
     if "cushion" in text:
@@ -1618,6 +1636,15 @@ def self_check() -> None:
     assert classify_skip(
         "No commodity paper buy. already open.", weekday=1
     ) == "already_holding"
+    assert classify_skip(
+        "No open KXBTC15M window right now — still tracking ETH/ladder history.",
+        weekday=1,
+    ) == "calendar"
+    assert classify_skip("orderbook failed for KXCL", weekday=1) == "data"
+    assert classify_skip(
+        "Selective +1 KILLED (5 green-day EV worsen) — base max_buys only",
+        weekday=1,
+    ) == "budget"
     assert depth_adjusted_edge(0.10, 5, need=10) == round(0.05, 6)
     assert depth_adjusted_edge(0.10, 20, need=10) == round(0.10, 6)
     assert opportunity_score_v2(0.10, 0.8, 5, need=10) < opportunity_score_v2(0.10, 0.8, 20, need=10)

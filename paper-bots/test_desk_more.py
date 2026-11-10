@@ -190,6 +190,25 @@ class DeskMoreTests(unittest.TestCase):
         )
         self.assertEqual(desk_more.classify_skip(portfolio), "correlation")
 
+    def test_feed_idle_starve_classify_not_other_invent(self):
+        """Prefer-2: feed-down / correct-idle / starve must not invent OTHER (#529 leftover)."""
+        idle = "No open KXBTC15M window right now — still tracking ETH/ladder history."
+        tip = "CARD: No live or tip-soon games, so this check bought nothing."
+        feed = "orderbook failed for KXCL"
+        incomplete = "Kalshi list incomplete for energy series"
+        starve = "expectancy starve factor 0.15"
+        selective = "Selective +1 KILLED (5 green-day EV worsen) — base max_buys only"
+        self.assertEqual(desk_more.classify_skip(idle), "calendar")
+        self.assertEqual(desk_more.classify_skip(tip), "calendar")
+        self.assertEqual(
+            desk_more.stable_skip_code(desk_more.classify_skip(idle)),
+            "CALENDAR",
+        )
+        self.assertEqual(desk_more.classify_skip(feed), "data")
+        self.assertEqual(desk_more.classify_skip(incomplete), "data")
+        self.assertEqual(desk_more.classify_skip(starve), "budget")
+        self.assertEqual(desk_more.classify_skip(selective), "budget")
+
 
 if __name__ == "__main__":
     unittest.main()
