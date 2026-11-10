@@ -7557,6 +7557,261 @@ def phase7_portfolio_gate(
     }
 
 
+# Phase 8 helper evidence locks — scanners feed mains; never place alone until
+# Gate A + staff arm; commodity 2.0R / sports 1.5R stay locked.
+PHASE8_HELPERS_LOCKS = {
+    "helper_gate_a_min_n": HELPER_GATE_A_MIN_N,
+    "helper_auto_promote": False,
+    "helper_places_orders_default": False,
+    "may_place_alone_default": False,
+    "skip_regret_auto_loosen": False,
+    "ladder_min_p": 0.80,
+    "sports_daily_r": 1.5,
+    "commodity_daily_r": 2.0,
+    "note": (
+        "Helpers observe/digest only until Gate A (n≥20, taxed EV≥0) + staff arm. "
+        "Skip-regret accept/defer never auto-loosens. Ladder/parlay stay shadow "
+        "until Φ≥80 staff promote. ETH calib never auto-writes Φ. "
+        "Exit: ≥1 helper-proven promote or documented reject."
+    ),
+}
+
+
+def phase8_helpers_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Phase 8 helper evidence loop exit gate (master plan).
+
+    Pass when infrastructure + locks are honest:
+      1. Helper Gate A: n≥20 + taxed EV≥0; auto_promote=False; places_orders=False.
+      2. may_place_alone defaults False; autonomy blocked until Gate A + staff arm.
+      3. Insight helpers execution lock: no paper_buy/paper_sell / opens.
+      4. Skip-regret twin: candidates + accept/defer log; never auto-loosens.
+      5. Advice lift board observe-only on Gate A path.
+      6. ETH calib publishable without auto Φ write; Phase3 ladder/parlay shadow.
+      7. Sports daily R 1.5 + commodity 2.0 locked; floors locked; LIVE off.
+
+    Economic exit (≥1 helper-proven promote OR documented reject) is
+    economic_pass — empty boards still pass infra (no invent fills).
+
+    Observe / certify only — never force-arms, staff-clears, or invents evidence.
+    """
+    gate_a = helper_gate_a(root)
+    promote = helper_promote_status(root)
+    gate_a_ok = (
+        int(HELPER_GATE_A_MIN_N) >= 20
+        and int(gate_a.get("min_n") or 0) == int(HELPER_GATE_A_MIN_N)
+        and bool(gate_a.get("auto_promote") is False)
+        and bool(gate_a.get("places_orders") is False)
+        and bool(promote.get("auto_promote") is False)
+        and bool(promote.get("places_orders") is False)
+        and callable(record_helper_fill)
+        and callable(staff_set_helper_autonomy)
+    )
+
+    alone_default = helper_may_place_alone(root, "calendar_scanner")
+    block_msg = helper_autonomy_blocks(root, "calendar_scanner")
+    autonomy_ok = (
+        alone_default is False
+        and isinstance(block_msg, str)
+        and bool(block_msg)  # blocked while thin
+    )
+
+    exec_lock = insight_helpers_execution_lock(root) or {}
+    exec_ok = (
+        bool(exec_lock.get("pass") or exec_lock.get("ok"))
+        and bool(exec_lock.get("may_place_alone") is False)
+        and bool(exec_lock.get("places_orders") is False)
+        and bool(exec_lock.get("auto_promote") is False)
+    )
+
+    skip_cands = skip_regret_candidates(root) or {}
+    skip_log = skip_regret_decision_log(root) or {}
+    skip_ok = (
+        bool(skip_cands.get("auto_promote") is False)
+        and bool(skip_log.get("auto_promote") is False)
+        and bool(skip_log.get("loosen_soft_gates") is False)
+        and callable(staff_log_skip_regret_decision)
+        and callable(skip_regret_weekly_card)
+    )
+
+    advice = helper_advice_lift_board(root) or {}
+    advice_log = helper_advice_log_board(root) or {}
+    advice_ok = (
+        bool(advice.get("auto_promote") is False)
+        and bool(advice.get("places_orders") is False)
+        and bool(advice.get("gate_a_path") is True)
+        and bool(advice.get("staff_arm") is False or advice.get("observe_only"))
+    )
+
+    pilots = gate_a_pilots_board(root) or {}
+    pilots_ok = (
+        bool(pilots.get("auto_promote") is False)
+        and bool(pilots.get("staff_arm") is False)
+        and bool(pilots.get("observe_only", True))
+    )
+
+    eth = eth_calibration_report(bots)
+    eth_ok = isinstance(eth, dict) and eth.get("auto_write_phi") is False
+
+    ladder_ok = False
+    try:
+        import desk_phase3
+        ladder_ok = (
+            abs(float(desk_phase3.LADDER_MIN_P) - 0.80) < 1e-9
+            and callable(getattr(desk_phase3, "evaluate_ladder_rung", None))
+        )
+    except Exception:
+        ladder_ok = False
+
+    r_sports = _finite(DAILY_R_BUDGET.get("sports-gap"))
+    r_cmd = _finite(DAILY_R_BUDGET.get("commodity-15m"))
+    r_ok = (
+        r_sports is not None and abs(float(r_sports) - 1.5) < 1e-9
+        and r_cmd is not None and abs(float(r_cmd) - 2.0) < 1e-9
+    )
+
+    floors_ok = bool((fee_floors_locked_check() or {}).get("ok"))
+    live_off = bool(LIVE_ORDERS_ENABLED) is False
+
+    # Economic: ≥1 helper-proven promote OR documented reject.
+    accept_n = int(advice.get("accept_n") or advice_log.get("accept_n") or 0)
+    reject_n = int(advice.get("reject_n") or advice_log.get("reject_n") or 0)
+    skip_accepts = int(skip_log.get("accepts") or 0)
+    skip_defers = int(skip_log.get("defers") or 0)
+    ready_n = int(promote.get("ready_n") or 0)
+    armed_ready = 0
+    for row in promote.get("helpers") or []:
+        if isinstance(row, dict) and row.get("armed") and row.get("promote_ready"):
+            armed_ready += 1
+    documented_decision = bool(
+        accept_n >= 1 or reject_n >= 1 or skip_accepts >= 1 or skip_defers >= 1
+    )
+    proven_promote = bool(armed_ready >= 1)
+    economic_pass = bool(documented_decision or proven_promote)
+
+    gate_pass = (
+        gate_a_ok
+        and autonomy_ok
+        and exec_ok
+        and skip_ok
+        and advice_ok
+        and pilots_ok
+        and eth_ok
+        and ladder_ok
+        and r_ok
+        and floors_ok
+        and live_off
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "force_arm": False,
+        "invent_fills": False,
+        "places_orders": False,
+        "phase": "P8",
+        "pass": gate_pass,
+        "economic_pass": economic_pass,
+        "locks": dict(PHASE8_HELPERS_LOCKS),
+        "helper_gate_a": {
+            "pass": gate_a_ok,
+            "min_n": int(HELPER_GATE_A_MIN_N),
+            "ready_n": ready_n,
+            "thin_n": promote.get("thin_n"),
+            "auto_promote": False,
+            "places_orders": False,
+            "label": promote.get("label"),
+        },
+        "autonomy": {
+            "pass": autonomy_ok,
+            "may_place_alone_default": False,
+            "calendar_scanner_alone": alone_default,
+            "calendar_scanner_block": block_msg,
+        },
+        "execution_lock": {
+            "pass": exec_ok,
+            "ok": exec_lock.get("ok"),
+            "violation_n": exec_lock.get("violation_n"),
+            "may_place_alone": False,
+            "label": exec_lock.get("label"),
+        },
+        "skip_regret": {
+            "pass": skip_ok,
+            "candidates_n": len(skip_cands.get("candidates") or []),
+            "accepts": skip_accepts,
+            "defers": skip_defers,
+            "loosen_soft_gates": False,
+            "auto_promote": False,
+        },
+        "advice_lift": {
+            "pass": advice_ok,
+            "accept_n": accept_n,
+            "reject_n": reject_n,
+            "lift": advice.get("lift"),
+            "gate_a_path": True,
+            "staff_arm": bool(advice.get("staff_arm")),
+            "label": advice.get("label"),
+        },
+        "gate_a_pilots": {
+            "pass": pilots_ok,
+            "any_ready": bool(pilots.get("any_ready")),
+            "staff_arm": False,
+            "label": pilots.get("label"),
+        },
+        "eth_calibration": {
+            "pass": eth_ok,
+            "auto_write_phi": False,
+            "n": eth.get("n") if isinstance(eth, dict) else None,
+        },
+        "ladder_parlay_shadow": {
+            "pass": ladder_ok,
+            "ladder_min_p": 0.80,
+            "shadow_only": True,
+        },
+        "daily_r": {
+            "pass": r_ok,
+            "sports": r_sports,
+            "commodity": r_cmd,
+            "expected": {"sports-gap": 1.5, "commodity-15m": 2.0},
+        },
+        "economic": {
+            "documented_decision": documented_decision,
+            "proven_promote": proven_promote,
+            "accept_n": accept_n,
+            "reject_n": reject_n,
+            "skip_accepts": skip_accepts,
+            "skip_defers": skip_defers,
+            "armed_ready_n": armed_ready,
+        },
+        "label": (
+            f"P8 helpers-gate {'PASS' if gate_pass else 'FAIL'} "
+            f"infra={gate_pass} economic={economic_pass} "
+            f"gate_a_ready={ready_n} "
+            f"advice={accept_n}/{reject_n} "
+            f"skip={skip_accepts}/{skip_defers} "
+            f"exec_ok={exec_ok}"
+        ),
+        "note": (
+            "Phase 8 helper evidence gate — Gate A n≥20 EV≥0; no place-alone; "
+            "exec lock; skip-regret never loosens; advice lift observe; "
+            "ETH/ladder shadow. Economic exit (≥1 promote or documented reject) "
+            "is economic_pass (ops). Never softens floors; never arms LIVE_ORDERS; "
+            "never invents fills; never force-arms or helper auto-buys."
+        ),
+        "decision": (
+            "phase8_helpers_gate_pass"
+            if gate_pass
+            else "phase8_helpers_gate_fail"
+        ),
+    }
+
+
 def _exit_kind(text: str | None) -> str:
     t = str(text or "").lower()
     if "scale" in t:
@@ -14584,6 +14839,7 @@ def plan_summary(
         "phase5_throughput": phase5_throughput_gate(root, bots=bots),
         "phase6_graduation": phase6_graduation_gate(root, bots=bots),
         "phase7_portfolio": phase7_portfolio_gate(root, bots=bots, cfg=cfg),
+        "phase8_helpers": phase8_helpers_gate(root, bots=bots),
         "weekly_scorecard": latest_weekly_scorecard(root),
         "graduation": graduation_board(root, bots=bots),
         # Prefer live bots whenever provided (#488 profit_lock twin).
