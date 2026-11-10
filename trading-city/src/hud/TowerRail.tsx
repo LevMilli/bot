@@ -7,7 +7,7 @@ import {
   pnlTone,
   statusLabel,
 } from '../data/format'
-import { isSupportTower } from '../data/floorMap'
+import { isResearchTower, isSupportTower } from '../data/floorMap'
 import type { BotRow } from '../types'
 
 type Props = {
@@ -74,7 +74,7 @@ function TowerTab({
   const color = beamColorFor(bot.id, index)
   const offline = bot.present === false
   const status = statusLabel(bot)
-  const supportIdle = isSupportTower(bot.id) && !offline && !bookPnlApplies(bot)
+  const supportIdle = isResearchTower(bot.id) && !offline && !bookPnlApplies(bot)
   const tone = offline || supportIdle ? 'flat' : pnlTone(hologramPnlValue(bot))
   const figure = supportIdle ? supportHeadline(bot) : offline ? 'offline' : hologramPnl(bot)
   return (
@@ -136,6 +136,11 @@ export function TowerRail({ bots, onSelect }: Props) {
   if (!bots.length) return null
 
   const live = bots.filter((b) => b.present !== false).length
+  const research = [
+    ...bots.filter((bot) => isSupportTower(bot.id)),
+    ...bots.filter((bot) => bot.id === 'wall-street'),
+  ]
+  const trading = bots.filter((bot) => !isResearchTower(bot.id))
 
   return (
     <div className={`tower-menu ${open ? 'open' : ''}`} ref={rootRef}>
@@ -172,7 +177,7 @@ export function TowerRail({ bots, onSelect }: Props) {
         <nav className="tower-menu-panel" aria-label="Paper towers" id={listId}>
           <TowerGroup
             label="Trading"
-            bots={bots.filter((bot) => !isSupportTower(bot.id))}
+            bots={trading}
             all={bots}
             onSelect={(id) => {
               setOpen(false)
@@ -180,8 +185,8 @@ export function TowerRail({ bots, onSelect }: Props) {
             }}
           />
           <TowerGroup
-            label="Support"
-            bots={bots.filter((bot) => isSupportTower(bot.id))}
+            label="Research"
+            bots={research}
             all={bots}
             onSelect={(id) => {
               setOpen(false)

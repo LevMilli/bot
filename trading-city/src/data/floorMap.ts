@@ -91,9 +91,14 @@ export function floorForBot(botId: string): FloorDef | null {
   return FLOORS.find((f) => f.offices.some((o) => o.botId === botId)) || null
 }
 
-/** Research-helpers floor. These sit in the same tower menu, under the trading book. */
+/** Research-helpers floor. These are the relay buildings, not the Wall Street tower. */
 export function isSupportTower(botId: string): boolean {
   return floorForBot(botId)?.id === '4'
+}
+
+/** Dropdown group: the two research relays, plus the Wall Street floor. */
+export function isResearchTower(botId: string): boolean {
+  return isSupportTower(botId) || botId === 'wall-street'
 }
 
 export function parseCityHash(hash: string): {
