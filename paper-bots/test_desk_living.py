@@ -620,6 +620,24 @@ class DeskLivingTests(unittest.TestCase):
             os.environ.pop("DESK_BLOCK_ENTRIES", None)
             os.environ.pop("DESK_BLOCK_REASON", None)
 
+    def test_honor_requeries_when_entries_on_reason_empty(self):
+        """Post-#550 Prefer-1: timer DESK_BLOCK_ENTRIES=1 without REASON must not invent bland."""
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["DESK_BLOCK_ENTRIES"] = "1"
+            os.environ.pop("DESK_BLOCK_REASON", None)
+            try:
+                with mock.patch(
+                    "pimp_desk.entry_gate",
+                    return_value="ruin drill soft: new entries off; bots paused",
+                ):
+                    reason = desk_living.honor_desk_entry_gate(tmp)
+                self.assertIn("ruin drill", reason.lower())
+                self.assertIn("ruin drill", os.environ.get("DESK_BLOCK_REASON", "").lower())
+                self.assertNotEqual(reason, "DESK_BLOCK_ENTRIES=1")
+            finally:
+                os.environ.pop("DESK_BLOCK_ENTRIES", None)
+                os.environ.pop("DESK_BLOCK_REASON", None)
+
     def test_desk_block_entries_reason_prefers_real_gate(self):
         """Prefer-1: DESK_BLOCK_REASON must beat bland entry_gate invent."""
         os.environ.pop("DESK_BLOCK_ENTRIES", None)

@@ -101,18 +101,28 @@ def honor_desk_entry_gate(root: str | None = None) -> str:
     """CLI/standalone bots: if desk entry_gate would block, set DESK_BLOCK_ENTRIES=1.
 
     Returns the block reason (empty if entries allowed). Exits still run when blocked.
+    Prefer-1: when ENTRIES is already on but REASON is empty (timer manage-when-gated
+    path), re-query entry_gate so Learning densifies ruin/daily-loss — never bland
+    DESK_BLOCK_ENTRIES=1 invent.
     """
-    if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
-        return os.environ.get("DESK_BLOCK_REASON") or "DESK_BLOCK_ENTRIES=1"
+    already = os.environ.get("DESK_BLOCK_ENTRIES") == "1"
+    existing = str(os.environ.get("DESK_BLOCK_REASON") or "").strip()
+    if already and existing:
+        return existing
     try:
         import pimp_desk
         reason = pimp_desk.entry_gate(root or _root())
     except Exception as exc:
-        return ""  # fail-open on desk import only — timer path still authoritative
+        # fail-open on desk import only — timer path still authoritative
+        if already:
+            return existing or "DESK_BLOCK_ENTRIES=1"
+        return ""
     if reason:
         os.environ["DESK_BLOCK_ENTRIES"] = "1"
         os.environ["DESK_BLOCK_REASON"] = str(reason)[:240]
         return str(reason)
+    if already:
+        return existing or "DESK_BLOCK_ENTRIES=1"
     return ""
 
 
