@@ -1732,7 +1732,7 @@ def main() -> int:
             "inx-research", "inx-status",
             "skip-regret", "skip-regret-accept", "skip-regret-defer",
             "firm-queue", "completions", "feature-store", "money-pulse",
-            "exit-quality", "promote-distance", "hillclimb-lever", "firm-health",
+            "exit-quality", "phase3-gate", "promote-distance", "hillclimb-lever", "firm-health",
             "bleed-week", "daily-r", "opp-cost", "profit-lock", "ops-observe",
             "incubation", "ruin-drill", "cold-harvest", "graduation", "btc-calib",
             "eth-calib",
@@ -3791,6 +3791,7 @@ def main() -> int:
             "edge08": desk_roi_plan.btc_edge08_shadow_status(root),
             "helper_gate_a": desk_roi_plan.helper_promote_status(root),
             "exit_quality": desk_roi_plan.exit_quality_observe(root, bots=None),
+            "phase3_exits": desk_roi_plan.phase3_exit_gate(root, bots=None),
             "selective_throughput": desk_roi_plan.selective_throughput_observe(root),
             "promote_distance": desk_roi_plan.promote_distance_observe(root),
             "firm_health": desk_roi_plan.firm_health_observe(root),
@@ -3815,7 +3816,7 @@ def main() -> int:
             "capital_os": desk_roi_plan.capital_os_status(root),
             "note": (
                 "Money-path pulse — observe only (firm-queue / completions / "
-                "feature densify / exit-quality / selective after M1 / "
+                "feature densify / exit-quality / phase3-gate / selective after M1 / "
                 "promote-distance / firm-health / ops / dual-control-observe / "
                 "guardrails / review / calib-clv / baseline-fee / fee_ledger / "
                 "graduation / observation-clock / "
@@ -3836,6 +3837,7 @@ def main() -> int:
                 cfg = None
             if isinstance(bots, list):
                 out["exit_quality"] = desk_roi_plan.exit_quality_observe(root, bots=bots)
+                out["phase3_exits"] = desk_roi_plan.phase3_exit_gate(root, bots=bots)
                 out["selective_throughput"] = desk_roi_plan.selective_throughput_observe(
                     root, bots=bots,
                 )
@@ -3878,6 +3880,19 @@ def main() -> int:
         out = desk_roi_plan.exit_quality_observe(root, bots=bots)
         print(json.dumps(out, indent=2, sort_keys=True, default=str))
         return 0
+    if args.action == "phase3-gate":
+        bots: list = []
+        try:
+            import pimp_desk
+            snap = pimp_desk.snapshot(root)
+            raw = snap.get("bots") if isinstance(snap, dict) else None
+            if isinstance(raw, list):
+                bots = raw
+        except Exception:
+            bots = []
+        out = desk_roi_plan.phase3_exit_gate(root, bots=bots)
+        print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        return 0 if out.get("pass") else 2
     if args.action == "promote-distance":
         bots = []
         try:

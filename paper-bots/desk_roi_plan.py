@@ -6377,6 +6377,170 @@ def exit_plan_coverage(
     }
 
 
+# Explicit settle-backstop waivers — towers that keep settle/staff-close as the
+# final backstop while intermediate exits already run (Phase 3 exit gate).
+PHASE3_SETTLE_BACKSTOP_WAIVERS = {
+    "sports-gap": "gap_decay+scale_out+hard_stop_shadow+time_final_shadow; settle backstop",
+    "btc15m": "take_profit+model_flip live; settle backstop",
+    "commodity-15m": "model_flip live + time_stop_shadow; settle backstop",
+    "kalshi-sp": "model_flip live; settle backstop; post-macro blackout",
+    "kalshi-sized": "model_flip live; settle backstop; twin+1¢",
+    "memecoin": "−12% stop + mom flip + ladder TP; settle backstop",
+    "btc-carry": "shadow hold sleeve — staff close backstop (no monthly flip invent)",
+    "coinbase-spot": "shadow stop/TP/flip/time — staff promote gated",
+}
+
+
+def _phase3_has_intermediate_exits(plan: dict | None) -> bool:
+    """True when exit plan is not bare settle-only."""
+    if not isinstance(plan, dict):
+        return False
+    kind = str(plan.get("kind") or "").strip().lower()
+    if not kind or kind == "settle":
+        return False
+    flags = (
+        "take_profit", "model_flip", "hard_stop_shadow", "time_final_shadow",
+        "time_stop_shadow", "gap_decay", "scale_out", "ladder_take_profits",
+        "stop_pct", "hold", "red_month_exit",
+    )
+    if any(plan.get(k) for k in flags):
+        return True
+    # kind tokens like "stop+take_profit+…" without boolean flags
+    parts = [p for p in kind.replace(" ", "").split("+") if p]
+    return bool(parts) and parts != ["settle"]
+
+
+def phase3_exit_gate(
+    root: str | None = None,
+    *,
+    bots: list | None = None,
+) -> dict:
+    """Phase 3 exit-quality exit gate (master plan).
+
+    Pass when:
+      1. Every core tower has intermediate exits (not bare settle-only) OR an
+         explicit settle-backstop waiver naming those exits.
+      2. BTC take-profit path is honest (default_exit_plan take_profit=True).
+      3. Commodity model-flip is live in the plan (flip not shadow-only).
+      4. Sports hard-stop + time-final exist as shadow (live stays staff-gated).
+      5. exit_plan_coverage passes when opens exist.
+      6. Floors stay locked; never arms LIVE_ORDERS here.
+
+    Observe / certify only — does not auto-promote shadows.
+    """
+    core = list(FEE_CLEAR) + list(LOSER_IDS)
+    towers = []
+    bare = []
+    for bot_id in core:
+        plan = default_exit_plan(bot_id)
+        intermediate = _phase3_has_intermediate_exits(plan)
+        waiver = PHASE3_SETTLE_BACKSTOP_WAIVERS.get(bot_id) or ""
+        ok = bool(intermediate) and bool(waiver)
+        if not intermediate:
+            bare.append(bot_id)
+        towers.append({
+            "bot": bot_id,
+            "kind": plan.get("kind"),
+            "intermediate_exits": intermediate,
+            "settle_backstop": bool(plan.get("settle_backstop")),
+            "waiver": waiver,
+            "pass": ok,
+        })
+
+    btc_plan = default_exit_plan("btc15m")
+    cmd_plan = default_exit_plan("commodity-15m")
+    sports_plan = default_exit_plan("sports-gap")
+    btc_tp_honest = bool(btc_plan.get("take_profit")) and "take_profit" in str(
+        btc_plan.get("kind") or ""
+    )
+    cmd_flip_live = bool(cmd_plan.get("model_flip"))
+    sports_hs_shadow = bool(sports_plan.get("hard_stop_shadow"))
+    sports_tf_shadow = bool(sports_plan.get("time_final_shadow"))
+
+    coverage = exit_plan_coverage(root, bots=bots)
+    hard = sports_hard_stop_shadow_summary(root)
+    tstop = commodity_time_stop_shadow_summary(root)
+    tfinal = sports_time_final_shadow_summary(root)
+    quality = exit_quality_observe(root, bots=bots)
+
+    shadows = {
+        "sports_hard_stop": {
+            "promote_ready": bool(hard.get("promote_ready")),
+            "live": bool(hard.get("live")),
+            "n_with_pnl": int(hard.get("n_with_pnl") or 0),
+            "n_to_promote": max(
+                0,
+                int(hard.get("promote_min_n") or 30) - int(hard.get("n_with_pnl") or 0),
+            ),
+        },
+        "commodity_time_stop": {
+            "promote_ready": bool(tstop.get("promote_ready")),
+            "live": bool(tstop.get("live")),
+            "n_with_pnl": int(tstop.get("n_with_pnl") or 0),
+            "n_to_promote": int(tstop.get("n_to_promote") or 0),
+        },
+        "sports_time_final": {
+            "promote_ready": bool(tfinal.get("promote_ready")),
+            "live": bool(tfinal.get("live")),
+            "n_with_pnl": int(tfinal.get("n_with_pnl") or 0),
+            "n_to_promote": int(tfinal.get("n_to_promote") or 0),
+        },
+    }
+
+    gate_pass = (
+        not bare
+        and all(t.get("pass") for t in towers)
+        and btc_tp_honest
+        and cmd_flip_live
+        and sports_hs_shadow
+        and sports_tf_shadow
+        and bool(coverage.get("pass"))
+        and bool((fee_floors_locked_check() or {}).get("ok"))
+    )
+    return {
+        "paper_only": True,
+        "fee_floors_locked": True,
+        "observe_only": True,
+        "auto_promote": False,
+        "live_orders_enabled": False,
+        "board_chip": False,
+        "phase": "P3",
+        "pass": gate_pass,
+        "towers": towers,
+        "bare_settle_only": bare,
+        "btc_tp_honest": btc_tp_honest,
+        "commodity_flip_live": cmd_flip_live,
+        "sports_hard_stop_shadow": sports_hs_shadow,
+        "sports_time_final_shadow": sports_tf_shadow,
+        "exit_plan_coverage": {
+            "pass": coverage.get("pass"),
+            "n_open": coverage.get("n_open"),
+            "n_with_plan": coverage.get("n_with_plan"),
+            "coverage": coverage.get("coverage"),
+        },
+        "shadows": shadows,
+        "exit_quality": {
+            "label": quality.get("label"),
+            "exit_regret": quality.get("exit_regret"),
+        },
+        "waivers": dict(PHASE3_SETTLE_BACKSTOP_WAIVERS),
+        "label": (
+            f"P3 exit-gate {'PASS' if gate_pass else 'FAIL'} "
+            f"towers={sum(1 for t in towers if t.get('pass'))}/{len(towers)} "
+            f"btc_tp={btc_tp_honest} cmd_flip={cmd_flip_live} "
+            f"cover={coverage.get('n_with_plan')}/{coverage.get('n_open')}"
+        ),
+        "note": (
+            "Phase 3 exit gate — intermediate exits + explicit settle-backstop waivers; "
+            "BTC TP honest; commodity flip live; sports HS/t-final shadow (staff-gated live). "
+            "Never softens floors; never arms LIVE_ORDERS; shadows stay staff-promote."
+        ),
+        "decision": (
+            "phase3_exit_gate_pass" if gate_pass else "phase3_exit_gate_fail"
+        ),
+    }
+
+
 def _exit_kind(text: str | None) -> str:
     t = str(text or "").lower()
     if "scale" in t:
@@ -13397,6 +13561,7 @@ def plan_summary(
         "sports_hard_stop_shadow": sports_hard_stop_shadow_summary(root),
         "commodity_time_stop": commodity_time_stop_shadow_summary(root),
         "sports_time_final": sports_time_final_shadow_summary(root),
+        "phase3_exits": phase3_exit_gate(root, bots=bots),
         "weekly_scorecard": latest_weekly_scorecard(root),
         "graduation": graduation_board(root, bots=bots),
         # Prefer live bots whenever provided (#488 profit_lock twin).
