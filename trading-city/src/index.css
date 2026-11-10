@@ -419,6 +419,10 @@ a {
   color: var(--lime);
 }
 
+.tower-tab-wait {
+  color: #d5dcf5;
+}
+
 .tower-tab-pnl.tone-down {
   color: #ff3b3b;
 }
