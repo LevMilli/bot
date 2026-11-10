@@ -1619,11 +1619,12 @@ def main() -> int:
     for row in ranked:
         if buys >= max_buys_eff:
             max_note = f"max buys this check ({max_buys_eff})"
-            # Prefer-1: gate (settle-only / cool / stale / entry) zeroed the cap —
+            # Prefer-1: gate (settle-only / cool / stale / entry / ruin) zeroed the cap —
             # do not invent capacity skip into brain while CARD names the gate.
             gate_keys = (
                 "settle-only", "adverse cool", "stale-world", "clock-skew",
-                "entry_gate", "daily loss", "max open risk", "max open positions",
+                "entry_gate", "ruin drill", "daily loss",
+                "max open risk", "max open positions",
             )
             gate_hits = [
                 str(s)

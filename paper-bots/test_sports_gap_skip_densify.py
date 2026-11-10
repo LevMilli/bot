@@ -245,6 +245,7 @@ class SportsGapSkipDensify(unittest.TestCase):
         self.assertIn("adverse cool", gate_chunk)
         self.assertIn("stale-world", gate_chunk)
         self.assertIn("entry_gate", gate_chunk)
+        self.assertIn("ruin drill", gate_chunk)
         self.assertIn("daily loss", gate_chunk)
         # CARD prepend: cool/stale beat evaluate noise.
         gap = _load_gap()
@@ -313,6 +314,20 @@ class SportsGapSkipDensify(unittest.TestCase):
             desk_more.classify_skip("max buys this check (0)"),
             "other",
         )
+
+    def test_ruin_drill_gate_lock_refuses_max_buys_invent(self):
+        """Post-#549 Prefer-1: ruin entry densify must gate_lock capacity invent."""
+        src = GAP.read_text(encoding="utf-8")
+        max_idx = src.find("if buys_this_check >= max_buys_eff:")
+        self.assertGreater(max_idx, 0)
+        chunk = src[max_idx:max_idx + 1200]
+        self.assertIn("gate_lock", chunk)
+        self.assertIn('"ruin drill"', chunk)
+        import desk_more
+        ruin = "ruin drill soft: new entries off. Settles/exits still run under soft."
+        self.assertEqual(desk_more.classify_skip(ruin), "entry_gate")
+        # entry_gate stable chip is BUDGET (desk_more map) — not capacity OTHER/DATA.
+        self.assertEqual(desk_more.stable_skip_code("entry_gate"), "BUDGET")
 
 
 if __name__ == "__main__":
