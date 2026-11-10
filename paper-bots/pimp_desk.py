@@ -555,7 +555,7 @@ BOT_PLANS = {
         "buy": [
             "RugCheck facts fail-closed; accurate conf ≥80% or speed ≥72%",
             "Entries refused until taxed EV ≥ 0 — conf−0.5 is not a fee-aware edge",
-            "Tickets $10–$25; red ceiling $10. Today ≤ −$5 → entries off",
+            "Buy-in $10 at 80% and speed, $17.50 at 85%, $25 at 90%+. Red ceiling $10. Today ≤ −$5 → entries off",
             "Max 6 open on a green day, 1 if today < 0; 8 entries/day; 12h cooldown",
             "Midnight cash reload does not waive the refuse. No size-up. expand_volume stays false",
         ],

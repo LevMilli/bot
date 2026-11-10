@@ -4,9 +4,12 @@
 MODEL = "grok-4.7"          # only used by the OPTIONAL Grok hook below (paid API, off by default)
 PAPER = True                # week one: fake fills at real prices. bot.py refuses to run if this is False
 
-TICKET_USD = 25             # default ticket; desk Kelly-lite may size down to cash
-MIN_TICKET_USD = 10         # still trade when cash is thin but edge clears
+TICKET_USD = 25             # confidence buy-in at 90% and above
+MIN_TICKET_USD = 10         # confidence buy-in at 80% and on the speed lane
 RED_DAY_TICKET_USD = 10     # red-day ticket ceiling — lose less per knife
+# Linear from MIN at CONF_P_LO to TICKET at CONF_P_HI. This tower's $10–$25 band.
+CONF_P_LO = 0.80
+CONF_P_HI = 0.90
 MAX_OPEN = 6                # green-day concurrent paper tickets
 MAX_OPEN_RED = 1            # red-day: one open max (ROI rescue — was 2)
 MAX_ENTRIES_PER_DAY = 8     # fewer attempts while stop-bleed week runs

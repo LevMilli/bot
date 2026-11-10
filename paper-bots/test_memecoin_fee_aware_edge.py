@@ -93,6 +93,11 @@ class MemeFeeAwareEdgeTests(unittest.TestCase):
         shown = buy + " " + sell + " " + fails
         self.assertIn("taxed EV ≥ 0", buy)
         self.assertIn("−$5", buy)
+        self.assertIn("$17.50", buy)
+        self.assertIn("$10", buy)
+        self.assertIn("$25", buy)
+        self.assertNotIn("$6", shown)
+        self.assertNotIn("−12%", buy)
         self.assertIn("−12%", sell)
         self.assertIn("35%", sell)
         self.assertIn("25%", sell)

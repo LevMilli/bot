@@ -32,8 +32,9 @@ If any number is missing, that check **fails** and the token is skipped. Prices 
 | Setting | Meaning |
 |---|---|
 | `PAPER` | Must be `True`. Fake fills only. |
-| `TICKET_USD` = 25 | Green-day ticket cap. The floor is $10. |
-| `RED_DAY_TICKET_USD` = 10 | If today is red, the ticket ceiling is $10. |
+| `TICKET_USD` = 25 | Buy-in at 90% confidence and above. |
+| `MIN_TICKET_USD` = 10 | Buy-in at 80% and on the speed lane. 85% is $17.50, linear in between. |
+| `RED_DAY_TICKET_USD` = 10 | If today is red, the ticket ceiling stays $10. |
 | `MAX_OPEN` = 6 | At most 6 positions when today is flat or green. |
 | `MAX_OPEN_RED` = 1 | If today is red, at most 1 open position. |
 | `MAX_ENTRIES_PER_DAY` = 8 | At most 8 buys per Chicago day. The residual refuse currently blocks all of them. |
