@@ -559,7 +559,7 @@ def scan(st, stats):
         elif pnl_today <= -C.DAILY_LOSS_HALT_USD:
             gate_reason = f"daily loss halt (realized today ${pnl_today:.2f})"
         else:
-            ticket = ticket_for(st, conf)
+            ticket = ticket_for(st, conf, lane)
             if ticket < C.MIN_TICKET_USD:
                 gate_reason = f"paper cash ${st['cash_usd']:.2f} < min ticket ${C.MIN_TICKET_USD}"
             else:
@@ -626,20 +626,16 @@ def scan(st, stats):
             except Exception:
                 pass
             continue
-        ticket = ticket_for(st, conf)
+        ticket = apply_entry_cuts(ticket_for(st, conf, lane), st, lane, pnl_today)
         if ticket < C.MIN_TICKET_USD:
-            record("SKIP", f"ticket ${ticket:.2f} below min")
-            continue
-        # ROI rescue: red-day ticket ceiling so each knife costs less.
-        if pnl_today < 0:
-            red_cap = float(getattr(C, "RED_DAY_TICKET_USD", C.MIN_TICKET_USD) or C.MIN_TICKET_USD)
-            ticket = round(min(ticket, red_cap, float(st["cash_usd"])), 2)
-            if ticket < C.MIN_TICKET_USD:
+            if pnl_today < 0:
+                red_cap = float(getattr(C, "RED_DAY_TICKET_USD", C.MIN_TICKET_USD) or C.MIN_TICKET_USD)
                 record("SKIP", f"red-day ticket ${ticket:.2f} below min after cap ${red_cap:.0f}")
-                continue
-        # Speed lane: slightly smaller ticket so more fills fit open-risk.
-        if lane == "speed":
-            ticket = round(max(C.MIN_TICKET_USD, min(ticket, C.TICKET_USD * 0.7, float(st["cash_usd"]))), 2)
+            elif lane == "speed":
+                record("SKIP", f"speed-lane ticket below ${C.MIN_TICKET_USD:.0f}")
+            else:
+                record("SKIP", f"ticket ${ticket:.2f} below min")
+            continue
         price = float(p["priceUsd"])
         tokens, fee, imp, fill = paper_buy(price, liq, ticket)
         st["cash_usd"] = round(float(st["cash_usd"]) - ticket, 4)
@@ -739,32 +735,56 @@ def refuse_conf_residual_as_edge(conf, *, lane: str = "", venue_need: float = 0.
     )
 
 
-def ticket_for(st, conf) -> float:
-    """Fee-aware ticket: desk Kelly-lite when available, never above cash or TICKET_USD."""
-    cash = float(st.get("cash_usd") or 0)
-    if cash + 1e-9 < C.MIN_TICKET_USD:
-        return 0.0
-    dollars = float(C.TICKET_USD)
+def confidence_buy_in(conf, lane: str = "") -> float:
+    """Target dollars before red-day and cash cuts.
+
+    $10 at 80% and on the speed lane, $17.50 at 85%, $25 at 90% and above.
+    Linear between 80% and 90%. Speed never outgrows the 80% ticket.
+    """
+    lo = float(C.MIN_TICKET_USD)
+    hi = float(C.TICKET_USD)
+    if str(lane or "").lower() == "speed":
+        return round(lo, 2)
     try:
-        desk = _desk()
-        cfg = desk.load_settings(os.path.dirname(BASE))
-        # conf−0.5 is not EV; size with fee-haircut residual only (entry still refused below).
-        edge = max(0.0, conf_minus_half_residual(conf) - round_trip_swap_fee_frac())
-        open_risk = sum(float(p.get("cost_usd") or 0) for p in (st.get("open") or []))
-        dollars = float(desk.stake_dollars_for(
-            "memecoin", conf, edge=edge, cfg=cfg, open_risk_used=open_risk,
-            ask=None, root=os.path.dirname(BASE),
-            vol_kwargs={
-                "ticker": "meme",
-                "recent_range": None,
-                "spot": None,
-                "minutes_left": 30,
-            },
-        ))
-    except Exception:
-        pass
-    dollars = max(float(C.MIN_TICKET_USD), min(float(C.TICKET_USD), dollars, cash))
+        chance = float(conf)
+    except (TypeError, ValueError):
+        return round(lo, 2)
+    p_lo = float(getattr(C, "CONF_P_LO", 0.80) or 0.80)
+    p_hi = float(getattr(C, "CONF_P_HI", 0.90) or 0.90)
+    if p_hi <= p_lo or chance <= p_lo:
+        return round(lo, 2)
+    if chance >= p_hi:
+        return round(hi, 2)
+    t = (chance - p_lo) / (p_hi - p_lo)
+    return round(lo + t * (hi - lo), 2)
+
+
+def ticket_for(st, conf, lane: str = "") -> float:
+    """Confidence buy-in, then cash. Red-day ceiling is apply_entry_cuts."""
+    cash = float(st.get("cash_usd") or 0)
+    if cash + 1e-9 < float(C.MIN_TICKET_USD):
+        return 0.0
+    dollars = min(confidence_buy_in(conf, lane), cash)
+    if dollars + 1e-9 < float(C.MIN_TICKET_USD):
+        return 0.0
     return round(dollars, 2)
+
+
+def apply_entry_cuts(ticket: float, st, lane: str, pnl_today: float) -> float:
+    """Red day stays at $10. Speed stays at the $10 / 80% ticket. Cash caps both."""
+    cash = float(st.get("cash_usd") or 0)
+    try:
+        out = float(ticket)
+    except (TypeError, ValueError):
+        return 0.0
+    out = min(out, cash)
+    if float(pnl_today) < 0:
+        out = min(out, float(getattr(C, "RED_DAY_TICKET_USD", C.MIN_TICKET_USD) or C.MIN_TICKET_USD))
+    if str(lane or "").lower() == "speed":
+        out = min(out, float(C.MIN_TICKET_USD))
+    if out + 1e-9 < float(C.MIN_TICKET_USD):
+        return 0.0
+    return round(out, 2)
 
 
 def maybe_reload_broke_cash(st) -> bool:
