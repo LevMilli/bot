@@ -35,6 +35,10 @@ make living-floors
 make living-chaos-drills
 make living-doctrine-distance
 make living-promote-ready-pack
+make living-phase11-gate   # P3–P11 spine; P9 LIVE stays blocked
+make living-hillclimb-lever
 ```
+
+Spine formal gates P3–P11 are COMPLETE for paper observe. Prefer-1 invent densify is EXHAUSTED — do not invent tip chips or soft observe to “move” ROI. Next is staff ops on tape (lever pick, promote-ready when n≥30 EV≥0).
 
 Discord never auto-posts from these. Paper only.
