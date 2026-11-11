@@ -207,14 +207,7 @@ def settle_account(state):
         record_close(pos, cash=state["cash"], reason="settled", bid=None, fee=pos.get("fee"))
         try:
             desk = _desk()
-            desk.record_learning(DESK_ROOT, {
-                "result": "hit" if pnl > 0 else "miss",
-                "market": "BTC",
-                "prob": pos.get("fair_at_entry"),
-                "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
-                "fill_id": pos.get("fill_id") or "",
-                "at": pos["closed"],
-            })
+            desk.record_learning(DESK_ROOT, settle_learning_row(pos, pnl))
         except Exception:
             pass
         # Near-miss would_pnl densify — label shadow skips for this ticker (observe).
@@ -298,6 +291,26 @@ def sell_learning_row(pos, reason):
         "fill_id": pos.get("fill_id") or "",
         "side": pos.get("side") or "",
     }
+
+
+def settle_learning_row(pos, pnl, *, hour_ct=None):
+    """One settle row for this series. Hit or miss comes from the real P/L.
+
+    The market is KXBTC15M or KXETH15M, not one blended crypto bucket.
+    """
+    row = {
+        "result": "hit" if float(pnl or 0) > 0 else "miss",
+        "reason": "settled",
+        "market": series_for(pos.get("ticker"), pos.get("series")),
+        "prob": pos.get("fair_at_entry"),
+        "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
+        "fill_id": pos.get("fill_id") or "",
+        "side": pos.get("side") or "",
+        "at": pos.get("closed") or "",
+    }
+    if hour_ct is not None:
+        row["hour_ct"] = hour_ct
+    return row
 
 
 def last_minute_block(min_left):
