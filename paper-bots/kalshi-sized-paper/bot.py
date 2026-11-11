@@ -671,75 +671,65 @@ def step_settle(args, state, day):
                 flip_on = bool(cfg.get("model_flip_exits", True))
             except Exception:
                 pass
-            if flip_on and bid is not None and bid < CFG["invalidation_log_below"] and not args.dry_run:
-                contracts = float(pos.get("contracts") or 0)
-                sell_fee = float(paper_sim.taker_fee(contracts, bid))
-                proceeds = round(contracts * float(bid) - sell_fee, 4)
-                pnl = round(proceeds - float(pos.get("cost") or 0) - float(pos.get("fee") or 0), 4)
-                state["bankroll"] = round(float(state["bankroll"]) + proceeds, 4)
-                pos.update({
-                    "status": "sold",
-                    "exit": "model-flip bid under 50c",
-                    "exit_price": bid,
-                    "exit_fee": sell_fee,
-                    "payout": proceeds,
-                    "pnl": pnl,
-                    "settled_at": dt.datetime.now().isoformat(timespec="seconds"),
-                })
-                state["open"] = [p for p in state["open"] if p is not pos]
-                state["closed"].append(pos)
-                paper_sim.save_state(state)
-                try:
-                    desk = _desk()
-                    desk.record_learning(DESK_ROOT, {
-                        "result": "hit" if pnl > 0 else "miss",
-                        "market": "S&P-sized",
-                        "prob": pos.get("ask"),
-                        "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
-                        "fill_id": pos.get("fill_id") or "",
-                        "side": pos.get("side") or "",
-                    })
-                except Exception:
-                    pass
-                try:
-                    if DESK_ROOT not in sys.path:
-                        sys.path.insert(0, DESK_ROOT)
-                    import desk_roi_plan
-                    import desk_living
-                    desk_roi_plan.record_fee_ledger(
-                        DESK_ROOT,
-                        bot="kalshi-sized",
-                        ticker=str(pos.get("ticker") or ""),
-                        side=str(pos.get("side") or ""),
-                        price=bid,
-                        contracts=pos.get("contracts"),
-                        fee=sell_fee,
-                        pnl=pnl,
-                        fill_id=str(pos.get("fill_id") or ""),
-                        kind="model_flip",
-                        note="model-flip bid under 50c",
-                    )
-                    desk_living.record_completion(
-                        DESK_ROOT,
-                        bot="kalshi-sized",
-                        ticker=str(pos.get("ticker") or ""),
-                        side=str(pos.get("side") or ""),
-                        pnl=pnl,
-                        contracts=pos.get("contracts"),
-                        fill_id=str(pos.get("fill_id") or ""),
-                        kind="model_flip",
-                        eligible=False,
-                        note="model-flip bid under 50c",
-                    )
-                except Exception:
-                    pass
-                logger.learn(
-                    f"MODEL-FLIP SELL: {pos['ticker']} {pos['side']} bid {bid:.2f} pnl {pnl:+.2f}",
-                    "model-flip",
+            if flip_on and not args.dry_run:
+                sale = paper_sim.apply_failsafe(
+                    state, pos, bid,
+                    floor=CFG["invalidation_log_below"],
+                    quote_ticker=ticker,
                 )
-                print(f"MODEL-FLIP SELL {pos['ticker']} @ {bid:.2f} pnl {pnl:+.2f}")
-                continue
-            if bid is not None and bid < CFG["invalidation_log_below"] and not args.dry_run:
+                if sale and not sale.get("opens_new_ticket") and not sale.get("unlocks_fill"):
+                    paper_sim.save_state(state)
+                    try:
+                        desk = _desk()
+                        desk.record_learning(DESK_ROOT, {
+                            "reason": sale["exit"],
+                            "market": "S&P-sized",
+                            "prob": pos.get("ask"),
+                            "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
+                            "fill_id": pos.get("fill_id") or "",
+                            "side": pos.get("side") or "",
+                        })
+                    except Exception:
+                        pass
+                    try:
+                        if DESK_ROOT not in sys.path:
+                            sys.path.insert(0, DESK_ROOT)
+                        import desk_roi_plan
+                        import desk_living
+                        desk_roi_plan.record_fee_ledger(
+                            DESK_ROOT,
+                            bot="kalshi-sized",
+                            ticker=str(pos.get("ticker") or ""),
+                            side=str(pos.get("side") or ""),
+                            price=sale["exit_price"],
+                            contracts=pos.get("contracts"),
+                            fee=sale["exit_fee"],
+                            pnl=sale["pnl"],
+                            fill_id=str(pos.get("fill_id") or ""),
+                            kind="model_flip",
+                            note=sale["exit"],
+                        )
+                        desk_living.record_completion(
+                            DESK_ROOT,
+                            bot="kalshi-sized",
+                            ticker=str(pos.get("ticker") or ""),
+                            side=str(pos.get("side") or ""),
+                            pnl=sale["pnl"],
+                            contracts=pos.get("contracts"),
+                            fill_id=str(pos.get("fill_id") or ""),
+                            kind="model_flip",
+                            eligible=False,
+                            note=sale["exit"],
+                        )
+                    except Exception:
+                        pass
+                    logger.learn(
+                        f"MODEL-FLIP SELL: {pos['ticker']} {pos['side']} bid {sale['exit_price']:.2f} pnl {sale['pnl']:+.2f}",
+                        "model-flip",
+                    )
+                    print(f"MODEL-FLIP SELL {pos['ticker']} @ {sale['exit_price']:.2f} pnl {sale['pnl']:+.2f}")
+                    continue
+            if paper_sim.bid_under_exit(bid, CFG["invalidation_log_below"]) and not args.dry_run:
                 logger.learn(
                     f"INVALIDATION (log only): {pos['ticker']} {pos['side']} bid {bid:.2f} < 0.50",
                     "invalidation",
