@@ -31,6 +31,64 @@ import alerts  # noqa: E402
 
 CFG = json.load(open(os.path.join(HERE, "config.json")))
 CT = ZoneInfo(CFG["timezone"])
+WINDOW_START = dt.time(12, 5)
+WINDOW_END = dt.time(14, 55)
+
+
+def scan_window(day, entry_time=None):
+    """12:05–14:55 CT. A start before 12:05 is put back. The end stays 14:55."""
+    start_t = WINDOW_START
+    raw = CFG.get("entry_time_ct") if entry_time is None else entry_time
+    try:
+        configured = dt.time.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        configured = WINDOW_START
+    if configured > WINDOW_START:
+        start_t = configured
+    return (
+        dt.datetime.combine(day, start_t, CT),
+        dt.datetime.combine(day, WINDOW_END, CT),
+    )
+
+
+def outside_scan_window(now, day, entry_time=None) -> str:
+    """A clock outside the tower window. It does not open a buy."""
+    start, end = scan_window(day, entry_time)
+    if start <= now <= end:
+        return ""
+    return f"outside {start:%H:%M}–{end:%H:%M} CT"
+
+
+def learning_is_header_only(text) -> bool:
+    lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
+    if not lines:
+        return True
+    return not any(ln for ln in lines if not ln.startswith("#"))
+
+
+def header_only_fact(text):
+    """A header-only learning file is a fact. It does not force a sample fill."""
+    if not learning_is_header_only(text):
+        return None
+    return {
+        "fact": "header-only learning file",
+        "fill": False,
+        "paper_only": True,
+    }
+
+
+def remember_refused_edge(best, ask, edge):
+    """Keep the best refused edge only when the ask is a real quote."""
+    try:
+        ask_n = float(ask)
+        edge_n = float(edge)
+    except (TypeError, ValueError):
+        return best
+    if ask_n != ask_n or edge_n != edge_n or ask_n <= 0 or ask_n >= 1:
+        return best
+    if best is None or edge_n > float(best):
+        return edge_n
+    return best
 
 
 def _desk():
@@ -170,15 +228,22 @@ def step_scan(args, state, day):
             )
     except Exception as exc:
         print(f"Pre-noon INX warm skipped: {type(exc).__name__}")
-    if not args.any_time:
-        start = dt.datetime.combine(day, dt.time.fromisoformat(CFG["entry_time_ct"]), CT)
-        end = dt.datetime.combine(day, dt.time(14, 55), CT)
-        if not (start <= now <= end):
+    if not (getattr(args, "any_time", False) and getattr(args, "dry_run", False)):
+        outside = outside_scan_window(now, day, CFG.get("entry_time_ct"))
+        if outside:
             print(
-                f"Not scan time: now {now:%Y-%m-%d %H:%M} CT, "
-                f"window {start:%H:%M}-{end:%H:%M} CT on {day}. Use --any-time to test."
+                f"Not scan time: now {now:%Y-%m-%d %H:%M} CT, {outside}. "
+                "The window is not loosened."
             )
             return
+    try:
+        with open(logger.LEARNING, encoding="utf-8") as handle:
+            learning_text = handle.read()
+    except OSError:
+        learning_text = ""
+    fact = header_only_fact(learning_text)
+    if fact:
+        print(f"Learning file: {fact['fact']}. Not a sample fill.")
     if state.get("halted"):
         print("HALTED by kill switch earlier. Review paper_state.json before trading resumes.")
         return
@@ -269,6 +334,7 @@ def step_scan(args, state, day):
     last_skip_ticker = ""
     last_skip_side = ""
     last_skip_edge = None
+    best_refused = None
     spot_px = chosen.get("spot")
     hour_ct = dt.datetime.now(CT).hour
     sp_state = {}
@@ -330,6 +396,7 @@ def step_scan(args, state, day):
             )
             continue
         edge_try = float(fair_try.get("edge") or 0.0)
+        best_refused = remember_refused_edge(best_refused, confirmed.get("ask"), edge_try)
         twin_block = desk_inx.twin_edge_blocks(
             sized_edge=edge_try, venue_edge=venue_edge, extra=0.01,
         )
@@ -361,7 +428,7 @@ def step_scan(args, state, day):
         print(alerts.format_skip_note(day, reason))
         if not args.dry_run:
             logger.learn(f"{day}: no trade - {reason}", "skip")
-            densify_edge = last_skip_edge
+            densify_edge = best_refused if best_refused is not None else last_skip_edge
             if densify_edge is None and edge_proxy:
                 densify_edge = edge_proxy
             _densify_scan_skip(
