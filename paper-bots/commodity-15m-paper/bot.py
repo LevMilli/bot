@@ -595,8 +595,33 @@ def mark_bid_for_held(pos, *, model_side=None, model_bid=None, market=None):
     return None
 
 
+def failsafe_sale(pos, *, flip, market, today_pnl=None, watch_fired=False):
+    """The held contract sells only when the model-flip is true and the listing bid is real.
+
+    A drop watch is not a sell. Today's P/L is not a sell. The time-stop is not
+    decided here, and it stays a shadow.
+    """
+    del today_pnl
+    if not isinstance(pos, dict) or not flip:
+        return None
+    if watch_fired and not flip:
+        return None
+    held = str(pos.get("side") or "").upper()
+    return real_held_bid(listing_bid_for_side(market, held))
+
+
+def same_series_block(series, sold_this_check) -> str:
+    """After a sell, that series is not bought again on this check."""
+    want = str(series or "").strip()
+    sold = {str(item or "").strip() for item in (sold_this_check or []) if str(item or "").strip()}
+    if want and want in sold:
+        return "same series already sold this check"
+    return ""
+
+
 def manage_model_flips(
     state: dict, side_now, prob_now, bid, fee, delta, ticker=None, market=None,
+    sold_series=None,
 ) -> list[str]:
     """Exit open commodity paper when the live model flips against the held side.
 
@@ -628,16 +653,17 @@ def manage_model_flips(
         if not flip:
             still.append(pos)
             continue
-        mark = mark_bid_for_held(
-            pos, model_side=side_now, model_bid=bid, market=market,
-        )
-        if mark is None or float(mark) <= 0:
+        mark = failsafe_sale(pos, flip=True, market=market, watch_fired=False)
+        if mark is None:
             still.append(pos)
             continue
         # Fee from held mark — never model-side complementary fee invent.
         mark_fee = kalshi_fee(float(mark))
         pnl = paper_sell(state, pos, mark, mark_fee, reason)
         sold.append(f"{pos.get('ticker')} {reason} pnl {pnl:+.2f}")
+        name = str(pos.get("series") or "").strip()
+        if name and sold_series is not None:
+            sold_series.add(name)
     state["open"] = still
     return sold
 
@@ -1421,7 +1447,7 @@ def watch_opens(state, markets):
     return notes
 
 
-def paper_buy(state: dict, ev: dict, buys_this_check: int = 0) -> str:
+def paper_buy(state: dict, ev: dict, buys_this_check: int = 0, sold_this_check=None) -> str:
     none_msg = "No commodity paper buy."
     if ev.get("reasons"):
         return none_msg + " " + "; ".join(ev["reasons"][:3])
@@ -1431,6 +1457,9 @@ def paper_buy(state: dict, ev: dict, buys_this_check: int = 0) -> str:
     averaged = average_block(state, ev.get("series"))
     if averaged:
         return averaged
+    again = same_series_block(ev.get("series"), sold_this_check)
+    if again:
+        return again
     if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
         # Prefer-1: honor stored DESK_BLOCK_REASON — do not invent bland entry_gate.
         try:
@@ -1940,6 +1969,7 @@ def main() -> int:
     buys = 0
     skip_reasons = []  # first evaluate skip → CARD densify (#396 sibling)
     watched_ids = set()
+    sold_series = set()
     for series, spot, m in windows:
         tick = str(m["ticker"])
         # BTC/ETH densify prefetch book failures into scored reasons → CARD/brain;
@@ -2107,6 +2137,7 @@ def main() -> int:
                 flip_delta,
                 ticker=ev.get("ticker"),
                 market=m,
+                sold_series=sold_series,
             )
             if sold:
                 save_account(account)
@@ -2539,7 +2570,7 @@ def main() -> int:
                 note="commodity sticky densify",
             )
             continue
-        msg = paper_buy(account, ev, buys)
+        msg = paper_buy(account, ev, buys, sold_this_check=sold_series)
         print(f"  → {msg}")
         if msg.startswith("Paper buy"):
             buys += 1
