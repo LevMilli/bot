@@ -434,6 +434,46 @@ def scan_marks(marks, *, coinbase_price=None, key_set=False) -> dict:
     }
 
 
+def floor_stays(edge=None, paid=None) -> float:
+    """0.02 stays. A month that paid does not cut it."""
+    _num(paid)
+    n = _num(edge)
+    if n is None or n < VENUE_FLOOR:
+        return VENUE_FLOOR
+    return n
+
+
+def decide_hold(state, marks, *, floor=None, paid=None, block_entries=False) -> dict:
+    """Open once, when both marks exist and the sleeve is flat.
+
+    A red month does not add a second leg. A paid month does not cut 0.02.
+    This does not open and does not sell.
+    """
+    book = state if isinstance(state, dict) else {}
+    opens = [row for row in (book.get("open") or []) if isinstance(row, dict)]
+    locked = floor_stays(VENUE_FLOOR if floor is None else floor, paid=paid)
+    base = {
+        "floor": locked,
+        "opened": False,
+        "sold": False,
+        "second_leg": False,
+        "paper_only": True,
+        "legs": len(opens),
+    }
+    quote = marks if isinstance(marks, dict) else {}
+    symbol = str(quote.get("symbol") or "BTCUSDT").upper()
+    if quote.get("observe_only") or symbol != "BTCUSDT":
+        return {**base, "action": "flat", "reason": "observe twin, not a second tower"}
+    if block_entries and not opens:
+        return {**base, "action": "flat", "reason": "desk entry gate"}
+    scanned = scan_marks(quote)
+    if opens:
+        return {**base, "action": "hold", "reason": "red month is not a second leg"}
+    if scanned["data_skip"]:
+        return {**base, "action": "flat", "reason": scanned["reason"]}
+    return {**base, "action": "open", "reason": "hold rule, once"}
+
+
 def observe_twin_marks(
     now: dt.datetime | None = None,
     opener=None,
@@ -674,7 +714,15 @@ def run_once(
         marks["error"] = detail[5:] if detail.startswith("data ") else detail
     blocked = os.environ.get("DESK_BLOCK_ENTRIES") == "1"
     before = len(state.get("open") or [])
-    state = hold_step(state, marks, cfg, now, block_entries=blocked and before == 0)
+    decision = decide_hold(
+        state, marks, floor=cfg.get("venue_min_edge"), block_entries=blocked and before == 0,
+    )
+    state = hold_step(
+        state, marks, cfg, now,
+        block_entries=(blocked and before == 0) or decision["action"] != "open",
+    )
+    state["decision"] = decision["action"]
+    state["floor"] = decision["floor"]
     state["checks"] = int(state.get("checks") or 0) + 1
     state["last_check"] = now.isoformat(timespec="seconds")
     _record_month_marks(desk_root, state)
