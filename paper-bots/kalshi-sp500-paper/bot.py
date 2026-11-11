@@ -211,10 +211,10 @@ def step_scan(args, state, day):
     lo, hi = _ask_band()
     cands = signal_engine.candidate_sides(quotes, lo, hi)
     if not cands:
-        reason = "no contract with ask in the 80-90c band"
+        reason = f"no contract with ask in the {lo * 100:.0f}–{hi * 100:.0f}¢ band"
         print(alerts.format_skip_note(day, reason))
         if not args.dry_run:
-            logger.learn(f"{day}: no trade - nothing in 80-90c band at scan time", "skip")
+            logger.learn(f"{day}: no trade - nothing in the ask band at scan time", "skip")
             _densify_scan_skip(reason)
         return
     venue_edge = 0.02

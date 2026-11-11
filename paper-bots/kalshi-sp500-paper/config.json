@@ -1,5 +1,5 @@
 {
-  "_comment": "Settings for the Kalshi PAPER bot. Paper only: no API keys, no login, no real orders. Throughput: up to 3 scans/day in-window.",
+  "_comment": "Settings for the Kalshi PAPER bot. Paper only: no API keys, no login, no real orders. Scan session 12:00-14:00 CT, max 1 fill, full $25 stake. No forced trades.",
   "paper_mode": true,
   "api_base": "https://api.elections.kalshi.com/trade-api/v2",
   "series": "KXINXU",
