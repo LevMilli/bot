@@ -381,6 +381,7 @@ def sell(st, pos, frac_of_original, reason, price, liq, full=False):
     except Exception:
         pass
     if full:
+        record_close(pos, cash=st.get("cash_usd"), reason=reason, mark=price, fee=fee)
         try:
             desk = _desk()
             row = {
@@ -413,6 +414,82 @@ def real_mark(price):
     if n != n or n <= 0:
         return None
     return n
+
+
+def is_red_day_lock(reason) -> bool:
+    """The −$5 lock is an entry fact. It is not a fill."""
+    text = str(reason or "")
+    return "−$5" in text or "<= −$5" in text
+
+
+def exit_that_fired(reason):
+    """Keep the exit that already fired. Do not rename a lock into a sale."""
+    text = str(reason or "").strip()
+    if is_red_day_lock(text):
+        return ""
+    if "model-flip" in text:
+        return "model-flip −6%"
+    if "stop" in text and "12" in text:
+        return "stop −12%"
+    return text[:120]
+
+
+def record_close(pos, *, cash, reason, mark=None, fee=None, root=None):
+    """Trade row facts: mark, fee, exit name, and the cash already on the book.
+
+    A missing mark is left missing. The −$5 lock writes no fill and no price.
+    The same fill and exit are not journaled twice. P/L is not retyped.
+    """
+    if is_red_day_lock(reason):
+        return {
+            "action": "skip",
+            "entry_fact": str(reason),
+            "fill": False,
+            "paper_only": True,
+        }
+    if not isinstance(pos, dict):
+        return None
+    label = exit_that_fired(reason or pos.get("exit_name") or "")
+    if not label:
+        return None
+    pnl_before = pos.get("realized_usd")
+    try:
+        pos["cash_after"] = round(float(cash), 4)
+    except (TypeError, ValueError):
+        pass
+    pos["exit_name"] = label
+    stored = real_mark(mark)
+    if stored is not None:
+        pos["exit_mark"] = stored
+    if fee is not None:
+        try:
+            pos["exit_fee"] = round(float(fee), 4)
+        except (TypeError, ValueError):
+            pass
+    if pnl_before is not None:
+        pos["realized_usd"] = pnl_before
+    journal_root = os.path.dirname(BASE) if root is None else root
+    try:
+        if journal_root not in sys.path:
+            sys.path.insert(0, journal_root)
+        import desk_brain
+        return desk_brain.record_decision(
+            journal_root,
+            bot="memecoin",
+            action="sell",
+            ticker=str(pos.get("mint") or pos.get("symbol") or ""),
+            side=str(pos.get("lane") or "long"),
+            reasons=[label],
+            note=str(reason or label)[:240],
+            fill_id=str(pos.get("fill_id") or ""),
+            bid=stored,
+            stake=pos.get("cost_usd"),
+            exit_name=label,
+            fee=pos.get("exit_fee"),
+            cash=pos.get("cash_after"),
+        )
+    except Exception:
+        return None
 
 
 def watch_open(pos, price):
@@ -743,6 +820,7 @@ def scan(st, stats):
         max_open_eff = min(max_open_eff, int(getattr(C, "MAX_OPEN_RED", 2) or 2))
     locked = decide_skip(pnl_today)
     if locked:
+        record_close(None, cash=st.get("cash_usd"), reason=locked)
         print(f"  RED-DAY LOCK: {locked} — new entries off (exits already ran)")
         stats["red_day_lock"] = 1
         return
