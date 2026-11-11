@@ -34,6 +34,42 @@ function saveNotes(notes: StaffNotes) {
   localStorage.setItem(NOTES_KEY, JSON.stringify(notes))
 }
 
+function csvCell(value: string): string {
+  if (/[",\n\r]/.test(value)) return `"${value.replace(/"/g, '""')}"`
+  return value
+}
+
+/** Excel opens this as a spreadsheet. The tower filter chooses the rows. */
+function historyCsv(rows: HistRow[]): string {
+  const lines = [
+    ['When', 'Tower', 'Tower id', 'What', 'Result', 'PnL'].join(','),
+    ...rows.map((row) =>
+      [
+        csvCell(row.when),
+        csvCell(row.botName),
+        csvCell(row.botId),
+        csvCell(row.what),
+        csvCell(row.result),
+        row.pnl == null ? '' : row.pnl.toFixed(2),
+      ].join(','),
+    ),
+  ]
+  return `\uFEFF${lines.join('\r\n')}\r\n`
+}
+
+function downloadHistory(rows: HistRow[], towerId: string) {
+  const blob = new Blob([historyCsv(rows)], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  const slug = towerId === 'all' ? 'all-towers' : towerId
+  link.href = url
+  link.download = `apex-city-history-${slug}.csv`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 function whenMs(when: string): number {
   const cleaned = when.replace(/\s+(Central|CT|UTC|ET|PT)$/i, '')
   const t = Date.parse(cleaned)
@@ -424,6 +460,15 @@ export function BossDashboard({ bots, desk, roi, snap, onClose, onFocusBot }: Pr
                   <option value="all">All</option>
                 </select>
               </label>
+              <button
+                type="button"
+                className="boss-mini"
+                disabled={!history.length}
+                title="Download every settle in this tower filter as a CSV for Excel"
+                onClick={() => downloadHistory(history, historyBot)}
+              >
+                Download CSV
+              </button>
             </div>
             {!history.length ? (
               <p className="boss-muted">No closed paper settles for this filter.</p>

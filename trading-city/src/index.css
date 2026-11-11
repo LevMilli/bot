@@ -1583,6 +1583,11 @@ a {
   cursor: pointer;
 }
 
+.boss-mini:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .boss-history ul,
 .boss-learn ul {
   list-style: none;
