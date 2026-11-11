@@ -442,6 +442,155 @@ def apply_exit(state: dict, pos: dict, mark: float, reason: str, cfg: dict, now:
     return closed
 
 
+FLAT_LINE = "flat, realized 0"
+KNOWN_EXITS = set(EXIT_NAME) | set(EXIT_NAME.values())
+
+
+def _exit_label(pos: dict) -> str:
+    name = str(pos.get("exit_name") or "").strip()
+    if name:
+        return name
+    short = str(pos.get("exit") or "").strip()
+    return EXIT_NAME.get(short, short)
+
+
+def _real_close(row) -> bool:
+    """A close this tower already wrote. A typed gain with no fill is not one."""
+    if not isinstance(row, dict):
+        return False
+    if not str(row.get("ticker") or "").strip() or not str(row.get("fill_id") or "").strip():
+        return False
+    if str(row.get("side") or "buy").lower() not in ("buy", "long"):
+        return False
+    if _exit_label(row) not in KNOWN_EXITS:
+        return False
+    return _num(row.get("pnl")) is not None
+
+
+def _brain(root):
+    if DESK_ROOT not in sys.path:
+        sys.path.insert(0, DESK_ROOT)
+    import desk_brain
+    return desk_brain, DESK_ROOT if root is None else root
+
+
+def _write_flat_line(root):
+    """One explicit flat line. Its realized zero is not a gain."""
+    brain, base = _brain(root)
+    journal = brain.load_journal(base)
+    for prev in journal.get("decisions") or []:
+        if (
+            isinstance(prev, dict)
+            and prev.get("bot") == "coinbase-spot"
+            and prev.get("action") == "flat"
+            and not prev.get("fill_id")
+            and prev.get("note") == FLAT_LINE
+        ):
+            prev["realized"] = 0.0
+            prev.pop("hit", None)
+            prev.pop("result", None)
+            brain.save_journal(journal, base)
+            return prev
+    row = brain.record_decision(
+        base,
+        bot="coinbase-spot",
+        action="flat",
+        reasons=["flat"],
+        note=FLAT_LINE,
+    )
+    row["realized"] = 0.0
+    row.pop("hit", None)
+    row.pop("result", None)
+    fresh = brain.load_journal(base)
+    for prev in fresh.get("decisions") or []:
+        if prev is row or (
+            isinstance(prev, dict)
+            and prev.get("bot") == "coinbase-spot"
+            and prev.get("action") == "flat"
+            and prev.get("note") == FLAT_LINE
+            and not prev.get("fill_id")
+        ):
+            prev["realized"] = 0.0
+            prev.pop("hit", None)
+            prev.pop("result", None)
+    brain.save_journal(fresh, base)
+    row["realized"] = 0.0
+    return row
+
+
+def _write_close(pos: dict, cash, root):
+    """Journal the close already on the ticket. Do not retype P/L or invent a mark."""
+    brain, base = _brain(root)
+    label = _exit_label(pos)
+    mark = real_spot(pos.get("exit_price"))
+    stake = pos.get("stake") if pos.get("stake") is not None else pos.get("cost")
+    row = brain.record_decision(
+        base,
+        bot="coinbase-spot",
+        action="sell",
+        ticker=str(pos.get("ticker") or ""),
+        side=str(pos.get("side") or "buy"),
+        reasons=[label],
+        note=label[:240],
+        fill_id=str(pos.get("fill_id") or ""),
+        bid=mark,
+        stake=stake,
+        exit_name=label,
+        fee=pos.get("fee"),
+        cash=cash,
+    )
+    row.pop("hit", None)
+    row.pop("result", None)
+    return row
+
+
+def record_close(state, claimed=None, *, root=None) -> dict:
+    """A real close, or an explicit flat line.
+
+    Realized stays 0 while nothing has closed. A number passed in for that
+    flat day does not become a gain. A close keeps the pnl, mark, fee, and
+    exit already on the ticket. A missing mark stays missing. The same fill
+    and exit are not written twice. A sale is not labeled a hit.
+    """
+    book = state if isinstance(state, dict) else {}
+    closes = [row for row in (book.get("closed") or []) if _real_close(row)]
+    # A number typed in for the day is not the record. The flat zero stays zero.
+    typed = _num(claimed)
+    if typed is not None and typed != 0 and not closes and isinstance(state, dict):
+        state["realized"] = 0.0
+    if not closes:
+        if isinstance(state, dict):
+            state["realized"] = 0.0
+            state["record"] = "flat"
+        line = _write_flat_line(root)
+        return {
+            "flat": True,
+            "realized": 0.0,
+            "closes": [],
+            "line": line,
+            "claimed": None,
+        }
+    cash = _num(book.get("cash"))
+    written = []
+    for pos in closes:
+        pnl_before = pos.get("pnl")
+        if cash is not None:
+            pos["cash_after"] = round(cash, 4)
+        pos["pnl"] = pnl_before
+        pos.pop("hit", None)
+        pos.pop("result", None)
+        written.append(_write_close(pos, None if cash is None else round(cash, 4), root))
+    realized = round(sum(float(pos["pnl"]) for pos in closes), 4)
+    book["realized"] = realized
+    book["record"] = "close"
+    return {
+        "flat": False,
+        "realized": realized,
+        "closes": written,
+        "claimed": None,
+    }
+
+
 def empty_state(cfg: dict) -> dict:
     return {
         "cash": float(cfg["starter_cash"]),
@@ -791,6 +940,7 @@ def run_once(
         if decision and decision.get("action") == "buy":
             decision["action"] = "skip"
             decision["reason"] = "research only — btc15m owns this factor"
+    record_close(state, root=desk_root)
     state["checks"] = int(state.get("checks") or 0) + 1
     state["last_check"] = now.isoformat(timespec="seconds")
     _write_json(os.path.join(tower, "paper_account.json"), state)
