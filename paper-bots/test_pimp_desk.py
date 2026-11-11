@@ -3,6 +3,7 @@
 import datetime as dt
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -63,6 +64,41 @@ def _write(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(text)
+
+
+def _js_function(source, name):
+    """The function as it appears in bot.py. Brace-matched, skipping quotes."""
+    token = f"function {name}("
+    start = source.find(token)
+    if start < 0:
+        raise AssertionError(name)
+    depth = 0
+    quote = ""
+    seen = False
+    j = start
+    while j < len(source):
+        ch = source[j]
+        if quote:
+            if ch == "\\":
+                j += 2
+                continue
+            if ch == quote:
+                quote = ""
+            j += 1
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            j += 1
+            continue
+        if ch == "{":
+            depth += 1
+            seen = True
+        elif ch == "}":
+            depth -= 1
+            if seen and depth == 0:
+                return source[start:j + 1]
+        j += 1
+    raise AssertionError("unclosed " + name)
 
 
 def _checkout_snapshot():
@@ -1940,6 +1976,126 @@ class PimpDeskTests(unittest.TestCase):
             # Outside the early window: skip.
             afternoon = dt.datetime(2026, 11, 2, 15, 0, tzinfo=pimp_desk.CT)
             self.assertEqual(pimp_desk.run_midnight_broke_reload(tmp, afternoon), [])
+
+    def test_stretch_record_counts_settled_wins_and_losses_in_the_highlight(self):
+        page = os.path.join(os.path.dirname(ROOT), "bot.py")
+        with open(page, encoding="utf-8") as handle:
+            text = handle.read()
+        self.assertIn('BOT_VERSION = "2026-11-11 1.80"', text)
+        self.assertEqual(text.count(
+            '("1.80", "On the paper chart, the win and loss counts follow the stretch you drag. '
+            'Clear it and the full record is back.")'
+        ), 2)
+        self.assertIn("!Number.isFinite(n)||n===0", text)
+        self.assertIn(
+            "const rows=bounds?rowsInSpan(settledResults(), bounds.start, bounds.end):settledResults();",
+            text,
+        )
+        self.assertIn("const wins=rows.filter(row=>Number(row.pnl)>0), losses=rows.filter(row=>Number(row.pnl)<0);", text)
+        self.assertIn("function paintSlips(){paintResults();", text)
+        head = text[text.find("const head=hi>lo"):text.find("const head=hi>lo") + 240]
+        self.assertIn("This stretch '+spikeText(stretchOf(lo,hi).dollars, stretchOf(lo,hi).pct)", head)
+        self.assertNotIn("wins", head)
+        self.assertNotIn("losses", head)
+        with tempfile.TemporaryDirectory() as tmp:
+            _write(os.path.join(tmp, "sports-gap-paper", "gap_bot.py"), QUIET)
+            _write(os.path.join(tmp, "sports-gap-paper", "state.json"), json.dumps({
+                "cash": 20,
+                "open": [{
+                    "contracts": 1, "team": "Open", "ticker": "OPEN", "game": "Open game",
+                    "cost": 3, "opened": "2026-10-30 12:00:00 CT", "fill_id": "open-1",
+                }],
+                "closed": [
+                    {"team": "Alpha", "pnl": -2.5, "closed": "2026-10-28 14:00:00 CT", "fill_id": "a"},
+                    {"team": "Flat", "pnl": 0, "closed": "2026-10-30 13:00:00 CT", "fill_id": "flat"},
+                    {"team": "Bravo", "pnl": -3, "closed": "2026-11-01 11:00:00 CT", "fill_id": "b"},
+                    {"team": "Charlie", "pnl": 4, "closed": "November 2, 2026, 3:00 PM Central", "fill_id": "c"},
+                    {"team": "Echo", "pnl": 1.25, "closed": "2026-11-04 13:00:00 CT", "fill_id": "e"},
+                ],
+            }))
+            snap = pimp_desk.snapshot(tmp)
+            curve = snap["desk"]["curve"]
+            history = []
+            for bot in snap["bots"]:
+                history.extend(bot.get("history") or [])
+        self.assertEqual([point["name"] for point in curve], ["Alpha", "Flat", "Bravo", "Charlie", "Echo"])
+        self.assertEqual([point["pnl"] for point in curve], [-2.5, 0.0, -3.0, 4.0, 1.25])
+        self.assertFalse(any(row.get("team") == "Open" for row in history))
+        script = "const CT_ZONE='America/Chicago';\nvar pimpPick=null, pimpPts=[];\n" + "\n".join(
+            _js_function(text, name) for name in ("ctWallMs", "ctMs", "stretchBounds", "rowsInSpan")
+        ) + r"""
+const fs = require('fs');
+const data = JSON.parse(fs.readFileSync(0, 'utf8'));
+function fail(msg){ throw new Error(msg); }
+function settled(rows){
+  return rows.filter(row => { const n = Number(row.pnl); return Number.isFinite(n) && n !== 0; });
+}
+function tally(rows){
+  return {
+    wins: rows.filter(row => Number(row.pnl) > 0).length,
+    losses: rows.filter(row => Number(row.pnl) < 0).length
+  };
+}
+for (const point of data.curve) {
+  const row = data.history.find(item => item.team === point.name);
+  if (!row) fail('missing ' + point.name);
+  const ms = ctMs(row.closed_at || row.when);
+  const iso = Date.parse(point.t);
+  if (ms !== iso) fail(point.name + ' ' + row.closed_at + ' -> ' + ms + ' vs ' + point.t + ' -> ' + iso);
+}
+const full = tally(settled(data.history));
+if (full.wins !== 2 || full.losses !== 2) fail('full ' + JSON.stringify(full));
+pimpPts = data.curve.map(point => ({ms: Date.parse(point.t), name: point.name, pnl: point.pnl}));
+const iA = pimpPts.findIndex(point => point.name === 'Alpha');
+const iC = pimpPts.findIndex(point => point.name === 'Charlie');
+pimpPick = {lo: iA, hi: iC};
+const bounds = stretchBounds();
+if (!bounds) fail('expected a stretch');
+const span = tally(rowsInSpan(settled(data.history), bounds.start, bounds.end));
+if (span.wins !== 1 || span.losses !== 2) fail('span ' + JSON.stringify(span));
+const timed = rowsInSpan(data.history, bounds.start, bounds.end).map(row => row.team).sort();
+if (timed.join(',') !== 'Alpha,Bravo,Charlie,Flat') fail('teams ' + timed.join(','));
+if (settled(rowsInSpan(data.history, bounds.start, bounds.end)).some(row => row.team === 'Flat')) fail('flat counted');
+pimpPick = {lo: iC, hi: iA};
+const flipped = stretchBounds();
+if (!flipped || flipped.start !== bounds.start || flipped.end !== bounds.end) fail('flip');
+pimpPick = {lo: iA, hi: iA};
+if (stretchBounds() !== null) fail('a single slip keeps the full record');
+pimpPick = null;
+if (stretchBounds() !== null) fail('cleared highlight keeps the full record');
+const outside = settled(data.history.concat([
+  {team:'Before', pnl:-9, closed_at: new Date(bounds.start - 1000).toISOString()},
+  {team:'After', pnl:9, closed_at: new Date(bounds.end + 1000).toISOString()},
+  {team:'Untimed', pnl:-4, closed_at:''}
+]));
+const edged = rowsInSpan(outside, bounds.start, bounds.end);
+if (edged.some(row => row.team === 'Before' || row.team === 'After' || row.team === 'Untimed' || row.team === 'Echo'))
+  fail('leaked ' + edged.map(row => row.team).join(','));
+if (!edged.some(row => row.team === 'Alpha') || !edged.some(row => row.team === 'Charlie')) fail('endpoints');
+console.log('ok');
+"""
+        payload = json.dumps({
+            "history": [{
+                "team": row.get("team"),
+                "pnl": row.get("pnl"),
+                "closed_at": row.get("closed_at"),
+                "when": row.get("when"),
+            } for row in history],
+            "curve": [{
+                "t": point.get("t"),
+                "name": point.get("name"),
+                "pnl": point.get("pnl"),
+            } for point in curve],
+        })
+        proc = subprocess.run(
+            ["node", "-e", script],
+            input=payload,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        self.assertIn("ok", proc.stdout)
 
 
 if __name__ == "__main__":
