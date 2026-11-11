@@ -61,6 +61,17 @@ ASK_MIN, ASK_MAX = 0.70, 0.92
 MAX_SPREAD = 0.05
 MIN_DEPTH = 2
 EDGE_BUFFER = 0.05
+
+
+def decide_floor(edge_buf):
+    """0.05 after the fee. A higher bar stays. A lower number is put back."""
+    try:
+        n = float(edge_buf)
+    except (TypeError, ValueError):
+        return EDGE_BUFFER
+    if n != n or n < EDGE_BUFFER:
+        return EDGE_BUFFER
+    return n
 # Relative cushion floors (fraction of spot) — commodities have different scales.
 MIN_CUSHION_FRAC = {
     "KXNATGAS15M": 0.0015,
@@ -981,6 +992,71 @@ def commodity_red_day_mult(today_pnl) -> float:
     return round(max(RED_DAY_FLOOR, min(1.0, mult)), 4)
 
 
+def red_day_second_buy(today_pnl, buys_this_check) -> str:
+    """A red Chicago day gets one new buy. The next one is a skip, before Adapt."""
+    try:
+        pnl = float(today_pnl)
+    except (TypeError, ValueError):
+        return ""
+    if pnl != pnl or pnl >= 0:
+        return ""
+    if int(buys_this_check or 0) >= 1:
+        return "one new buy on a red day"
+    return ""
+
+
+def sister_mult(series, open_series, closed_today_series=None) -> float:
+    """WTI/Brent half when the sister is open or already closed today.
+
+    An open Brent is the sibling for a WTI ticket. A different series is not.
+    """
+    try:
+        import desk_profit
+        hair = desk_profit.series_corr_haircut(
+            series,
+            open_series=open_series,
+            closed_today_series=closed_today_series,
+        )
+        if hair.get("apply"):
+            half = float(hair.get("mult") or 1.0)
+            if 0 < half <= 1.0:
+                return half
+    except Exception:
+        return 1.0
+    return 1.0
+
+
+def decide_size(ladder, adapted, today_pnl, *, sister=1.0):
+    """Red-day scale and the sister half. Adapt may shrink. It cannot restore.
+
+    A green day with no sister leaves Adapt's number alone. A red day, or an
+    open Brent beside WTI, caps the ticket at the ladder after those cuts.
+    """
+    try:
+        base = float(ladder)
+        got = float(adapted)
+    except (TypeError, ValueError):
+        return 0.0
+    if base != base or got != got or base <= 0 or got < 0:
+        return 0.0
+    red = commodity_red_day_mult(today_pnl)
+    try:
+        half = float(sister)
+    except (TypeError, ValueError):
+        half = 1.0
+    if half != half or half <= 0 or half > 1.0:
+        half = 1.0
+    if red >= 1.0 - 1e-12 and half >= 1.0 - 1e-12:
+        return round(got, 2)
+    scaled = round(base * red * half, 2)
+    if 0 < scaled < 1.0:
+        scaled = 0.0
+    stake = round(min(got, scaled), 2)
+    if 0 < stake < 1.0:
+        stake = 0.0
+    return stake
+
+
 def commodity_same_day_skip(closed, series, prob, side, now: dt.datetime | None = None) -> str:
     """Skip a series × side × bucket that already lost money today.
 
@@ -1126,19 +1202,31 @@ def backfill_commodity_learning(state: dict) -> int:
     return n
 
 
+def series_learning_skip(rows, series, prob, side, hour_ct) -> str:
+    """Cold gold does not block WTI. The learning market is this series."""
+    desk = _desk()
+    return desk.learning_skip(
+        rows,
+        str(series or ""),
+        desk.prob_bucket(prob),
+        side=side,
+        hour_ct=hour_ct,
+    ) or ""
+
+
 def commodity_learning_block(series, prob, side) -> str:
     """Skip a series × bucket that is already cold. Desk error does not block."""
     try:
         from zoneinfo import ZoneInfo
         desk = _desk()
         hour_ct = dt.datetime.now(ZoneInfo("America/Chicago")).hour
-        return desk.learning_skip(
+        return series_learning_skip(
             desk.load_learning(DESK_ROOT),
-            str(series or ""),
-            desk.prob_bucket(prob),
-            side=side,
-            hour_ct=hour_ct,
-        ) or ""
+            series,
+            prob,
+            side,
+            hour_ct,
+        )
     except Exception:
         return ""
 
@@ -1162,7 +1250,7 @@ def drop_worth_watching(entry, mark) -> bool:
     return (e - m) + 1e-12 >= bar
 
 
-def paper_buy(state: dict, ev: dict) -> str:
+def paper_buy(state: dict, ev: dict, buys_this_check: int = 0) -> str:
     none_msg = "No commodity paper buy."
     if ev.get("reasons"):
         return none_msg + " " + "; ".join(ev["reasons"][:3])
@@ -1204,6 +1292,15 @@ def paper_buy(state: dict, ev: dict) -> str:
     )
     if repeat:
         return repeat
+    # Red-day scale, one new buy, and the bucket skip are already decided.
+    # Adapt below cannot put the cut size back.
+    try:
+        today_for_decide = sum_chicago_today_pnl(state.get("closed"))
+    except Exception:
+        today_for_decide = 0.0
+    second = red_day_second_buy(today_for_decide, buys_this_check)
+    if second:
+        return second
     fam = series_family(str(ev.get("series") or ""))
     if fam in ("energy", "metal") and fam in open_families(state):
         return (
@@ -1302,6 +1399,34 @@ def paper_buy(state: dict, ev: dict) -> str:
             notes.append(f"red-day adjust × {day_mult:.2f} (${before:.2f} → ${stake:.2f})")
             plan["notes"] = notes
             plan["commodity_red_day_mult"] = day_mult
+        open_names = [
+            str(p.get("series") or "")
+            for p in (state.get("open") or [])
+            if isinstance(p, dict)
+        ]
+        closed_names = []
+        for p in state.get("closed") or []:
+            if not isinstance(p, dict):
+                continue
+            if closed_stamp_chicago_day(p.get("closed")) != chicago_day_label():
+                continue
+            closed_names.append(str(p.get("series") or ""))
+        half = sister_mult(ev.get("series"), open_names, closed_names)
+        before_cap = float(stake)
+        stake = decide_size(
+            confidence_target(ev.get("p")),
+            stake,
+            sum_chicago_today_pnl(state.get("closed")),
+            sister=half,
+        )
+        if stake + 1e-9 < before_cap:
+            plan = dict(plan or {})
+            notes = list(plan.get("notes") or [])
+            notes.append(
+                f"decide cap ${before_cap:.2f} → ${stake:.2f} "
+                f"(red-day × sister {half:.2f}; adapt cannot restore)"
+            )
+            plan["notes"] = notes
         contracts = desk.contracts_for_stake(per, stake)
     except Exception as exc:
         return f"Desk sizing failed: {type(exc).__name__}"
@@ -1466,11 +1591,11 @@ def main() -> int:
     try:
         desk = _desk()
         cfg = desk.load_settings(DESK_ROOT)
-        edge_buf = float(desk.venue_min_edge("kalshi_commodity15m", cfg))
+        edge_buf = decide_floor(desk.venue_min_edge("kalshi_commodity15m", cfg))
         flip_delta = float(cfg.get("model_flip_delta") or 0.06)
         flip_on = bool(cfg.get("model_flip_exits", True))
     except Exception:
-        edge_buf = EDGE_BUFFER
+        edge_buf = decide_floor(EDGE_BUFFER)
         flip_delta = 0.06
         flip_on = True
 
@@ -2212,7 +2337,7 @@ def main() -> int:
                 note="commodity sticky densify",
             )
             continue
-        msg = paper_buy(account, ev)
+        msg = paper_buy(account, ev, buys)
         print(f"  → {msg}")
         if msg.startswith("Paper buy"):
             buys += 1
