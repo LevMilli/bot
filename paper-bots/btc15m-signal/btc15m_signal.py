@@ -448,6 +448,61 @@ def mark_bid_for_held(pos, *, model_side=None, model_bid=None, market=None):
     return None
 
 
+def real_held_bid(bid):
+    """A held-side bid strictly inside (0, 1). A wipe or a complement is not a mark."""
+    try:
+        n = float(bid)
+    except (TypeError, ValueError):
+        return None
+    if n != n or n <= 0 or n >= 1:
+        return None
+    return n
+
+
+def watch_open(pos, bid, *, model_side=None, model_p=None, market=None):
+    """Mark the open contract at the held-side bid and compare. Does not sell.
+
+    The comparison is the stored take-profit and whether the model still
+    matches the held side. A missing bid, a zero, a wipe, or the other
+    side's price does not replace a prior mark.
+    """
+    if not isinstance(pos, dict):
+        return None
+    held = str(pos.get("side") or "").upper()
+    ms = str(model_side or "").upper()
+    mark = real_held_bid(mark_bid_for_held(
+        pos, model_side=model_side, model_bid=bid, market=market,
+    ))
+    other = real_held_bid(bid)
+    if mark is not None and ms and held and ms != held and other is not None and abs(mark - other) < 1e-12:
+        mark = None
+    try:
+        tp_f = float(pos.get("take_profit")) if pos.get("take_profit") is not None else None
+    except (TypeError, ValueError):
+        tp_f = None
+    if mark is None:
+        pos["watch"] = {
+            "last_mark": pos.get("last_mark"),
+            "take_profit": tp_f,
+            "at_take_profit": False,
+            "model_side": ms or None,
+            "model_matches_held": False,
+            "marked": False,
+        }
+        return pos["watch"]
+    pos["last_mark"] = mark
+    pos["watch"] = {
+        "last_mark": mark,
+        "take_profit": tp_f,
+        "at_take_profit": bool(tp_f is not None and mark + 1e-12 >= tp_f),
+        "model_side": ms or None,
+        "model_p": model_p,
+        "model_matches_held": bool(ms and held and ms == held),
+        "marked": True,
+    }
+    return pos["watch"]
+
+
 def manage_model_flips(
     state, side_now, prob_now, bid, fee, delta, ticker=None, market=None,
 ):
@@ -1862,6 +1917,23 @@ def main():
             )
             print(f"  Depth offered at or below ask: {ev.get('depth', 0):,.0f} contracts")
 
+        if account.get("open"):
+            marked = False
+            for pos in account.get("open") or []:
+                if not isinstance(pos, dict):
+                    continue
+                if ev.get("ticker") and pos.get("ticker") != ev.get("ticker"):
+                    continue
+                before = pos.get("last_mark")
+                watch_open(
+                    pos, ev.get("bid"), model_side=ev.get("side"),
+                    model_p=ev.get("p"), market=m,
+                )
+                if pos.get("last_mark") != before:
+                    marked = True
+            if marked and not IS_SHADOW:
+                save_account(account)
+
         if account.get("open") and ev.get("bid") is not None:
             tp_fee = fee_per_contract(ev["bid"]) if ev["bid"] else 0
             tp_sold = manage_take_profits(
@@ -2343,6 +2415,22 @@ def main():
         ):
             regime = "confident_early"
         print(f"--- ETH {m['ticker']} regime={regime} p={ev_early.get('p')} cushion={ev_early.get('cushion')}")
+        if account.get("open"):
+            marked = False
+            for pos in account.get("open") or []:
+                if not isinstance(pos, dict):
+                    continue
+                if m.get("ticker") and pos.get("ticker") != m.get("ticker"):
+                    continue
+                before = pos.get("last_mark")
+                watch_open(
+                    pos, ev_early.get("bid"), model_side=ev_early.get("side"),
+                    model_p=ev_early.get("p"), market=m,
+                )
+                if pos.get("last_mark") != before:
+                    marked = True
+            if marked and not IS_SHADOW:
+                save_account(account)
         if account.get("open") and ev_early.get("bid") is not None:
             eth_bid = ev_early["bid"]
             eth_tp_fee = fee_per_contract(eth_bid) if eth_bid else 0
