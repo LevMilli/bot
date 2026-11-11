@@ -1347,6 +1347,80 @@ def drop_worth_watching(entry, mark) -> bool:
     return (e - m) + 1e-12 >= bar
 
 
+def real_held_bid(bid):
+    """A held-side bid strictly inside (0, 1). A wipe is not a mark."""
+    try:
+        n = float(bid)
+    except (TypeError, ValueError):
+        return None
+    if n != n or n <= 0 or n >= 1:
+        return None
+    return n
+
+
+def _entry_px(pos):
+    if not isinstance(pos, dict):
+        return None
+    if pos.get("ask") is not None:
+        return pos.get("ask")
+    if pos.get("entry") is not None:
+        return pos.get("entry")
+    return pos.get("price")
+
+
+def watch_open(pos, market):
+    """Mark this open ticket at the held-side listing bid. Does not sell.
+
+    A missing bid, a zero, a wipe, or the other side's price does not replace
+    a prior mark.
+    """
+    if not isinstance(pos, dict):
+        return None
+    held = str(pos.get("side") or "").upper()
+    mark = real_held_bid(listing_bid_for_side(market, held))
+    entry = _entry_px(pos)
+    if mark is None:
+        pos["watch"] = {
+            "last_mark": pos.get("last_mark"),
+            "entry": entry,
+            "marked": False,
+            "drop": False,
+            "fresh_log": False,
+            "sold": False,
+        }
+        return pos["watch"]
+    drop = bool(drop_worth_watching(entry, mark))
+    fresh = bool(drop and not pos.get("drop_watch_logged"))
+    pos["last_mark"] = mark
+    pos["watch"] = {
+        "last_mark": mark,
+        "entry": entry,
+        "marked": True,
+        "drop": drop,
+        "fresh_log": fresh,
+        "sold": False,
+    }
+    return pos["watch"]
+
+
+def watch_opens(state, markets):
+    """Mark every open ticket, including an unsettled Brent. Does not sell."""
+    book = markets if isinstance(markets, dict) else {}
+    notes = []
+    for pos in list((state or {}).get("open") or []):
+        if not isinstance(pos, dict):
+            continue
+        watch = watch_open(pos, book.get(str(pos.get("ticker") or "")))
+        if not watch or not watch.get("fresh_log"):
+            continue
+        pos["drop_watch_logged"] = True
+        notes.append(
+            f"DROP WATCH: {pos.get('ticker')} entry={watch.get('entry')} "
+            f"bid={watch.get('last_mark')} sold=False"
+        )
+    return notes
+
+
 def paper_buy(state: dict, ev: dict, buys_this_check: int = 0) -> str:
     none_msg = "No commodity paper buy."
     if ev.get("reasons"):
@@ -1865,6 +1939,7 @@ def main() -> int:
     candidates = []
     buys = 0
     skip_reasons = []  # first evaluate skip → CARD densify (#396 sibling)
+    watched_ids = set()
     for series, spot, m in windows:
         tick = str(m["ticker"])
         # BTC/ETH densify prefetch book failures into scored reasons → CARD/brain;
@@ -1940,31 +2015,29 @@ def main() -> int:
                 # Held-side listing bid — never complementary model-side ev["bid"]
                 # (BTC #456 sibling). Flip path clears open[] before all-opens densify.
                 held = str(pos.get("side") or "").upper()
+                watch = watch_open(pos, m)
+                watched_ids.add(id(pos))
                 bid_ts = listing_bid_for_side(m, held)
                 if bid_ts is None and held == str(ev.get("side") or "").upper():
                     bid_ts = ev.get("bid")
-                if bid_ts is None:
-                    continue
-                entry_px = (
-                    pos.get("ask") if pos.get("ask") is not None
-                    else pos.get("entry") if pos.get("entry") is not None
-                    else pos.get("price")
-                )
-                if drop_worth_watching(entry_px, bid_ts):
+                if watch and watch.get("fresh_log"):
                     watched = desk_roi_plan.record_adverse_fill(
                         DESK_ROOT,
                         bot="commodity-15m",
                         ticker=tick,
-                        entry_price=entry_px,
-                        mark_price=bid_ts,
+                        entry_price=watch.get("entry"),
+                        mark_price=pos.get("last_mark"),
                         note="commodity open mark down — watch, no extra sell",
                     )
                     if watched.get("cooled") and not pos.get("drop_watch_logged"):
                         pos["drop_watch_logged"] = True
                         print(
-                            f"  DROP WATCH: {tick} entry={entry_px} bid={bid_ts} "
+                            f"  DROP WATCH: {tick} entry={watch.get('entry')} "
+                            f"bid={pos.get('last_mark')} "
                             f"drop={watched.get('drop')} cool={watched.get('minutes')}m"
                         )
+                if bid_ts is None:
+                    continue
                 # Shadow note is once. The drop watch above still runs after that.
                 if pos.get("time_stop_shadowed"):
                     continue
@@ -2134,6 +2207,20 @@ def main() -> int:
                 "stake_est": 25.0,
                 "_ev": ev,
             })
+
+    markets_by_ticker = {
+        str(m_w.get("ticker") or ""): m_w
+        for _series_w, _spot_w, m_w in windows
+        if str(m_w.get("ticker") or "")
+    }
+    rest = {
+        "open": [
+            pos for pos in (account.get("open") or [])
+            if isinstance(pos, dict) and id(pos) not in watched_ids
+        ],
+    }
+    for line in watch_opens(rest, markets_by_ticker):
+        print(f"  {line}")
 
     # Densify time-stop shadow across ALL opens (not only current-window ticker).
     # Reuses window bids when present; best-effort market fetch otherwise.
