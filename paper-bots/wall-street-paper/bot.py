@@ -184,6 +184,25 @@ def route_question(question) -> dict:
     return {"to": "city guide", "guide": True, "bought": False, "sold": False, "trade": False}
 
 
+def refuse_floor(ticket=None) -> dict:
+    """No buy, no sell, no stake, and no failsafe.
+
+    A dropping ticket stays the holding tower's exit. It is not a button here.
+    """
+    holder = None
+    if isinstance(ticket, dict):
+        holder = str(ticket.get("tower") or ticket.get("id") or "").strip() or None
+    return {
+        "bought": False,
+        "sold": False,
+        "stake": 0,
+        "failsafe": False,
+        "button": False,
+        "holder": holder,
+        "reason": "the holding tower's exit" if holder else "no button on this floor",
+    }
+
+
 def evaluate() -> dict:
     seats = sum(int(row["seats"]) for row in DEPARTMENTS)
     if seats != HEADCOUNT:
@@ -206,6 +225,7 @@ def main() -> int:
     read_book(snap)
     explain_book(snap)
     route_question("")
+    refuse_floor(None)
     print("SIGNAL: SKIP " + row["reason"])
     print("CARD: " + row["reason"])
     print("no trade")
