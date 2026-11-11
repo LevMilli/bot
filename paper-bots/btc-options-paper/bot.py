@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """BTC options — paper shadow. Logs only. Buys nothing.
 
-The series ticker is read from the repo. If it is not named, this records
-that and skips. No stake. No desk risk share. Never LIVE.
+The series is read from the public API. An open book is logged.
+If the public API does not list it, the card says so and this skips.
+No stake. No desk risk share. Never LIVE.
 """
 from __future__ import annotations
 

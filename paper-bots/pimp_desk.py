@@ -4765,8 +4765,8 @@ def _install_shadow_loggers() -> None:
             "folder": spec["folder"],
             "script": "bot.py",
             "blurb": (
-                "Shadow logger. Records the series when the repo names it, "
-                "and records that the ticker is missing otherwise. "
+                "Shadow logger. Reads the public series and logs the open book. "
+                "A series the public API does not list is named on the card and skipped. "
                 "Buys nothing and takes no stake."
             ),
             "state": "paper_account.json",
@@ -4784,7 +4784,7 @@ def _install_shadow_loggers() -> None:
                 "The tower does not buy. It logs and leaves the book flat",
                 "Shadow only — spends no desk cash and takes no tower risk share",
                 spec["rule"],
-                "A missing series ticker is recorded and skipped. No ticker, fill, or fair is invented",
+                "A series the public API does not list is named on the card and skipped. No ticker, fill, or fair is invented",
                 "Stake stays 0",
             ],
             "sell": [
