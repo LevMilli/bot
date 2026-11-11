@@ -37,6 +37,14 @@ MIN_FAIR_ACCURATE = 0.80
 MIN_FAIR_SPEED = 0.72
 MIN_GAP_SPEED_EXTRA = 0.02   # speed lane needs +2¢ edge after fee vs desk venue
 MIN_FAIR_PROB = MIN_FAIR_ACCURATE  # legacy name used in logs
+# Extra paper size only after this tower's own settles are actually accurate.
+# Desk play-big starts at 80%. Sports waits for 85%, n≥30, Wilson lower ≥70%,
+# and a non-negative average. A short hot streak does not get the extra dollars.
+SPORTS_ACCURACY_HIT = 0.85
+SPORTS_ACCURACY_MIN_N = 30
+SPORTS_ACCURACY_CI = 0.70
+SPORTS_ACCURACY_MULT = 1.50
+DESK_PLAY_BIG_MULT = 1.75
 DESK_ROOT = os.path.dirname(HERE)
 CLOSE_GAME_BAND = (0.40, 0.60)  # skip if fair prob for home team is in this band
 MAX_SPREAD = 0.05         # skip illiquid markets (ask - bid wider than 5c)
@@ -85,11 +93,50 @@ def fair_lane_floors(league: str = "", root: str | None = None) -> dict:
     }
 
 
+def sports_accuracy_ready(perf: dict | None) -> bool:
+    """True when this tower's settles earned the extra size.
+
+    Point hit ≥ 85%, at least 30 closes, Wilson lower bound ≥ 70%, and
+    expectancy ≥ 0. Fee floors are not involved.
+    """
+    perf = perf or {}
+    try:
+        n = int(perf.get("n") or 0)
+        hit = float(perf.get("hit_rate"))
+        ci = float(perf.get("hit_ci_low"))
+        ev = float(perf.get("expectancy"))
+    except (TypeError, ValueError):
+        return False
+    return (
+        n >= int(SPORTS_ACCURACY_MIN_N)
+        and hit + 1e-12 >= float(SPORTS_ACCURACY_HIT)
+        and ci + 1e-12 >= float(SPORTS_ACCURACY_CI)
+        and ev + 1e-12 >= 0.0
+    )
+
+
+def apply_sports_accuracy_size(stake, plan: dict | None) -> float:
+    """Strip the desk's 80% size-up. Add 1.50× only after the 85% gate."""
+    try:
+        dollars = float(stake)
+    except (TypeError, ValueError):
+        return 0.0
+    plan = plan or {}
+    if plan.get("play_big"):
+        dollars = dollars / float(DESK_PLAY_BIG_MULT)
+    if sports_accuracy_ready(plan.get("perf")) and not plan.get("play_safe"):
+        dollars = dollars * float(SPORTS_ACCURACY_MULT)
+    dollars = round(max(0.0, dollars), 2)
+    if 0 < dollars < 1.0:
+        return 0.0
+    return dollars
+
+
 def stake_for_model(fair, desk=None, cfg=None, edge=None, open_risk_used=0.0, ask=None, spread=None, ticker=None):
     """Paper dollars for one sports fill — Kelly-lite + shared vol/learn adapt."""
     if desk is not None:
         try:
-            return float(desk.stake_dollars_for(
+            quoted = desk.stake_dollars_for(
                 "sports-gap",
                 fair,
                 edge=edge,
@@ -105,7 +152,13 @@ def stake_for_model(fair, desk=None, cfg=None, edge=None, open_risk_used=0.0, as
                     "cushion": abs(float(fair) - 0.5) if fair is not None else None,
                     "sigma": 0.25,
                 },
-            ))
+                return_plan=True,
+            )
+            if isinstance(quoted, tuple):
+                stake, plan = quoted
+            else:
+                stake, plan = quoted, {}
+            return apply_sports_accuracy_size(stake, plan)
         except Exception:
             try:
                 return float(desk.paper_stake_dollars(fair, cfg))
