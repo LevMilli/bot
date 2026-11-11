@@ -19,10 +19,10 @@ def format_brief(day, skip_reason, risk_ok, risk_msg, state, event_ticker, candi
     elif not risk_ok:
         lines.append(f"Today: NO TRADE - {risk_msg}")
     else:
-        lines.append("Today: tradable. Scan runs at 12:30 PM CT; settles 3:00 PM CT.")
+        lines.append("Today: tradable. Scan runs 12:00–2:00 PM CT; settles 3:00 PM CT.")
     lines.append(f"Contract family: {event_ticker or 'not listed yet'}")
     if candidates:
-        lines.append("Right now in the 80-90c band (prices will move before 12:30):")
+        lines.append("Right now in the 80-90c band (prices will move before the noon scan):")
         for c in candidates[:5]:
             lines.append(f"  - {c['side'].upper()} {c['ticker']} ask {c['ask']*100:.0f}c (spread {c['spread']*100:.0f}c)")
     elif event_ticker:

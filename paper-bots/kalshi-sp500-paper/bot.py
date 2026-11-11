@@ -3,7 +3,7 @@ bot.py - the Kalshi PAPER bot. One run = one step.
 
   python3 bot.py brief  [--dry-run] [--date YYYY-MM-DD]   morning summary (text only)
   python3 bot.py scan   [--dry-run] [--date YYYY-MM-DD] [--any-time]
-                                                         12:30 PM CT: pick & paper-buy
+                                                         12:00-2:00 PM CT: pick & paper-buy
   python3 bot.py settle [--dry-run]                      after 3 PM CT: settle open paper trades
 
 Safety
@@ -12,7 +12,7 @@ Safety
   * --dry-run: does everything except write paper_state.json, Trade_Ledger.md, Learning.md.
   * --date lets you point the scan at another day's 3 PM CT contract (e.g. tomorrow's,
     which is already listed) for testing. Combined with --dry-run it is harmless.
-  * --any-time: skip the "is it 12:30-2:55 PM CT?" clock check (testing only).
+  * --any-time: skip the 12:00-2:00 PM CT clock check (testing only).
 """
 import argparse
 import datetime as dt
@@ -163,12 +163,14 @@ def step_scan(args, state, day):
             )
     except Exception as exc:
         print(f"Pre-noon INX warm skipped: {type(exc).__name__}")
-    # 1) clock check: only between 12:30 and 2:55 PM CT on the target day
+    # 1) clock check: 12:00–2:00 PM CT. Outside it, write "clock" and stop.
     if not args.any_time:
-        start = dt.datetime.combine(day, dt.time.fromisoformat(CFG["entry_time_ct"]), CT)
-        end = dt.datetime.combine(day, dt.time(14, 55), CT)
-        if not (start <= now <= end):
-            print(f"Not scan time: now {now:%Y-%m-%d %H:%M} CT, window {start:%H:%M}-{end:%H:%M} CT on {day}. Use --any-time to test.")
+        if risk_manager.noon_window_reason(now, day, CFG["entry_time_ct"]):
+            reason = "clock"
+            print(alerts.format_skip_note(day, reason))
+            if not args.dry_run:
+                logger.learn(f"{day}: no trade - {reason}", "skip")
+                _densify_scan_skip(reason)
             return
     # 2) risk rules (skip days, 1/day, loss limit, kill switch)
     if state.get("halted"):
@@ -537,7 +539,7 @@ def main():
     ap.add_argument("step", choices=["brief", "scan", "settle"])
     ap.add_argument("--dry-run", action="store_true", help="read and decide, but write nothing")
     ap.add_argument("--date", help="target day YYYY-MM-DD (default: today in CT)")
-    ap.add_argument("--any-time", action="store_true", help="ignore the 12:30-2:55 PM CT scan window (testing)")
+    ap.add_argument("--any-time", action="store_true", help="ignore the 12:00-2:00 PM CT scan window (testing)")
     args = ap.parse_args()
     day = dt.date.fromisoformat(args.date) if args.date else dt.datetime.now(CT).date()
     if not args.dry_run:

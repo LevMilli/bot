@@ -506,7 +506,7 @@ BOT_PLANS = {
     },
     "kalshi-sp": {
         "buy": [
-            "Up to 3 scans/day 12:00–14:55 CT",
+            "Up to 3 scans/day 12:00–14:00 CT",
             "Safest YES/NO ask in the 80–92¢ band; venue kalshi_inx edge",
             "Stake floor($25 / ask); correlation + learning clear",
             "Adapt layer still logs vol/performance for desk study",
