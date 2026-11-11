@@ -89,6 +89,22 @@ def series_family(series: str) -> str:
     return "other"
 
 
+def scan_quote(series, spot, book, *, sister_spot=None, sister_book=None):
+    """This series on the commodity clock. A sister quote is not a substitute.
+
+    Returns (spot, book, reason). No own book is a skip. sister_spot and
+    sister_book are ignored. EIA blackouts stay in evaluate.
+    """
+    del sister_spot, sister_book
+    if str(series or "") not in SERIES:
+        return None, None, "not on the commodity clock"
+    if spot is None:
+        return None, None, "no spot"
+    if book is None:
+        return None, None, "no book"
+    return spot, book, ""
+
+
 def open_families(state: dict) -> set[str]:
     out = set()
     for pos in state.get("open") or []:
@@ -1643,7 +1659,30 @@ def main() -> int:
                 "spot": spot,
             }
         else:
-            ev = evaluate(m, spot, edge_buf, book=books.get(tick))
+            own_book = books.get(tick)
+            _quote_spot, quote_book, scan_reason = scan_quote(
+                series, spot, own_book,
+            )
+            if scan_reason:
+                print(f"--- {series} {tick} SKIP -> {scan_reason}")
+                skip_reasons.append(scan_reason)
+                ev = {
+                    "reasons": [scan_reason],
+                    "side": "YES" if float(spot) > float(m["target"]) else "NO",
+                    "ask": m.get("yes_ask"),
+                    "bid": m.get("yes_bid"),
+                    "p": None,
+                    "z": None,
+                    "edge": None,
+                    "depth": 0,
+                    "ticker": tick,
+                    "series": series,
+                    "close_time": m.get("close_time"),
+                    "target": m.get("target"),
+                    "spot": spot,
+                }
+            else:
+                ev = evaluate(m, spot, edge_buf, book=quote_book)
         print(
             f"  {series} {m['ticker']} spot={spot:.5f} target={m['target']} "
             f"side={ev.get('side')} p={ev.get('p')} reasons={ev.get('reasons')}"
