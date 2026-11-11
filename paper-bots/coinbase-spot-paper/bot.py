@@ -303,6 +303,38 @@ def btc_yes_open(desk_root: str) -> bool | None:
     return False
 
 
+def real_spot(price):
+    """A Coinbase price above zero. Missing, zero, and a wipe are not a mark."""
+    n = _num(price)
+    if n is None or n <= 0:
+        return None
+    return n
+
+
+def watch_sleeve(state, prices) -> dict:
+    """Mark an open long at its own real price. A flat sleeve stays flat.
+
+    A missing price is not filled in with the −1.5% stop. This does not sell.
+    """
+    book = state if isinstance(state, dict) else {}
+    opens = [row for row in book.get("open") or [] if isinstance(row, dict)]
+    quotes = prices if isinstance(prices, dict) else {}
+    if not opens:
+        book["watch"] = "flat"
+        return {"flat": True, "sold": False, "marks": []}
+    marks = []
+    for pos in opens:
+        product = str(pos.get("ticker") or "")
+        mark = real_spot(quotes.get(product))
+        if mark is None:
+            marks.append({"product": product, "marked": False, "sold": False})
+            continue
+        pos["last_mark"] = mark
+        marks.append({"product": product, "marked": True, "sold": False, "last_mark": mark})
+    book["watch"] = "marked"
+    return {"flat": False, "sold": False, "marks": marks}
+
+
 def exit_reason(pos: dict, mark: float, z: float | None, cfg: dict, now: dt.datetime) -> str:
     entry = _num(pos.get("entry_price"))
     if entry is None or entry <= 0 or mark <= 0:
@@ -611,6 +643,12 @@ def run_once(
             decisions[product] = decide(decision, state.get("closed") or [], cfg, adapted=None)
     blocked = os.environ.get("DESK_BLOCK_ENTRIES") == "1"
     btc_open = btc_yes_open(desk_root)
+    spot_prices = {}
+    for product, closes in books.items():
+        cleaned = read_closes(closes)
+        if cleaned:
+            spot_prices[product] = cleaned[-1]
+    watch_sleeve(state, spot_prices)
     sold = []
     for pos in list(state["open"]):
         product = str(pos.get("ticker") or "")
