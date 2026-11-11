@@ -153,6 +153,37 @@ def _load_snapshot(path: str):
     return data if isinstance(data, dict) else None
 
 
+TOWERS = (
+    ("sports-sharp-lag", ("sports sharp lag", "sharp lag")),
+    ("commodity-15m", ("commodity",)),
+    ("btc15m", ("btc 15-minute", "btc 15 minute")),
+    ("btc-carry", ("btc carry",)),
+    ("kalshi-sized", ("sized kalshi",)),
+    ("kalshi-sp", ("kalshi s&p",)),
+    ("coinbase-spot", ("coinbase",)),
+    ("sports-gap", ("sports gap",)),
+    ("fed-watch", ("fed watch",)),
+    ("memecoin", ("memecoin",)),
+    ("exclusive-set", ("exclusive set",)),
+    ("wall-street", ("wall street",)),
+)
+
+
+def route_question(question) -> dict:
+    """Send one tower's question to that tower. A wider question stays with the city guide.
+
+    Wall Street does not place the trade.
+    """
+    text = str(question or "").lower()
+    found = []
+    for ident, aliases in TOWERS:
+        if ident in text or any(alias in text for alias in aliases):
+            found.append(ident)
+    if len(found) == 1:
+        return {"to": found[0], "guide": False, "bought": False, "sold": False, "trade": False}
+    return {"to": "city guide", "guide": True, "bought": False, "sold": False, "trade": False}
+
+
 def evaluate() -> dict:
     seats = sum(int(row["seats"]) for row in DEPARTMENTS)
     if seats != HEADCOUNT:
@@ -174,6 +205,7 @@ def main() -> int:
     snap = _load_snapshot(os.path.join(os.path.dirname(os.path.abspath(__file__)), "city_book.json"))
     read_book(snap)
     explain_book(snap)
+    route_question("")
     print("SIGNAL: SKIP " + row["reason"])
     print("CARD: " + row["reason"])
     print("no trade")
