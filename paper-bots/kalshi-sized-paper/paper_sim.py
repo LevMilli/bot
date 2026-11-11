@@ -187,6 +187,66 @@ def watch_opens(state, quotes):
     return notes
 
 
+def failsafe_sale(pos, bid, *, floor=0.50, quote_ticker=None):
+    """Sell this tower's contract at its own bid minus the taker.
+
+    An S&P contract is not sold. A missing bid is not a sale.
+    The sale does not open another ticket.
+    """
+    if not _sized_row(pos):
+        return None
+    if quote_ticker is not None and str(quote_ticker) != str(pos.get("ticker") or ""):
+        return None
+    mark = real_side_bid(bid)
+    if not bid_under_exit(bid, floor):
+        return None
+    try:
+        contracts = float(pos.get("contracts") or 0)
+        cost = float(pos.get("cost") or 0)
+        entry_fee = float(pos.get("fee") or 0)
+    except (TypeError, ValueError):
+        return None
+    if contracts <= 0 or mark is None:
+        return None
+    fee = taker_fee(contracts, mark)
+    proceeds = round(contracts * mark - fee, 4)
+    pnl = round(proceeds - cost - entry_fee, 4)
+    return {
+        "exit": BUY_EXIT_RULE,
+        "exit_price": mark,
+        "exit_fee": fee,
+        "payout": proceeds,
+        "pnl": pnl,
+        "opens_new_ticket": False,
+        "unlocks_fill": False,
+    }
+
+
+def apply_failsafe(state, pos, bid, *, floor=0.50, quote_ticker=None):
+    """Close this tower's open row. The day's fill stays counted."""
+    if not isinstance(state, dict) or not isinstance(pos, dict):
+        return None
+    if pos not in (state.get("open") or []):
+        return None
+    sale = failsafe_sale(pos, bid, floor=floor, quote_ticker=quote_ticker)
+    if not isinstance(sale, dict) or sale.get("opens_new_ticket") or sale.get("unlocks_fill"):
+        return None
+    state["bankroll"] = round(float(state.get("bankroll") or 0) + float(sale["payout"]), 4)
+    pos.update({
+        "status": "sold",
+        "exit": sale["exit"],
+        "exit_price": sale["exit_price"],
+        "exit_fee": sale["exit_fee"],
+        "payout": sale["payout"],
+        "pnl": sale["pnl"],
+        "settled_at": dt.datetime.now().isoformat(timespec="seconds"),
+        "paper_only": True,
+    })
+    state["open"] = [p for p in state["open"] if p is not pos]
+    state.setdefault("closed", []).append(pos)
+    return sale
+
+
 def taker_fee(contracts, price, rate=None):
     """Kalshi taker fee, rounded up to the cent. Tiny epsilon avoids 0.26000000001 -> 0.27."""
     rate = CFG["taker_fee_rate"] if rate is None else rate
