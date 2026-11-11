@@ -57,7 +57,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 log = logging.getLogger("picksbot")
-BOT_VERSION = "2026-10-16 1.79"   # shown in /help and the startup log, so you can tell which upload is live
+BOT_VERSION = "2026-11-11 1.80"   # shown in /help and the startup log, so you can tell which upload is live
 ROADMAP_NOW = "L1"                # the later list this upload is filling; r67–r71 are rolled out
 BOT_UPDATES = [  # posted to the recap channel once when this version first comes up
     ("r38", "Tap a player in search for last-20 games vs a line, PrizePicks-style (same as /trend)."),
@@ -220,6 +220,7 @@ BOT_UPDATES = [  # posted to the recap channel once when this version first come
     ("1.77", "Every game in the last 30 shows as a bar on the player chart."),
     ("1.78", "The bot carries a license, and /help states it tracks picks and is not a sportsbook."),
     ("1.79", "Staff HQ shows when the head admin leaves, and a ban signs that person out of the dashboard."),
+    ("1.80", "On the paper chart, the win and loss counts follow the stretch you drag. Clear it and the full record is back."),
 ]
 # Lines for the member board's What's new card. The recap channel still gets BOT_UPDATES.
 MEMBER_NEWS = [
@@ -284,6 +285,7 @@ MEMBER_NEWS = [
     ("1.77", "Every game in the last 30 shows as a bar on the player chart."),
     ("1.78", "The bot carries a license, and /help states it tracks picks and is not a sportsbook."),
     ("1.79", "Staff HQ shows when the head admin leaves, and a ban signs that person out of the dashboard."),
+    ("1.80", "On the paper chart, the win and loss counts follow the stretch you drag. Clear it and the full record is back."),
 ]
 # The map through r50. Later uploads fill these in; nothing already live is removed.
 BOT_ROADMAP = [
@@ -41031,10 +41033,46 @@ function resultCard(t){const n=Number(t.pnl);
 function sideBtn(side, n, pressed){const word=side==='win'?(n===1?'win':'wins'):(n===1?'loss':'losses');
  return h('button',{type:'button','data-side':side,'aria-pressed':pressed?'true':'false','aria-expanded':pressed?'true':'false',
   'aria-label':String(n)+' '+word,class:side==='win'?'win':'loss'}, h('b',{text:String(n)}), h('small',{text:word}))}
+function ctWallMs(yy,mm,dd,h,minute,second){
+ let utc=Date.UTC(yy,mm-1,dd,h,minute,second);
+ for(let i=0;i<4;i++){
+  const bits=new Intl.DateTimeFormat('en-US',{timeZone:CT_ZONE,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date(utc));
+  const q={}; bits.forEach(p=>{if(p.type!=='literal') q[p.type]=p.value});
+  utc+=Date.UTC(yy,mm-1,dd,h,minute,second)-Date.UTC(+q.year,+q.month-1,+q.day,+q.hour,+q.minute,+q.second)}
+ return utc}
+function ctMs(text){
+ const raw=String(text||'').trim();
+ if(!raw||raw==='no check yet') return NaN;
+ const months={january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12};
+ const named=raw.match(/^(January|February|March|April|May|June|July|August|September|October|November|December) (\d\d?), (\d\d\d\d), (\d\d?):(\d\d)(?::(\d\d))? (AM|PM)(?: Central| CT)?$/i);
+ if(named){const month=months[named[1].toLowerCase()];
+  let hour=(+named[4])%12; if(String(named[7]).toUpperCase()==='PM') hour+=12;
+  return ctWallMs(+named[3], month, +named[2], hour, +named[5], +(named[6]||0))}
+ const clock=raw.match(/^(\d\d\d\d)-(\d\d)-(\d\d)(?:[ T](\d\d):(\d\d)(?::(\d\d))?)?(?: CT| Central)?$/);
+ if(clock && raw.indexOf('T')<0 && (/CT|Central/i.test(raw) || raw.length===10))
+  return ctWallMs(+clock[1], +clock[2], +clock[3], +(clock[4]||0), +(clock[5]||0), +(clock[6]||0));
+ const ms=Date.parse(raw);
+ return Number.isFinite(ms)?ms:NaN}
+function stretchBounds(){
+ if(!pimpPick||!pimpPts.length) return null;
+ const lo=Math.max(0, Math.min(pimpPick.lo, pimpPick.hi));
+ const hi=Math.min(pimpPts.length-1, Math.max(pimpPick.lo, pimpPick.hi));
+ if(!(hi>lo)) return null;
+ const start=Number(pimpPts[lo].ms), end=Number(pimpPts[hi].ms);
+ if(!Number.isFinite(start)||!Number.isFinite(end)) return null;
+ return {start:Math.min(start,end), end:Math.max(start,end)}}
+function rowsInSpan(rows, startMs, endMs){
+ const lo=Number(startMs), hi=Number(endMs);
+ if(!Number.isFinite(lo)||!Number.isFinite(hi)) return rows||[];
+ const a=Math.min(lo,hi), b=Math.max(lo,hi);
+ return (rows||[]).filter(row=>{const ms=ctMs((row&&(row.closed_at||row.when))||'');
+  return Number.isFinite(ms)&&ms>=a&&ms<=b})}
 function paintResults(){const box=$('#eqwl'), list=$('#eqresults');
- const rows=settledResults();
+ const bounds=stretchBounds();
+ const rows=bounds?rowsInSpan(settledResults(), bounds.start, bounds.end):settledResults();
  const wins=rows.filter(row=>Number(row.pnl)>0), losses=rows.filter(row=>Number(row.pnl)<0);
- if(box) put(box, sideBtn('win', wins.length, pimpSide==='win'), sideBtn('loss', losses.length, pimpSide==='loss'));
+ if(box){box.setAttribute('aria-label', bounds?'Paper wins and losses in this stretch':'Paper wins and losses');
+  put(box, sideBtn('win', wins.length, pimpSide==='win'), sideBtn('loss', losses.length, pimpSide==='loss'))}
  if(!list) return;
  if(pimpSide!=='win'&&pimpSide!=='loss'){list.hidden=true; put(list); return}
  const shown=pimpSide==='win'?wins:losses;
@@ -41071,7 +41109,7 @@ function stretchOf(lo, hi){const start=pimpPts[lo].v, end=pimpPts[hi].v, dollars
   if(Number.isFinite(s)){saw=true; stake+=Math.abs(s)}}
   if(saw&&stake>=0.01) pct=Math.round(dollars/stake*1000)/10}
  return {dollars:dollars, pct:pct}}
-function paintSlips(){const box=$('#pimpslips'), hint=$('#pimpeqhint');
+function paintSlips(){paintResults(); const box=$('#pimpslips'), hint=$('#pimpeqhint');
  if(hint) hint.hidden=!pimpPts.length||!!pimpPick;
  if(!box) return;
  if(!pimpPick||!pimpPts.length){box.hidden=true; put(box); return}
@@ -41092,13 +41130,7 @@ function chartRange(){
  const parts=new Intl.DateTimeFormat('en-US',{timeZone:CT_ZONE,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date(now));
  const g={}; parts.forEach(p=>{if(p.type!=='literal') g[p.type]=p.value});
  const y=+g.year, m=+g.month, d=+g.day, hh=+g.hour, mi=+g.minute, ss=+g.second;
- function wall(yy,mm,dd,h,minute,second){
-  let utc=Date.UTC(yy,mm-1,dd,h,minute,second);
-  for(let i=0;i<4;i++){
-   const bits=new Intl.DateTimeFormat('en-US',{timeZone:CT_ZONE,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date(utc));
-   const q={}; bits.forEach(p=>{if(p.type!=='literal') q[p.type]=p.value});
-   utc+=Date.UTC(yy,mm-1,dd,h,minute,second)-Date.UTC(+q.year,+q.month-1,+q.day,+q.hour,+q.minute,+q.second)}
-  return utc}
+ function wall(yy,mm,dd,h,minute,second){return ctWallMs(yy,mm,dd,h,minute,second)}
  let start;
  if(pimpRange==='ytd') start=wall(y,1,1,0,0,0);
  else {const n=pimpRange==='12m'?12:pimpRange==='9m'?9:pimpRange==='6m'?6:3;
