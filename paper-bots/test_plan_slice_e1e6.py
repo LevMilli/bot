@@ -33,6 +33,52 @@ class PlanSliceE1E6Tests(unittest.TestCase):
         self.assertFalse(btc.eth_early_should_buy("volatile_hold", []))
         self.assertFalse(btc.eth_early_should_buy("confident_early", [], delay_eth=True))
 
+    def test_late_single_keeps_fee_floor_and_one_contract_bar(self):
+        btc = _load_btc_signal()
+        self.assertEqual(btc.EDGE_BUFFER, 0.05)
+        self.assertEqual(btc.MIN_MODEL_ACCURATE, 0.80)
+        self.assertEqual((btc.ASK_MIN, btc.ASK_MAX), (0.70, 0.92))
+        self.assertEqual(btc.MIN_CUSHION_USD, 35)
+        self.assertEqual(btc.MIN_CUSHION_ETH, 1.5)
+        self.assertEqual(btc.PARLAY_MIN_MIN, 1.0)
+        self.assertEqual(btc.PARLAY_MAX_MIN, 5.0)
+
+        def row(**overrides):
+            base = {
+                "reasons": [],
+                "min_left": 3.0,
+                "p": 0.86,
+                "lane": "accurate",
+                "cushion": 40.0,
+                "ask": 0.78,
+                "edge": 0.06,
+                "spread": 0.02,
+                "depth": 5,
+                "calendar_loaded": True,
+                "news": None,
+            }
+            base.update(overrides)
+            return base
+
+        self.assertTrue(btc.late_single_ready(row(), min_cushion=35, edge_floor=0.05))
+        self.assertTrue(btc.late_single_ready(row(cushion=1.5), min_cushion=1.5, edge_floor=0.05))
+        self.assertFalse(btc.late_single_ready(row(min_left=0.4), min_cushion=35, edge_floor=0.05))
+        self.assertFalse(btc.late_single_ready(row(min_left=8), min_cushion=35, edge_floor=0.05))
+        self.assertFalse(btc.late_single_ready(row(p=0.79), min_cushion=35, edge_floor=0.05))
+        self.assertFalse(btc.late_single_ready(row(lane="speed", p=0.80), min_cushion=35, edge_floor=0.05))
+        self.assertFalse(btc.late_single_ready(row(cushion=34), min_cushion=35, edge_floor=0.05))
+        self.assertFalse(btc.late_single_ready(row(ask=0.93), min_cushion=35, edge_floor=0.05))
+        self.assertFalse(btc.late_single_ready(row(edge=0.04), min_cushion=35, edge_floor=0.05))
+        # A caller cannot lower the locked 0.05 floor.
+        self.assertFalse(btc.late_single_ready(row(edge=0.03), min_cushion=35, edge_floor=0.01))
+        self.assertFalse(btc.late_single_ready(row(reasons=["news"]), min_cushion=35, edge_floor=0.05))
+        self.assertFalse(btc.late_single_ready(row(calendar_loaded=False), min_cushion=35, edge_floor=0.05))
+        with open(os.path.join(ROOT, "btc15m-signal", "btc15m_signal.py"), encoding="utf-8") as handle:
+            src = handle.read()
+        self.assertEqual(src.count("late_single_ready("), 3)
+        self.assertIn("late_singles < 1", src)
+        self.assertNotIn("LIVE_ORDERS = True", src)
+
     def test_eia_inventory_blackout_energy_only(self):
         eia_blackout.self_check()
         now = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
