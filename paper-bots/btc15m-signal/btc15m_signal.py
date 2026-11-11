@@ -66,20 +66,63 @@ PAPER_CASH = 100.0
 IS_SHADOW = os.environ.get("DESK_SHADOW") == "1"
 
 
+FEE_FLOOR = 0.05
+
+
+def decide_floor(edge_buf):
+    """0.05 after the fee. A higher bar stays. A lower number is put back."""
+    try:
+        n = float(edge_buf)
+    except (TypeError, ValueError):
+        return FEE_FLOOR
+    if n != n or n < FEE_FLOOR:
+        return FEE_FLOOR
+    return n
+
+
+def series_for(ticker, series=None):
+    """Learning skip is this series, not one blended crypto bucket."""
+    text = str(series or "").strip().upper()
+    if text:
+        return text
+    ticker_u = str(ticker or "").upper()
+    if ticker_u.startswith("KXETH"):
+        return "KXETH15M"
+    return "KXBTC15M"
+
+
+def cleared_stake(base, adapted, *, proved_80):
+    """Adapt may shrink a cleared ticket. It does not size up without 80%."""
+    try:
+        b = float(base)
+        a = float(adapted)
+    except (TypeError, ValueError):
+        return base
+    if a > b + 1e-9 and not proved_80:
+        return b
+    return a
+
+
 def _edge_buffer():
-    """Venue kalshi_btc15m from desk, or shadow overlay, else local EDGE_BUFFER."""
+    """Venue kalshi_btc15m from desk, or shadow overlay, else local EDGE_BUFFER.
+
+    Never below 0.05. A shadow bar above the floor, such as 0.08, stays.
+    """
+    raw = None
     shadow = os.environ.get("DESK_SHADOW_VENUE_EDGE")
     if shadow not in (None, ""):
         try:
-            return float(shadow)
+            raw = float(shadow)
         except (TypeError, ValueError):
-            pass
-    try:
-        desk = _desk()
-        cfg = desk.load_settings(DESK_ROOT)
-        return float(desk.venue_min_edge("kalshi_btc15m", cfg))
-    except Exception:
-        return float(EDGE_BUFFER)
+            raw = None
+    if raw is None:
+        try:
+            desk = _desk()
+            cfg = desk.load_settings(DESK_ROOT)
+            raw = float(desk.venue_min_edge("kalshi_btc15m", cfg))
+        except Exception:
+            raw = float(EDGE_BUFFER)
+    return decide_floor(raw)
 
 
 def load_account():
@@ -492,7 +535,7 @@ def manage_take_profits(state, bid, fee, ticker=None, market=None, model_side=No
     return sold
 
 
-def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=None, vol_kwargs=None):
+def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=None, vol_kwargs=None, series=None):
     """Paper fill only when the signal cleared the edge after fees. No order is sent."""
     none_msg = "Checked all open BTC 15-minute markets. No paper buy."
     if ask is None or not (0.05 <= float(ask) <= 0.95):
@@ -522,10 +565,17 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
             hour_ct = dt.datetime.now(ZoneInfo("America/Chicago")).hour
         except Exception:
             hour_ct = None
+        series_name = series_for(ticker, series)
+        bucket = desk.prob_bucket(prob)
+        rows = desk.load_learning(DESK_ROOT)
         skip = desk.learning_skip(
-            desk.load_learning(DESK_ROOT), "BTC", desk.prob_bucket(prob),
-            side=side, hour_ct=hour_ct,
+            rows, series_name, bucket, side=side, hour_ct=hour_ct,
         )
+        if not skip and series_name == "KXBTC15M":
+            # Rows written before the series key still brake this series only.
+            skip = desk.learning_skip(
+                rows, "BTC", bucket, side=side, hour_ct=hour_ct,
+            )
     except Exception:
         pass
     if skip:
@@ -544,6 +594,13 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
     edge_val = edge
     if edge_val is None and prob is not None and ask is not None:
         edge_val = float(prob) - float(ask) - float(fee or 0)
+    floor = decide_floor(_edge_buffer())
+    try:
+        gap = float(edge_val)
+    except (TypeError, ValueError):
+        gap = None
+    if gap is None or gap + 1e-12 < floor:
+        return "near-miss under the floor"
     if not IS_SHADOW:
         try:
             desk = _desk()
@@ -567,6 +624,16 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
             "btc15m", prob, edge=edge_val, cfg=cfg, open_risk_used=open_risk, ask=ask,
             root=DESK_ROOT, vol_kwargs=vk, return_plan=True,
         )
+        base = (adapt_plan or {}).get("base")
+        proved = bool(((adapt_plan or {}).get("perf") or {}).get("proven_80"))
+        capped = cleared_stake(base if base is not None else stake, stake, proved_80=proved)
+        if float(capped) + 1e-9 < float(stake):
+            adapt_plan = dict(adapt_plan or {})
+            notes = list(adapt_plan.get("notes") or [])
+            notes.append("adapt size-up needs 80% on this sample")
+            adapt_plan["notes"] = notes
+            adapt_plan["play_big"] = False
+            stake = capped
         contracts = desk.contracts_for_stake(per, stake)
     except Exception:
         stake = 20.0
@@ -1984,10 +2051,12 @@ def main():
         last_sentence = paper_buy(
             account, ev["ticker"], ev["side"], ev["ask"], ev["fee"], ev["p"],
             ev.get("close_time") or m.get("close_time"), True, edge=ev.get("edge"),
+            series=ev.get("series") or "KXBTC15M",
             vol_kwargs={
                 "cushion": ev.get("cushion"), "sigma": ev.get("sigma"),
                 "spread": ev.get("spread"), "minutes_left": ev.get("min_left"),
                 "ask": ev.get("ask"), "ticker": ev.get("ticker"),
+                "series": ev.get("series") or "KXBTC15M",
                 "calendar_loaded": bool(ev.get("calendar_loaded")),
             },
         )
@@ -2249,6 +2318,7 @@ def main():
             sentence = paper_buy(
                 account, m["ticker"], ev_early["side"], ev_early["ask"], ev_early["fee"],
                 ev_early["p"], m["close_time"], True, edge=ev_early.get("edge"),
+                series="KXETH15M",
                 vol_kwargs={
                     "cushion": ev_early.get("cushion"), "sigma": ev_early.get("sigma"),
                     "spread": ev_early.get("spread"), "minutes_left": ev_early.get("min_left"),
