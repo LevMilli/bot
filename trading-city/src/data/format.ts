@@ -15,6 +15,7 @@ export const BEAM_COLORS = [
   '#ff4fd8', // pink — BTC carry
   '#7cf5c0', // mint — Sports sharp lag (shadow)
   '#c4a35a', // brass — Fed Watch (shadow / idea-bank)
+  '#b388ff', // lilac — Exclusive set (shadow logger)
 ] as const
 
 /** Stable id → color so reordering bots does not reshuffle building colors. */
@@ -29,6 +30,7 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'btc-carry': '#ff4fd8',
   'sports-sharp-lag': '#7cf5c0',
   'fed-watch': '#c4a35a',
+  'exclusive-set': '#b388ff',
   'wall-street': '#c6a15b',
 }
 

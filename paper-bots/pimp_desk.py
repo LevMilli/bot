@@ -153,6 +153,7 @@ ACCOUNT_FILES = {
     "btc-carry": "paper_account.json",
     "sports-sharp-lag": "paper_account.json",
     "fed-watch": "paper_account.json",
+    "exclusive-set": "paper_account.json",
     "wall-street": "paper_account.json",
 }
 
@@ -196,6 +197,8 @@ SETTLEMENT_FILES = (
     "btc-carry-paper/paper_account.json",
     "sports-sharp-lag-paper/paper_account.json",
     "fed-watch-paper/paper_account.json",
+    "exclusive-set-paper/paper_account.json",
+    "exclusive-set-paper/evidence.jsonl",
     "wall-street-paper/paper_account.json",
     "pimp-learning.json",
     "pimp-good.json",
@@ -245,6 +248,10 @@ ACTIONS = {
         # Shadow sleeve. CME FedWatch fair vs Kalshi ask. Econ floor 0.05. Idea-bank.
         "run": {"argv": ("bot.py",), "entry": True, "timeout": 45, "label": "Run one check"},
     },
+    "exclusive-set": {
+        # Shadow logger. Public books only. The script logs and does not buy.
+        "run": {"argv": ("bot.py",), "entry": False, "timeout": 75, "label": "Run one check"},
+    },
     "wall-street": {
         # Display floor. The script skips. It is not on the timer.
         "run": {"argv": ("bot.py",), "entry": False, "timeout": 15, "label": "Show the floor"},
@@ -276,6 +283,8 @@ AUTO = (
     {"id": "sports-sharp-lag", "action": "run", "every_sec": 300},
     # FedWatch→Kalshi relative value. Shadow + idea-bank. Floor stays econ 0.05.
     {"id": "fed-watch", "action": "run", "every_sec": 300},
+    # Exclusive-set logger. Shadow only. No stake. Sports 0.06 / other Kalshi 0.05.
+    {"id": "exclusive-set", "action": "run", "every_sec": 300},
     {"id": "kalshi-sp", "action": "brief", "at_ct": "08:00", "until_ct": "11:59"},
     # Forced INX scan slots (plan E1 #123) — up to 3 fee-aware scans / Chicago day.
     # Third window ends ≤14:00 CT so late-σ 60m floor can still clear (15:00 settle).
@@ -418,6 +427,23 @@ BOTS = (
         ),
         "state": "paper_account.json",
         "kind": "macro",
+        "log": "",
+        "empty": "No paper account yet. A check writes paper_account.json.",
+        "shadow_only": True,
+    },
+    {
+        "id": "exclusive-set",
+        "name": "Exclusive set",
+        "folder": "exclusive-set-paper",
+        "script": "bot.py",
+        "blurb": (
+            "Shadow logger for one Kalshi exclusive set. "
+            "Interesting only when ask plus taker fee clears 0.06 on a sports set "
+            "and 0.05 on any other Kalshi set. Does not use the 0.02 INX floor. "
+            "Does not trade KXINXU. Buys nothing and takes no stake."
+        ),
+        "state": "paper_account.json",
+        "kind": "log",
         "log": "",
         "empty": "No paper account yet. A check writes paper_account.json.",
         "shadow_only": True,
@@ -691,6 +717,31 @@ BOT_PLANS = {
         "entry_gated": True,
         "stake": "fixed-25",
     },
+    "exclusive-set": {
+        "buy": [
+            "The tower does not buy. It logs a mutually exclusive Kalshi set and leaves the book flat",
+            "Shadow only — spends no desk cash and takes no tower risk share",
+            "Interesting only when the sum of public ask plus taker fee is below $1 by the floor",
+            "Sports set floor 0.06. Any other Kalshi set floor 0.05. The INX 0.02 floor is not used",
+            "KXINXU is refused. One-sided books are skipped. Observe examples are not evidence",
+            "Stake stays 0",
+        ],
+        "sell": [
+            "Nothing is open, so there is nothing to sell",
+            "A logged basket is not a position. Staff review is the backstop",
+        ],
+        "failsafes": [
+            "Paper only. No key and no desk cash",
+            "Stake stays 0. No tower_risk_budgets share while shadow_only",
+            "Sports floor 0.06 and the other-set floor 0.05 cannot be lowered",
+            "dutch_book_observe examples do not count as evidence",
+            "Incubation n≥50 before any desk share. This build does not buy",
+            "Pause file",
+        ],
+        "exit_quality": "partial",
+        "entry_gated": True,
+        "stake": "none",
+    },
     "btc-carry": {
         "buy": [
             "Shadow sleeve only — spends no desk cash and takes no tower risk share",
@@ -850,6 +901,7 @@ ROI_POLICY = {
         "btc-carry": ["shadow_only"],
         "sports-sharp-lag": ["fixed_ticket_25", "shadow_only"],
         "fed-watch": ["fixed_ticket_25", "shadow_only"],
+        "exclusive-set": ["shadow_only"],
         "wall-street": ["shadow_only"],
     },
     "target_exit_quality": {
@@ -862,6 +914,7 @@ ROI_POLICY = {
         "btc-carry": "partial",
         "sports-sharp-lag": "partial",
         "fed-watch": "partial",
+        "exclusive-set": "partial",
         "wall-street": "partial",
     },
 }
@@ -2199,7 +2252,7 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
         line = f"{view['traders']} traders on six desks. One book. It does not trade."
         view["why"] = card_copy(summary) or line
         return _finish_bot(view, spec, root)
-    if spec["kind"] in ("btc", "spot", "carry"):
+    if spec["kind"] in ("btc", "spot", "carry", "log"):
         summary = str(run.get("summary") or "")
         view["skip"] = _btc_skip(summary)
         if spec["kind"] == "btc":
@@ -2786,6 +2839,11 @@ def _enrich_bot_profit_fields(bot: dict, cfg: dict, capital: dict) -> dict:
     if bot.get("id") == "wall-street":
         # A staffed floor has no market and no stake. Do not borrow the desk edge.
         bot["venue_min_edge"] = None
+        bot["sizing_mode"] = "none"
+        bot["capital_weight"] = 0
+        bot["risk_factors_open"] = []
+        return bot
+    if bot.get("id") == "exclusive-set":
         bot["sizing_mode"] = "none"
         bot["capital_weight"] = 0
         bot["risk_factors_open"] = []
@@ -3623,7 +3681,14 @@ def _paper_ok(root: str, bot_id: str) -> str:
         return "BTC carry config is not paper-only. This desk will not start it."
     if bot_id == "wall-street" and not _wall_street_paper(root):
         return "Wall Street config is not paper-only. This desk will not start it."
+    if bot_id == "exclusive-set" and not _exclusive_set_paper(root):
+        return "Exclusive set config is not paper-only. This desk will not start it."
     return ""
+
+
+def _exclusive_set_paper(root: str) -> bool:
+    cfg = _read_json(_under(root, "exclusive-set-paper", "config.json")) or {}
+    return cfg.get("paper_only") is True and cfg.get("live_orders") is not True
 
 
 def _wall_street_paper(root: str) -> bool:
@@ -3785,6 +3850,7 @@ def timer_text() -> str:
         "Kalshi paper settle once at 4:00 PM. "
         "Coinbase spot shadow about every 5 minutes (public candles, no desk cash). "
         "BTC carry shadow about every 5 minutes (public funding archive, no desk cash). "
+        "Exclusive set shadow about every 5 minutes (public Kalshi books, log only, no buy). "
         "Memecoin about every 3 minutes (manage exits, then scan; dual lanes; stop-bleed); "
         "about every 2 minutes when open paper needs manage. "
         "Commodity about every 90 seconds; about every 60 seconds when ≥2 series are open. "
@@ -4649,6 +4715,7 @@ TOWER_STARTER_CASH = {
     "btc-carry": 500.0,
     "sports-sharp-lag": 500.0,
     "fed-watch": 500.0,
+    "exclusive-set": 0.0,
     "wall-street": 0.0,
 }
 TOWER_MIN_AMMO = {
@@ -4662,6 +4729,7 @@ TOWER_MIN_AMMO = {
     "btc-carry": 500.0,
     "sports-sharp-lag": 25.0,
     "fed-watch": 25.0,
+    "exclusive-set": 0.0,
     "wall-street": 0.0,
 }
 
@@ -4683,6 +4751,9 @@ def tower_doing_good(bot: dict) -> bool:
     # hold, not a broke book. A midnight reload would flatten it and the next
     # check would pay the fee again.
     if bot_id == "btc-carry":
+        return True
+    # Zero-stake logger. A midnight reload would mint cash this tower does not have.
+    if bot_id == "exclusive-set":
         return True
     starter = float(TOWER_STARTER_CASH.get(bot_id) or 100.0)
     min_ammo = float(TOWER_MIN_AMMO.get(bot_id) or 10.0)
@@ -4710,6 +4781,8 @@ def tower_needs_midnight_reload(bot: dict) -> bool:
         return False
     bot_id = str(bot.get("id") or "")
     if bot_id == "btc-carry":
+        return False
+    if bot_id == "exclusive-set":
         return False
     if int(bot.get("open_count") or 0) > 0:
         return False
@@ -4974,6 +5047,17 @@ def _account_body(bot_id: str) -> dict:
             "shadow_only": True,
             "live_orders": False,
             "traders": 120,
+        }
+    if bot_id == "exclusive-set":
+        return {
+            "cash": 0.0,
+            "open": [],
+            "closed": [],
+            "paper_only": True,
+            "shadow_only": True,
+            "live_orders": False,
+            "stake_usd": 0.0,
+            "buys": 0,
         }
     if bot_id == "memecoin":
         return {
