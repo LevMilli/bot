@@ -108,6 +108,85 @@ def already_open(state, fill_id="") -> str:
     return "open row already on the book"
 
 
+def real_side_bid(bid):
+    """A bid inside (0, 1). Missing, zero, and a wipe are not a mark."""
+    try:
+        number = float(bid)
+    except (TypeError, ValueError):
+        return None
+    if number != number or not (0.0 < number < 1.0):
+        return None
+    return number
+
+
+def bid_under_exit(bid, floor=0.50) -> bool:
+    """Under 50¢ is the exit signal. A missing bid is not under 50¢."""
+    mark = real_side_bid(bid)
+    if mark is None:
+        return False
+    try:
+        bar = float(floor)
+    except (TypeError, ValueError):
+        bar = 0.50
+    return mark < bar
+
+
+def _sized_row(pos) -> bool:
+    """This tower's open row. An S&P row is not watched here."""
+    if not isinstance(pos, dict):
+        return False
+    owner = str(pos.get("tower") or pos.get("bot") or "kalshi-sized")
+    if owner in ("kalshi-sp", "sp", "S&P"):
+        return False
+    return owner in ("kalshi-sized", "sized", "S&P-sized")
+
+
+def watch_open(pos, quotes):
+    """Mark the held contract at its own side bid. This does not sell.
+
+    A quote for another ticker, including S&P's, is not this mark.
+    A missing bid does not replace a prior mark.
+    """
+    if not _sized_row(pos) or not isinstance(quotes, dict):
+        return {"marked": False, "sold": False}
+    ticker = str(pos.get("ticker") or "")
+    book = quotes.get(ticker)
+    if not ticker or not isinstance(book, dict):
+        return {"marked": False, "sold": False}
+    named = str(book.get("ticker") or ticker)
+    if named != ticker:
+        return {"marked": False, "sold": False}
+    side = str(pos.get("side") or "").lower()
+    if side == "yes":
+        raw = book.get("yes_bid")
+    elif side == "no":
+        raw = book.get("no_bid")
+    else:
+        return {"marked": False, "sold": False}
+    mark = real_side_bid(raw)
+    if mark is None:
+        return {"marked": False, "sold": False}
+    pos["last_mark"] = mark
+    pos["tower"] = "kalshi-sized"
+    return {
+        "marked": True,
+        "sold": False,
+        "last_mark": mark,
+        "exit_signal": bid_under_exit(mark, 0.50),
+    }
+
+
+def watch_opens(state, quotes):
+    notes = []
+    for pos in list((state or {}).get("open") or []):
+        if not isinstance(pos, dict):
+            continue
+        result = watch_open(pos, quotes)
+        if result.get("marked"):
+            notes.append(f"{pos.get('ticker')} last_mark={result['last_mark']} sold=False")
+    return notes
+
+
 def taker_fee(contracts, price, rate=None):
     """Kalshi taker fee, rounded up to the cent. Tiny epsilon avoids 0.26000000001 -> 0.27."""
     rate = CFG["taker_fee_rate"] if rate is None else rate
@@ -160,7 +239,7 @@ def open_position(state, day, event_ticker, pick, contracts, entry_time_iso):
            "price_source": "https://api.elections.kalshi.com/trade-api/v2",
            "price_at": entry_time_iso,
            "fill_id": f"{pick.get('ticker')}|{entry_time_iso}",
-           "exit_rule": BUY_EXIT_RULE, "paper_only": True}
+           "exit_rule": BUY_EXIT_RULE, "tower": "kalshi-sized", "paper_only": True}
     try:
         desk_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         if desk_root not in sys.path:
