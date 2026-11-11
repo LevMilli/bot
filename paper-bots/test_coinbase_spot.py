@@ -104,6 +104,13 @@ class CoinbaseSpotRules(unittest.TestCase):
             self.assertTrue(state["shadow_only"])
             books["ETH-USD"] = _moon()
             out = _capture(bot, tmp, cfg, books)
+            self.assertIn("replay bar not met", out)
+            self.assertIn("no trade", out)
+            self.assertNotIn("paper buy", out)
+            state = json.load(open(os.path.join(tmp, "coinbase-spot-paper", "paper_account.json"), encoding="utf-8"))
+            self.assertEqual(state["open"], [])
+            _seed_replay(tmp)
+            out = _capture(bot, tmp, cfg, books)
             self.assertIn("paper buy ETH-USD", out)
             self.assertNotIn("no trade", out)
             state = json.load(open(os.path.join(tmp, "coinbase-spot-paper", "paper_account.json"), encoding="utf-8"))
@@ -119,6 +126,12 @@ class CoinbaseSpotRules(unittest.TestCase):
             with open(os.path.join(tmp, "btc15m-signal", "paper_account.json"), "w", encoding="utf-8") as handle:
                 json.dump({"open": [{"side": "YES", "ticker": "KXBTC15M"}]}, handle)
             cfg = bot.locked_cfg({})
+            seeded = bot.empty_state(cfg)
+            seeded["closed"] = [
+                {"pnl": 1.5, "cost": 25.0, "ticker": "ETH-USD"} for _ in range(20)
+            ]
+            with open(os.path.join(tmp, "coinbase-spot-paper", "paper_account.json"), "w", encoding="utf-8") as handle:
+                json.dump(seeded, handle)
             out = _capture(bot, tmp, cfg, {"ETH-USD": _moon(), "SOL-USD": _quiet(), "BTC-USD": _quiet()})
             self.assertIn("btc15m YES open", out)
             self.assertIn("no trade", out)
@@ -231,6 +244,17 @@ class CoinbaseSpotRules(unittest.TestCase):
             text = open(os.path.join(tmp, "weather-kalshi-paper", "config.json"), encoding="utf-8").read()
             self.assertIn("true", text.lower())
             self.assertNotIn('"live_orders": true', text)
+
+
+def _seed_replay(tmp, n=20):
+    path = os.path.join(tmp, "coinbase-spot-paper", "paper_account.json")
+    with open(path, encoding="utf-8") as handle:
+        state = json.load(handle)
+    state["closed"] = [
+        {"pnl": 1.5, "cost": 25.0, "ticker": "ETH-USD"} for _ in range(n)
+    ]
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(state, handle)
 
 
 def _capture(bot, tmp, cfg, books) -> str:

@@ -175,6 +175,103 @@ def evaluate_returns(returns: list[float], cfg: dict, *, product: str = "") -> d
     return row
 
 
+def fee_need(cfg: dict | None = None) -> float:
+    """0.05 on top of the taker round trip. A maker fee does not cheapen it."""
+    cfg = locked_cfg(cfg)
+    return round_trip(cfg) + float(cfg["venue_min_edge"])
+
+
+def _replay_returns(rows) -> list[float]:
+    out = []
+    for row in rows or []:
+        if isinstance(row, dict):
+            pnl = _num(row.get("pnl"))
+            stake = _num(row.get("cost") if row.get("cost") is not None else row.get("stake"))
+            if pnl is None or stake is None or stake <= 0:
+                continue
+            out.append(pnl / stake)
+        else:
+            n = _num(row)
+            if n is not None:
+                out.append(n)
+    return out
+
+
+def _window_clears(window) -> bool:
+    if len(window) < 20:
+        return False
+    hits = sum(1 for value in window if value > 0)
+    if hits / len(window) + 1e-12 < 0.40:
+        return False
+    if statistics.median(window) <= 0:
+        return False
+    return statistics.fmean(window) + 1e-12 >= 0.05
+
+
+def replay_bar(rows) -> str:
+    """Full sample and the latest 20. Empty means the bar is met."""
+    vals = _replay_returns(rows)
+    if not _window_clears(vals) or not _window_clears(vals[-20:]):
+        return "replay bar not met"
+    return ""
+
+
+def decide_stake(stake, adapted) -> float:
+    """Adapt does not get a stake to multiply. A missing ticket is zero."""
+    base = _num(stake)
+    if base is None or base <= 0:
+        return 0.0
+    if adapted is None:
+        return round(base, 2)
+    got = _num(adapted)
+    if got is None or got < 0:
+        return round(base, 2)
+    return round(min(got, base), 2)
+
+
+def decide(signal, replay, cfg=None, adapted=None) -> dict:
+    """Flat unless the replay bar and the fee floor both passed.
+
+    BTC stays a log. A failed candle stays a data skip. Adapt cannot raise the stake.
+    """
+    cfg = locked_cfg(cfg)
+    row = dict(signal or {})
+    row["floor"] = cfg["venue_min_edge"]
+    row["round_trip"] = round_trip(cfg)
+    row["need"] = fee_need(cfg)
+    row["taker_fee"] = cfg["taker_fee"]
+    row["stake"] = 0.0
+    row["flat"] = True
+    reason = str(row.get("reason") or "")
+    if row.get("data_skip") or reason.lower().startswith("data "):
+        if row.get("action") == "buy":
+            row["action"] = "skip"
+        return row
+    product = str(row.get("product") or "")
+    if product == "BTC-USD" or row.get("action") == "log":
+        row["action"] = "log" if row.get("action") == "log" else "flat"
+        row["scored_as_buy"] = False
+        if "not scored" not in reason and "research only" not in reason:
+            row["reason"] = "logged, not scored as a buy"
+        return row
+    if row.get("action") != "buy":
+        return row
+    missed = replay_bar(replay)
+    if missed:
+        row["action"] = "flat"
+        row["reason"] = missed
+        return row
+    edge = _num(row.get("edge"))
+    if edge is None or edge + 1e-12 < float(cfg["venue_min_edge"]):
+        row["action"] = "flat"
+        row["reason"] = "floor on top of the round trip"
+        return row
+    row["flat"] = False
+    row["stake"] = decide_stake(cfg["stake_usd"], adapted)
+    row["action"] = "buy"
+    return row
+
+
 def learning_block(state: dict, product: str, cfg: dict) -> str:
     closed = [
         row for row in (state.get("closed") or [])
@@ -377,6 +474,10 @@ def run_once(
             decision["scored_as_buy"] = decision.get("action") == "buy"
         decision["observe_return"] = horizon_return(closes if isinstance(closes, list) else [], int(cfg["observe_bars"]))
         decisions[product] = decision
+    for product in cfg["products_trade"]:
+        decision = decisions.get(product)
+        if isinstance(decision, dict):
+            decisions[product] = decide(decision, state.get("closed") or [], cfg, adapted=None)
     blocked = os.environ.get("DESK_BLOCK_ENTRIES") == "1"
     btc_open = btc_yes_open(desk_root)
     sold = []
@@ -418,7 +519,11 @@ def run_once(
                 decision["reason"] = learn
                 continue
             cash = float(state.get("cash") or 0)
-            stake = float(cfg["stake_usd"])
+            stake = float(decision.get("stake") if decision.get("stake") is not None else cfg["stake_usd"])
+            if decision.get("flat") or stake <= 0:
+                decision["action"] = "flat"
+                decision["reason"] = decision.get("reason") or "replay bar not met"
+                continue
             if cash + 1e-9 < stake:
                 decision["action"] = "skip"
                 decision["reason"] = "shadow cash below ticket"
