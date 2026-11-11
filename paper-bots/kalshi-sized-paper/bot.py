@@ -77,6 +77,90 @@ def header_only_fact(text):
     }
 
 
+SERIES_KEY = "S&P-sized"
+FEE_FLOOR = 0.02
+FAIR_GATE_EXTRA = 0.01
+
+
+def decide_floor(edge) -> float:
+    """0.02 on the fee-aware edge. A higher bar stays. A lower number is put back."""
+    try:
+        n = float(edge)
+    except (TypeError, ValueError):
+        return FEE_FLOOR
+    if n != n or n < FEE_FLOOR:
+        return FEE_FLOOR
+    return n
+
+
+def fair_gate_need(venue_edge, extra=FAIR_GATE_EXTRA) -> float:
+    """Floor 0.02, then the tower's +1¢ fair-edge gate. Neither is loosened."""
+    try:
+        add = float(extra)
+    except (TypeError, ValueError):
+        add = FAIR_GATE_EXTRA
+    if add != add or add < FAIR_GATE_EXTRA:
+        add = FAIR_GATE_EXTRA
+    return decide_floor(venue_edge) + add
+
+
+def fair_edge_skip(sized_edge, venue_edge) -> str:
+    """Both gates. A venue number under 0.02 is put back before the +1¢ gate."""
+    if DESK_ROOT not in sys.path:
+        sys.path.insert(0, DESK_ROOT)
+    import desk_inx
+    return desk_inx.twin_edge_blocks(
+        sized_edge=sized_edge,
+        venue_edge=decide_floor(venue_edge),
+        extra=FAIR_GATE_EXTRA,
+    ) or ""
+
+
+def sibling_skip(ticker, sp_state) -> str:
+    """S&P already holding this ticker is a skip. A different ticker is not."""
+    if DESK_ROOT not in sys.path:
+        sys.path.insert(0, DESK_ROOT)
+    import desk_inx
+    return desk_inx.anti_double_blocks(ticker=ticker, sp_state=sp_state) or ""
+
+
+def learning_skip_sized(rows, prob, side, hour_ct) -> str:
+    """Learning skip uses S&P-sized. A cold S&P row does not skip this tower."""
+    desk = _desk()
+    return desk.learning_skip(
+        rows,
+        SERIES_KEY,
+        desk.prob_bucket(prob),
+        side=side,
+        hour_ct=hour_ct,
+    ) or ""
+
+
+def second_fill_skip(trades_today) -> str:
+    """One fill a day. A looser daily cap is put back to one."""
+    try:
+        n = int(trades_today or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if n >= 1:
+        return "one fill a day"
+    return ""
+
+
+def decide_size(ladder, adapted, trades_today) -> float:
+    """Adapt may shrink the stake. It may not add a second daily fill."""
+    if second_fill_skip(trades_today):
+        return 0.0
+    try:
+        base = float(ladder)
+        got = float(adapted)
+    except (TypeError, ValueError):
+        return 0.0
+    if base != base or got != got or base <= 0 or got < 0:
+        return 0.0
+    return round(min(got, base), 2)
+
+
 def remember_refused_edge(best, ask, edge):
     """Keep the best refused edge only when the ask is a real quote."""
     try:
@@ -257,6 +341,13 @@ def step_scan(args, state, day):
             logger.learn(f"{day}: no trade - {why}", "skip")
             _densify_scan_skip(why)
         return
+    second = second_fill_skip(paper_sim.trades_on(state, day))
+    if second:
+        print(alerts.format_skip_note(day, second))
+        if not args.dry_run:
+            logger.learn(f"{day}: no trade - {second}", "skip")
+            _densify_scan_skip(second)
+        return
     ev = feed.find_event_for(CFG["series"], day, CFG["settle_time_ct"])
     if not ev:
         reason = "no KXINXU 3 PM CT event listed (holiday/half day?)"
@@ -295,9 +386,9 @@ def step_scan(args, state, day):
     venue_edge = 0.02
     try:
         desk = _desk()
-        venue_edge = float(desk.venue_min_edge("kalshi_inx", desk.load_settings(DESK_ROOT)))
+        venue_edge = decide_floor(desk.venue_min_edge("kalshi_inx", desk.load_settings(DESK_ROOT)))
     except Exception:
-        pass
+        venue_edge = decide_floor(0.02)
     try:
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
@@ -348,10 +439,11 @@ def step_scan(args, state, day):
     try:
         desk = _desk()
         cfg = desk.load_settings(DESK_ROOT)
-        venue_edge = float(desk.venue_min_edge("kalshi_inx", cfg))
+        venue_edge = decide_floor(desk.venue_min_edge("kalshi_inx", cfg))
     except Exception:
         desk = None
         cfg = {}
+        venue_edge = decide_floor(0.02)
     if DESK_ROOT not in sys.path:
         sys.path.insert(0, DESK_ROOT)
     import desk_inx
@@ -371,9 +463,7 @@ def step_scan(args, state, day):
         if not confirmed:
             last_ob_miss = True
             continue
-        blocked_dbl = desk_inx.anti_double_blocks(
-            ticker=str(confirmed.get("ticker") or ""), sp_state=sp_state,
-        )
+        blocked_dbl = sibling_skip(str(confirmed.get("ticker") or ""), sp_state)
         if blocked_dbl:
             _remember_veto(blocked_dbl, confirmed)
             continue
@@ -397,16 +487,24 @@ def step_scan(args, state, day):
             continue
         edge_try = float(fair_try.get("edge") or 0.0)
         best_refused = remember_refused_edge(best_refused, confirmed.get("ask"), edge_try)
-        twin_block = desk_inx.twin_edge_blocks(
-            sized_edge=edge_try, venue_edge=venue_edge, extra=0.01,
-        )
+        twin_block = fair_edge_skip(edge_try, venue_edge)
         if twin_block:
             _remember_veto(twin_block, confirmed, edge=edge_try)
             continue
         # Learn/corr are side×bucket keyed — continue to next fair sibling.
-        policy = desk_inx.inx_learn_corr_reason(
+        learn = ""
+        try:
+            learn = learning_skip_sized(
+                desk.load_learning(DESK_ROOT) if desk else [],
+                fair_try.get("p") if fair_try.get("p") is not None else confirmed.get("ask"),
+                confirmed.get("side"),
+                hour_ct,
+            )
+        except Exception:
+            learn = ""
+        policy = learn or desk_inx.inx_learn_corr_reason(
             desk, DESK_ROOT,
-            market="S&P-sized", bot_id="kalshi-sized",
+            market=SERIES_KEY, bot_id="kalshi-sized",
             pick=confirmed, edge=edge_try, hour_ct=hour_ct,
         )
         if policy:
@@ -456,14 +554,18 @@ def step_scan(args, state, day):
                 )
             return
         open_risk = _desk_open_risk(desk)
-        dollars = desk.stake_dollars_for(
-            "kalshi-sized",
-            pick["ask"],
-            edge=edge_proxy,
-            cfg=cfg,
-            open_risk_used=open_risk,
-            ask=pick["ask"],
-            root=DESK_ROOT,
+        dollars = decide_size(
+            float(CFG.get("max_stake_dollars") or 40),
+            desk.stake_dollars_for(
+                "kalshi-sized",
+                pick["ask"],
+                edge=edge_proxy,
+                cfg=cfg,
+                open_risk_used=open_risk,
+                ask=pick["ask"],
+                root=DESK_ROOT,
+            ),
+            paper_sim.trades_on(state, day),
         )
         n = desk.contracts_for_stake(pick["ask"], dollars)
         while n >= 1 and n * pick["ask"] + paper_sim.taker_fee(n, pick["ask"]) > float(state["bankroll"]) + 1e-9:
