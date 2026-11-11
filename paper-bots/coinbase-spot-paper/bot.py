@@ -335,6 +335,73 @@ def watch_sleeve(state, prices) -> dict:
     return {"flat": False, "sold": False, "marks": marks}
 
 
+EXIT_NAME = {
+    "stop": "stop −1.5%",
+    "take-profit": "fee take-profit",
+    "model-flip": "z≤−2",
+    "time": "24h",
+}
+
+
+def replacement_block(state) -> str:
+    """A failsafe sale does not open another long on the same check."""
+    book = state if isinstance(state, dict) else {}
+    sold = book.get("sold_this_check") or []
+    if isinstance(sold, (list, tuple)) and any(sold):
+        return "failsafe sold — no replacement"
+    return ""
+
+
+def failsafe_sale(state, prices, z_by_product=None, now=None, cfg=None) -> dict:
+    """Sell an open long at its own real mark when one of this tower's exits fired.
+
+    The exits are the −1.5% stop, the take-profit after the taker round trip
+    plus the 0.05 floor, z ≤ −2, and the 24h stop. A flat book has nothing to
+    sell. A missing price is not filled in with the stop. Another product's
+    price is not this sale. The taker is not cut to the maker fee. The sale
+    is not labeled a hit, and it does not open a replacement.
+    """
+    book = state if isinstance(state, dict) else {}
+    cfg = locked_cfg(cfg)
+    cfg["stop_pct"] = 0.015
+    cfg["time_stop_hours"] = 24.0
+    cfg["min_z"] = 2.0
+    if cfg["venue_min_edge"] < 0.05:
+        cfg["venue_min_edge"] = 0.05
+    if cfg["taker_fee"] < LOCKED_TAKER_MIN:
+        cfg["taker_fee"] = LOCKED_TAKER_MIN
+    when = now if isinstance(now, dt.datetime) else dt.datetime.now(dt.timezone.utc)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=dt.timezone.utc)
+    quotes = prices if isinstance(prices, dict) else {}
+    zs = z_by_product if isinstance(z_by_product, dict) else {}
+    opens = [row for row in book.get("open") or [] if isinstance(row, dict)]
+    if not opens:
+        book["sold_this_check"] = []
+        return {"flat": True, "sold": False, "hit": False, "sales": []}
+    sales = []
+    for pos in list(opens):
+        side = str(pos.get("side") or "buy").lower()
+        if side not in ("buy", "long"):
+            continue
+        product = str(pos.get("ticker") or "")
+        mark = real_spot(quotes.get(product))
+        if mark is None:
+            continue
+        reason = exit_reason(pos, mark, _num(zs.get(product)), cfg, when)
+        if not reason:
+            continue
+        closed = apply_exit(book, pos, mark, reason, cfg, when)
+        closed["exit_name"] = EXIT_NAME.get(reason, reason)
+        closed["tower"] = "coinbase-spot"
+        closed["stake"] = closed.get("cost")
+        closed.pop("hit", None)
+        closed.pop("result", None)
+        sales.append(closed)
+    book["sold_this_check"] = [row.get("ticker") for row in sales]
+    return {"flat": False, "sold": bool(sales), "hit": False, "sales": sales}
+
+
 def exit_reason(pos: dict, mark: float, z: float | None, cfg: dict, now: dt.datetime) -> str:
     entry = _num(pos.get("entry_price"))
     if entry is None or entry <= 0 or mark <= 0:
@@ -536,6 +603,9 @@ def place_shadow_buy(state, decision, price, *, btc_yes, intent_path, now) -> di
             "cash": cash_before,
         }
 
+    blocked = replacement_block(book)
+    if blocked:
+        return refuse(blocked)
     if btc_yes:
         return refuse("btc15m YES open")
     if any(isinstance(row, dict) for row in (book.get("open") or [])):
@@ -649,17 +719,21 @@ def run_once(
         if cleaned:
             spot_prices[product] = cleaned[-1]
     watch_sleeve(state, spot_prices)
-    sold = []
-    for pos in list(state["open"]):
-        product = str(pos.get("ticker") or "")
-        closes = books.get(product) or []
-        if not closes:
-            continue
-        decision = decisions.get(product) or {}
-        reason = exit_reason(pos, closes[-1], decision.get("z"), cfg, now)
-        if reason:
-            sold.append(apply_exit(state, pos, closes[-1], reason, cfg, now))
-            _record_incubation(desk_root, product, sold[-1].get("pnl"))
+    marks = {}
+    for product, closes in books.items():
+        if closes:
+            mark = real_spot(closes[-1])
+            if mark is not None:
+                marks[product] = mark
+    z_by = {
+        product: decision.get("z")
+        for product, decision in decisions.items()
+        if isinstance(decision, dict)
+    }
+    failsafe = failsafe_sale(state, marks, z_by_product=z_by, now=now, cfg=cfg)
+    sold = list(failsafe.get("sales") or [])
+    for row in sold:
+        _record_incubation(desk_root, str(row.get("ticker") or ""), row.get("pnl"))
     bought = None
     open_n = len(state.get("open") or [])
     gate = ""
