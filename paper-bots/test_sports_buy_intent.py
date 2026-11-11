@@ -9,9 +9,12 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GAP_DIR = os.path.join(HERE, "sports-gap-paper")
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
 if GAP_DIR not in sys.path:
     sys.path.insert(0, GAP_DIR)
 
+import desk_brain
 import gap_bot
 
 
@@ -92,6 +95,54 @@ class SportsBuyIntent(unittest.TestCase):
             "already holding this game",
         )
         self.assertEqual(gap_bot.replacement_block("g2", {}, set()), "")
+
+    def test_close_journals_cash_fee_and_exit_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            row = {
+                "fill_id": "g|1",
+                "ticker": "KXNBAGAME-TEST",
+                "side": "home",
+                "cost": 6.0,
+                "fee": 0.02,
+                "pnl": 1.5,
+            }
+            first = gap_bot.record_close(
+                row, cash=101.5, exit_name="gap-decay", bid=0.55,
+                stake=6.0, exit_fee=gap_bot.fee(0.55), root=tmp,
+            )
+            second = gap_bot.record_close(
+                row, cash=101.5, exit_name="gap-decay", bid=0.55,
+                stake=6.0, exit_fee=gap_bot.fee(0.55), root=tmp,
+            )
+            self.assertEqual(row["cash_after"], 101.5)
+            self.assertEqual(row["exit_fee"], gap_bot.fee(0.55))
+            self.assertEqual(row["pnl"], 1.5)
+            self.assertEqual(first["bot"], "sports-gap")
+            self.assertEqual(first["fill_id"], "g|1")
+            self.assertEqual(first["bid"], 0.55)
+            self.assertEqual(first["stake"], 6.0)
+            self.assertEqual(first["exit_name"], "gap-decay")
+            self.assertEqual(first["cash"], 101.5)
+            self.assertEqual(first["fee"], gap_bot.fee(0.55))
+            journal = desk_brain.load_journal(tmp)
+            matches = [
+                d for d in journal["decisions"]
+                if d.get("fill_id") == "g|1" and d.get("exit_name") == "gap-decay"
+            ]
+            self.assertEqual(len(matches), 1)
+            self.assertEqual(second["fill_id"], first["fill_id"])
+
+    def test_settle_does_not_invent_a_bid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            row = {"fill_id": "g|2", "ticker": "T", "side": "away", "cost": 4.0, "pnl": -4.0}
+            written = gap_bot.record_close(
+                row, cash=96.0, exit_name="settled", bid=None, stake=4.0, root=tmp,
+            )
+            self.assertNotIn("bid", written)
+            self.assertNotIn("exit_fee", row)
+            self.assertEqual(written["exit_name"], "settled")
+            self.assertEqual(written["action"], "settle")
+            self.assertEqual(row["pnl"], -4.0)
 
 
 if __name__ == "__main__":

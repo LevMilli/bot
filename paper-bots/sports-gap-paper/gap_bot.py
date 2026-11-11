@@ -308,6 +308,52 @@ def replacement_block(game_key, open_by_game, exited_this_check) -> str:
     return ""
 
 
+def record_close(position, *, cash, exit_name, bid=None, stake=None, exit_fee=None, root=None):
+    """Stamp cash and the exit on the closed row, then journal that reason.
+
+    A missing bid is not stored. The same fill id and exit name are not written twice.
+    P/L stays the number already on the row.
+    """
+    if not isinstance(position, dict):
+        return None
+    try:
+        position["cash_after"] = round(float(cash), 2)
+    except (TypeError, ValueError):
+        pass
+    if exit_fee is not None:
+        try:
+            fee_n = float(exit_fee)
+        except (TypeError, ValueError):
+            fee_n = None
+        if fee_n is not None and fee_n == fee_n and fee_n >= 0:
+            position["exit_fee"] = round(fee_n, 4)
+    journal_root = DESK_ROOT if root is None else root
+    fee_for_journal = position.get("exit_fee")
+    if fee_for_journal is None:
+        fee_for_journal = position.get("fee")
+    try:
+        if journal_root not in sys.path:
+            sys.path.insert(0, journal_root)
+        import desk_brain
+        return desk_brain.record_decision(
+            journal_root,
+            bot="sports-gap",
+            action="settle" if str(exit_name or "") == "settled" else "sell",
+            ticker=str(position.get("ticker") or ""),
+            side=str(position.get("side") or ""),
+            reasons=[str(exit_name or "")],
+            note=str(exit_name or "")[:240],
+            fill_id=str(position.get("fill_id") or ""),
+            bid=bid,
+            stake=stake if stake is not None else position.get("cost"),
+            exit_name=str(exit_name or ""),
+            fee=fee_for_journal,
+            cash=position.get("cash_after"),
+        )
+    except Exception:
+        return None
+
+
 def _atomic_json(path, payload):
     dest = path
     if os.path.islink(dest):
@@ -1402,6 +1448,12 @@ def run():
                 "pnl": pnl,
                 "final_score": f"{as_}-{hs}",
             })
+            record_close(
+                p,
+                cash=s["cash"],
+                exit_name="settled",
+                stake=p.get("risk") if p.get("risk") is not None else p.get("cost"),
+            )
             s["closed"].append(p)
             if p.get("game_key"):
                 exited_this_check.add(p.get("game_key"))
@@ -1806,6 +1858,14 @@ def run():
                         "scale_out_clip": True,
                         "runner_left": int(p.get("contracts") or 0),
                     })
+                    record_close(
+                        clip_row,
+                        cash=s["cash"],
+                        exit_name=reason,
+                        bid=bid,
+                        stake=cost_clip,
+                        exit_fee=fee(bid),
+                    )
                     s.setdefault("closed", []).append(clip_row)
                     try:
                         if DESK_ROOT not in sys.path:
@@ -1872,6 +1932,14 @@ def run():
                 fair_exit = round(fair, 4) if fair is not None else None
                 p.update({"closed": ts, "exit": exit_reason, "exit_price": bid, "payout": proceeds,
                           "pnl": pnl, "fair_at_exit": fair_exit})
+                record_close(
+                    p,
+                    cash=s["cash"],
+                    exit_name=exit_reason,
+                    bid=bid,
+                    stake=p.get("risk") if p.get("risk") is not None else p.get("cost"),
+                    exit_fee=fee(bid),
+                )
                 s["closed"].append(p)
                 if p.get("game_key"):
                     exited_this_check.add(p.get("game_key"))
