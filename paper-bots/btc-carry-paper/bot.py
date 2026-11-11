@@ -359,6 +359,81 @@ def fetch_marks(
     }
 
 
+def _public_print(value, *, spot=None):
+    """A funding rate or a premium close. A Coinbase dollar price is not one."""
+    n = _num(value)
+    if n is None:
+        return None
+    spot_n = _num(spot)
+    if spot_n is not None and abs(n - spot_n) <= 1e-9:
+        return None
+    if abs(n) >= 1.0:
+        return None
+    return n
+
+
+def scan_marks(marks, *, coinbase_price=None, key_set=False) -> dict:
+    """Read the public funding print and the public premium. No key.
+
+    A missing archive is a data skip. A Coinbase spot price does not fill
+    either print. This does not open and does not sell.
+    """
+    book = marks if isinstance(marks, dict) else {}
+    blank = {
+        "funding": [],
+        "premium": [],
+        "data_skip": True,
+        "opened": False,
+        "sold": False,
+        "borrowed_spot": False,
+        "paper_only": True,
+    }
+    if key_set:
+        return {**blank, "reason": "data key is set"}
+    spot = coinbase_price
+    if spot is None:
+        for key in ("coinbase", "coinbase_price", "spot", "btc_usd", "eth_usd"):
+            if key in book:
+                spot = book.get(key)
+                break
+    funding = []
+    for row in book.get("funding") or []:
+        if not isinstance(row, dict):
+            continue
+        rate = _public_print(row.get("rate"), spot=spot)
+        when = str(row.get("time") or "").strip()
+        if rate is None or not when:
+            continue
+        funding.append({"time": when, "rate": rate})
+    premium = []
+    for row in book.get("premium") or []:
+        if not isinstance(row, dict):
+            continue
+        close = _public_print(row.get("close"), spot=spot)
+        when = str(row.get("time") or "").strip()
+        if close is None or not when:
+            continue
+        premium.append({"time": when, "close": close})
+    if not funding or not premium:
+        if not funding and not premium:
+            detail = str(book.get("error") or "").strip() or "no archive rows"
+        elif not funding:
+            detail = "funding archive missing"
+        else:
+            detail = "premium archive missing"
+        return {**blank, "funding": funding, "premium": premium, "reason": "data " + detail}
+    return {
+        "funding": funding,
+        "premium": premium,
+        "data_skip": False,
+        "reason": "funding and premium read",
+        "opened": False,
+        "sold": False,
+        "borrowed_spot": False,
+        "paper_only": True,
+    }
+
+
 def observe_twin_marks(
     now: dt.datetime | None = None,
     opener=None,
@@ -590,6 +665,13 @@ def run_once(
         marks = {"funding": [], "premium": [], "error": exc.__class__.__name__}
     if not isinstance(marks, dict):
         marks = {"funding": [], "premium": [], "error": "bad marks"}
+    scanned = scan_marks(marks)
+    marks = dict(marks)
+    marks["funding"] = scanned["funding"]
+    marks["premium"] = scanned["premium"]
+    if scanned["data_skip"] and not str(marks.get("error") or "").strip():
+        detail = str(scanned["reason"] or "")
+        marks["error"] = detail[5:] if detail.startswith("data ") else detail
     blocked = os.environ.get("DESK_BLOCK_ENTRIES") == "1"
     before = len(state.get("open") or [])
     state = hold_step(state, marks, cfg, now, block_entries=blocked and before == 0)
