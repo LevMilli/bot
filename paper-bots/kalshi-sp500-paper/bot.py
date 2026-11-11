@@ -225,6 +225,7 @@ def step_scan(args, state, day):
         venue_edge = float(desk.venue_min_edge("kalshi_inx", desk.load_settings(DESK_ROOT)))
     except Exception:
         pass
+    venue_edge = risk_manager.noon_edge(venue_edge)
     try:
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
@@ -266,6 +267,7 @@ def step_scan(args, state, day):
     except Exception:
         desk = None
         cfg = {}
+    venue_edge = risk_manager.noon_edge(venue_edge)
     if DESK_ROOT not in sys.path:
         sys.path.insert(0, DESK_ROOT)
     import desk_inx
@@ -549,6 +551,7 @@ def step_settle(args, state, day):
             desk = _desk()
             desk.record_learning(DESK_ROOT, {
                 "result": "hit" if (pos.get("pnl") or 0) > 0 else "miss",
+                "reason": "settled",
                 "market": "S&P",
                 "prob": pos.get("ask"),
                 "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
