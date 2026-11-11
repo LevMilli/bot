@@ -382,23 +382,7 @@ def sell(st, pos, frac_of_original, reason, price, liq, full=False):
         pass
     if full:
         record_close(pos, cash=st.get("cash_usd"), reason=reason, mark=price, fee=fee)
-        try:
-            desk = _desk()
-            row = {
-                "market": pos.get("mint") or pos.get("symbol") or "",
-                "prob": pos.get("confidence"),
-                "stake": pos.get("cost_usd"),
-                "fill_id": f"{pos.get('mint')}|{pos.get('entry_iso')}",
-                "side": pos.get("lane") or pos.get("side") or "long",
-            }
-            reason_s = str(reason or "")
-            if reason_s in ("model-flip −6%", "stop −12%"):
-                row["reason"] = reason_s
-            else:
-                row["result"] = "hit" if pnl > 0 else "miss"
-            desk.record_learning(os.path.dirname(BASE), row)
-        except Exception:
-            pass
+        tell_memecoin_learning(pos, pnl, reason)
 
 
 FIRST_EXIT_PCT = -6.0
@@ -972,13 +956,13 @@ def scan(st, stats):
                 learn_skip = ""
                 try:
                     desk = _desk()
-                    learn_skip = desk.learning_skip(
+                    learn_skip = mint_learning_skip(
                         desk.load_learning(os.path.dirname(BASE)),
                         mint or row.get("symbol") or "",
-                        desk.prob_bucket(conf),
-                        side=str(lane or "long"),
-                        hour_ct=datetime.now(CT).hour,
-                    ) or ""
+                        conf,
+                        lane,
+                        datetime.now(CT).hour,
+                    )
                 except Exception:
                     learn_skip = ""
                 if learn_skip:
@@ -989,9 +973,9 @@ def scan(st, stats):
                     try:
                         desk = _desk()
                         venue = float(desk.venue_min_edge("solana_dex", desk.load_settings(os.path.dirname(BASE))))
-                        need_venue = decide_floor(venue) + (0.02 if lane == "speed" else 0.0)
+                        need_venue = floor_for_next_mint(venue) + (0.02 if lane == "speed" else 0.0)
                     except Exception:
-                        need_venue = decide_floor(0.02) + (0.02 if lane == "speed" else 0.0)
+                        need_venue = floor_for_next_mint(0.02) + (0.02 if lane == "speed" else 0.0)
                     gate_reason = facts_fee_skip(
                         True, conf, lane=str(lane or ""), venue_need=need_venue,
                     )
@@ -1141,6 +1125,76 @@ def refuse_conf_residual_as_edge(conf, *, lane: str = "", venue_need: float = 0.
         f"refuse conf−0.5 residual {raw:.3f} as fee-aware edge "
         f"(rt_fee={rt:.3f}; after_fee={after:.3f}{need_s}{lane_s}) — starve honesty"
     )
+
+
+def memecoin_learning_row(pos, pnl, reason="") -> dict | None:
+    """One learning row for this mint and bucket. A failsafe is not a hit."""
+    if not isinstance(pos, dict):
+        return None
+    mint = str(pos.get("mint") or "").strip()
+    fill_id = str(pos.get("fill_id") or "").strip()
+    if not fill_id:
+        fill_id = f"{mint}|{pos.get('entry_iso') or ''}".strip("|")
+    if not mint or not fill_id:
+        return None
+    try:
+        prob_n = float(pos.get("confidence"))
+        stake_n = float(pos.get("cost_usd"))
+        pnl_n = float(pnl)
+    except (TypeError, ValueError):
+        return None
+    if prob_n != prob_n or stake_n != stake_n or pnl_n != pnl_n:
+        return None
+    label = exit_that_fired(reason or pos.get("exit_name") or "")
+    row = {
+        "market": mint,
+        "prob": prob_n,
+        "stake": stake_n,
+        "fill_id": fill_id,
+        "side": str(pos.get("lane") or "long"),
+    }
+    if label in ("model-flip −6%", "stop −12%"):
+        row["reason"] = label
+    else:
+        row["result"] = "hit" if pnl_n > 0 else "miss"
+        if label:
+            row["reason"] = label
+    return row
+
+
+def tell_memecoin_learning(pos, pnl, reason="", root=None) -> str:
+    """Write one close. The same fill id is not written twice."""
+    row = memecoin_learning_row(pos, pnl, reason)
+    if not row:
+        return "skip"
+    try:
+        desk = _desk()
+        book = os.path.dirname(BASE) if root is None else root
+        fill_id = row["fill_id"]
+        if any(str(item.get("fill_id") or "") == fill_id for item in desk.load_learning(book)):
+            return "duplicate"
+        desk.record_learning(book, row)
+        return "recorded"
+    except Exception:
+        return "error"
+
+
+def mint_learning_skip(rows, mint, conf, lane, hour_ct) -> str:
+    """A cold mint skips that mint. It does not skip the next mint."""
+    desk = _desk()
+    return desk.learning_skip(
+        rows,
+        str(mint or ""),
+        desk.prob_bucket(conf),
+        side=str(lane or "long"),
+        hour_ct=hour_ct,
+    ) or ""
+
+
+def floor_for_next_mint(edge=0.02, rows=None) -> float:
+    """A cold mint does not lower 0.02 for the next mint. A higher bar stays."""
+    del rows
+    return decide_floor(edge)
 
 
 def decide_floor(edge) -> float:
