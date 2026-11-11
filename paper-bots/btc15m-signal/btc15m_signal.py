@@ -287,6 +287,29 @@ def settle_account(state):
     state["open"] = still
 
 
+def sell_learning_row(pos, reason):
+    """A sell before settle records the reason only. It is not a hit or a miss."""
+    return {
+        "reason": str(reason or "")[:160],
+        "market": series_for(pos.get("ticker"), pos.get("series")),
+        "prob": pos.get("fair_at_entry"),
+        "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
+        "fill_id": pos.get("fill_id") or "",
+        "side": pos.get("side") or "",
+    }
+
+
+def last_minute_block(min_left):
+    """The last minute does not open a buy to save a position."""
+    try:
+        left = float(min_left)
+    except (TypeError, ValueError):
+        return ""
+    if left < 1.0:
+        return "no new buy in the last minute"
+    return ""
+
+
 def paper_sell(state, pos, bid, fee, reason):
     """Flatten one open BTC paper position at bid − fee. No live order."""
     contracts = float(pos.get("contracts") or 0)
@@ -301,6 +324,7 @@ def paper_sell(state, pos, bid, fee, reason):
         "exit_price": round(float(bid), 4),
         "payout": proceeds,
         "pnl": pnl,
+        "opens_new_ticket": False,
     })
     state.setdefault("closed", []).append(closed)
     # Fee ledger + helper fill densify under DESK_SHADOW too (observe journals).
@@ -341,14 +365,7 @@ def paper_sell(state, pos, bid, fee, reason):
     if not IS_SHADOW:
         try:
             desk = _desk()
-            desk.record_learning(DESK_ROOT, {
-                "result": "hit" if pnl > 0 else "miss",
-                "market": "BTC",
-                "prob": pos.get("fair_at_entry"),
-                "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
-                "fill_id": pos.get("fill_id") or "",
-                "at": closed["closed"],
-            })
+            desk.record_learning(DESK_ROOT, sell_learning_row(pos, reason) | {"at": closed["closed"]})
         except Exception:
             pass
         try:
@@ -536,10 +553,10 @@ def manage_model_flips(
         if not flip:
             still.append(pos)
             continue
-        mark = mark_bid_for_held(
+        mark = real_held_bid(mark_bid_for_held(
             pos, model_side=side_now, model_bid=bid, market=market,
-        )
-        if mark is None or float(mark) <= 0:
+        ))
+        if mark is None:
             still.append(pos)
             continue
         mark_fee = fee_per_contract(mark)
@@ -561,10 +578,10 @@ def manage_take_profits(state, bid, fee, ticker=None, market=None, model_side=No
         if ticker and pos.get("ticker") != ticker:
             still.append(pos)
             continue
-        mark = mark_bid_for_held(
+        mark = real_held_bid(mark_bid_for_held(
             pos, model_side=model_side, model_bid=bid, market=market,
-        )
-        if mark is None or float(mark) <= 0:
+        ))
+        if mark is None:
             still.append(pos)
             continue
         tp = pos.get("take_profit")
@@ -581,7 +598,7 @@ def manage_take_profits(state, bid, fee, ticker=None, market=None, model_side=No
                 tp_f = None
         if tp_f is not None and float(mark) + 1e-12 >= tp_f:
             mark_fee = fee_per_contract(mark)
-            reason = f"take-profit bid {float(mark):.2f} ≥ {tp_f:.2f}"
+            reason = f"take-profit +15¢ cap 99¢ bid {float(mark):.2f} ≥ {tp_f:.2f}"
             pnl = paper_sell(state, pos, mark, mark_fee, reason)
             sold.append(f"{pos.get('ticker')} {reason} pnl {pnl:+.2f}")
         else:
@@ -684,6 +701,9 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
     none_msg = "Checked all open BTC 15-minute markets. No paper buy."
     if ask is None or not (0.05 <= float(ask) <= 0.95):
         return none_msg
+    late = last_minute_block((vol_kwargs or {}).get("minutes_left"))
+    if late:
+        return late
     held = second_side_block(state, ticker, side)
     if held:
         return held
