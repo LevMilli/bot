@@ -148,6 +148,58 @@ def learning_skip_sized(rows, prob, side, hour_ct) -> str:
     ) or ""
 
 
+def sized_learning_row(pos, pnl, reason):
+    """The first real settle is the first learning row. Anything else stays out."""
+    if str(reason or "").strip() != "settled" or not isinstance(pos, dict):
+        return None
+    if str(pos.get("result") or "") not in ("yes", "no"):
+        return None
+    owner = str(pos.get("tower") or pos.get("bot") or "kalshi-sized")
+    if owner in ("kalshi-sp", "sp", "S&P"):
+        return None
+    fill = str(pos.get("fill_id") or "").strip()
+    if not fill:
+        return None
+    try:
+        pnl_n = float(pnl)
+        stake = pos.get("risk") if pos.get("risk") is not None else pos.get("cost")
+        stake_n = float(stake)
+        prob_n = float(pos.get("ask"))
+    except (TypeError, ValueError):
+        return None
+    if pnl_n != pnl_n or stake_n != stake_n or stake_n <= 0 or not (0.0 < prob_n < 1.0):
+        return None
+    return {
+        "result": "hit" if pnl_n > 0 else "miss",
+        "reason": "settled",
+        "market": SERIES_KEY,
+        "prob": prob_n,
+        "stake": stake_n,
+        "fill_id": fill,
+        "side": str(pos.get("side") or ""),
+        "paper_only": True,
+    }
+
+
+def tell_sized_learning(pos, pnl, reason, root) -> str:
+    """Write one settle row. A failsafe, a header, and an empty book write nothing."""
+    row = sized_learning_row(pos, pnl, reason)
+    if not row:
+        return "empty"
+    desk = _desk()
+    fill = row["fill_id"]
+    before = desk.load_learning(root)
+    if any(str(item.get("fill_id") or "") == fill for item in before):
+        return "duplicate"
+    desk.record_learning(root, row)
+    return "recorded"
+
+
+def floor_stays(edge, rows=None) -> float:
+    """An empty book does not lower 0.02. A higher bar stays."""
+    return decide_floor(edge)
+
+
 def second_fill_skip(trades_today) -> str:
     """One fill a day. A looser daily cap is put back to one."""
     try:
@@ -687,15 +739,7 @@ def step_settle(args, state, day):
                         root=DESK_ROOT,
                     )
                     try:
-                        desk = _desk()
-                        desk.record_learning(DESK_ROOT, {
-                            "reason": sale["exit"],
-                            "market": "S&P-sized",
-                            "prob": pos.get("ask"),
-                            "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
-                            "fill_id": pos.get("fill_id") or "",
-                            "side": pos.get("side") or "",
-                        })
+                        tell_sized_learning(pos, sale.get("pnl"), sale.get("exit"), DESK_ROOT)
                     except Exception:
                         pass
                     try:
@@ -759,15 +803,7 @@ def step_settle(args, state, day):
             root=DESK_ROOT,
         )
         try:
-            desk = _desk()
-            desk.record_learning(DESK_ROOT, {
-                "result": "hit" if (pos.get("pnl") or 0) > 0 else "miss",
-                "market": "S&P-sized",
-                "prob": pos.get("ask"),
-                "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
-                "fill_id": pos.get("fill_id") or "",
-                "side": pos.get("side") or "",
-            })
+            tell_sized_learning(pos, pos.get("pnl"), "settled", DESK_ROOT)
         except Exception:
             pass
         try:
