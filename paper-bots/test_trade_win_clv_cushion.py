@@ -453,11 +453,11 @@ class TradeWinClvCushionTests(unittest.TestCase):
             again = desk_more.load_clv(tmp)
             self.assertIsNone(again["rows"][0].get("fair_close") or again["rows"][0].get("close_fair"))
 
-    def test_btc_cushion_skipped_when_z_clears(self):
+    def test_btc_cushion_blocks_when_z_clears(self):
         btc = _load_btc()
         close = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=12)
         open_t = close - dt.timedelta(minutes=15)
-        # σ≈20 → cushion $30 → z=1.5 clears MIN_Z=0.60; absolute $35 must not veto.
+        # σ≈20 → cushion $30 → z=1.5 clears MIN_Z. Scan still drops under $35.
         m = {
             "ticker": "KXBTC15M-TEST",
             "series": "KXBTC15M",
@@ -482,7 +482,7 @@ class TradeWinClvCushionTests(unittest.TestCase):
                         book=(0.80, 0.82, 10.0),
                     )
         reasons = " | ".join(ev.get("reasons") or [])
-        self.assertNotIn("cushion", reasons)
+        self.assertIn("cushion", reasons)
         self.assertGreaterEqual(float(ev.get("z") or 0), 0.60)
 
     def test_btc_cushion_still_blocks_when_z_thin(self):

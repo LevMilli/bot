@@ -1081,6 +1081,47 @@ def _sigma_for(price, min_left, closes, dvol):
     return sigma, realized, sig_dvol
 
 
+def scan_drop_reasons(min_left, ask=None, cushion=None, *, series="KXBTC15M", cushion_floor=None):
+    """Scan drops for one open window. An empty list can still face later gates.
+
+    Under 1 minute is too late. An ask outside 70–92¢ is out. A cushion under
+    $35 on BTC or $1.50 on ETH is out. Ask and cushion are checked only when
+    those values are passed. The 0.05 floor is not changed here.
+    """
+    drops = []
+    try:
+        left = float(min_left)
+    except (TypeError, ValueError):
+        left = -1.0
+    if left < 1.0:
+        drops.append("under 1 minute")
+    series_u = str(series or "").upper()
+    if cushion_floor is None:
+        cush_floor = MIN_CUSHION_ETH if "ETH" in series_u else MIN_CUSHION_USD
+    else:
+        cush_floor = float(cushion_floor)
+    if ask is not None:
+        try:
+            px = float(ask)
+        except (TypeError, ValueError):
+            px = None
+        if px is None or not (ASK_MIN <= px <= ASK_MAX):
+            drops.append(f"ask outside {ASK_MIN:.2f}-{ASK_MAX:.2f}")
+    if cushion is not None:
+        try:
+            gap = float(cushion)
+        except (TypeError, ValueError):
+            gap = -1.0
+        if gap < cush_floor:
+            drops.append(f"cushion ${gap:.2f} < ${cush_floor:g}")
+    return drops
+
+
+def late_scan_reasons(reasons):
+    """The late re-check drops the early clock line and keeps under 1 minute."""
+    return [r for r in (reasons or []) if "min left" not in str(r)]
+
+
 def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
                     min_minutes_left=None, min_cushion=None):
     """Apply the same guideline gates to one open 15m crypto window (BTC or ETH).
@@ -1116,10 +1157,14 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
         "confidence": None,
     }
     # Cheap gates first — fail fast before σ / news / book work when possible.
-    # Absolute cushion $ floor applied after z is known (see below) so tight-σ
-    # fee-clear Φ edges are not double-vetoed when z already clears.
+    # Under 1 minute is its own drop. The late re-check strips "min left" and
+    # must still keep this one. Cushion under the dollar floor is dropped even
+    # when z already clears.
     cheap = []
-    if min_left < time_floor:
+    series_name = m.get("series") or "KXBTC15M"
+    for reason in scan_drop_reasons(min_left, series=series_name):
+        cheap.append(reason)
+    if min_left >= 1.0 and min_left < time_floor:
         cheap.append(f"only {min_left:.1f} min left (< {time_floor:g})")
     listing_ask = m["yes_ask"] if side == "YES" else m["no_ask"]
     if listing_ask is not None and not (ASK_MIN <= listing_ask <= ASK_MAX):
@@ -1206,9 +1251,13 @@ def evaluate_window(m, price, closes, dvol, coinbase_only, edge_buf, book=None,
     zmin = max(0.40, float(zmin) - z_relax)
     if z < zmin:
         reasons.append(f"z {z:.2f} < {zmin}")
-    # Absolute cushion only when z does not already clear — distance is in Φ(z).
-    if cushion < cush_floor and z + 1e-12 < float(zmin):
-        reasons.append(f"cushion ${cushion:.2f} < ${cush_floor:g}")
+    for reason in scan_drop_reasons(
+        min_left, ask, cushion,
+        series=out.get("series") or series_name,
+        cushion_floor=cush_floor,
+    ):
+        if reason not in reasons:
+            reasons.append(reason)
     if not (ASK_MIN <= ask <= ASK_MAX):
         reasons.append(f"ask {ask:.2f} outside {ASK_MIN:.2f}-{ASK_MAX:.2f}")
     if spread > MAX_SPREAD + 1e-9:
@@ -1775,7 +1824,7 @@ def main():
                 book=books.get((m.get("ticker"), ev.get("side") or ("YES" if price > m["target"] else "NO"))),
                 min_minutes_left=PARLAY_MIN_MIN,
             )
-            late_reasons = [r for r in (late.get("reasons") or []) if "min left" not in r]
+            late_reasons = late_scan_reasons(late.get("reasons"))
             if not late_reasons and late.get("ask") is not None:
                 parlay_legs.append({
                     "ticker": late["ticker"],
@@ -2325,7 +2374,7 @@ def main():
                 m, eth_price, eth_closes, dvol, False, edge_buf,
                 book=eth_books.get(key), min_minutes_left=PARLAY_MIN_MIN, min_cushion=MIN_CUSHION_ETH,
             )
-            late_reasons = [r for r in (late.get("reasons") or []) if "min left" not in r]
+            late_reasons = late_scan_reasons(late.get("reasons"))
             if not late_reasons and late.get("ask") is not None:
                 parlay_legs.append({
                     "ticker": late["ticker"], "side": late["side"], "ask": late["ask"],
