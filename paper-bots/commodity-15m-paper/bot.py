@@ -929,33 +929,91 @@ def sum_chicago_today_pnl(closed, now: dt.datetime | None = None) -> float:
     return total
 
 
-def commodity_loss_stop(today_pnl) -> str:
-    """Settle-only when the Chicago day is down 2.0R ($40). Exits stay on.
+# Once the Chicago day is down a full 2.0R, new tickets are one quarter of the
+# ladder. They are not turned off. Haircuts still multiply after this.
+RED_DAY_FLOOR = 0.25
 
-    The shared profit lock only fires at +$40. This is the loss side, local to
-    this tower. It does not change daily_r_blocks, the fee floor, or size.
+
+def commodity_red_day_mult(today_pnl) -> float:
+    """Size factor for the rest of a red Chicago day.
+
+    Flat or green stays 1.0, so the $6-to-$15 ladder does not move. A loss
+    scales the ticket down, and at or below −2.0R ($40) it stays at the floor.
+    The tower can still take a different confident setup. It cannot add full size.
     """
+    try:
+        today = float(today_pnl)
+    except (TypeError, ValueError):
+        return 1.0
+    if today != today or today >= 0:
+        return 1.0
     try:
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
         import desk_roi_plan
-        budget_r = float(desk_roi_plan.daily_r_budget_for("commodity-15m"))
-        r_usd = float(desk_roi_plan.DAILY_R_USD)
+        cap = round(
+            float(desk_roi_plan.daily_r_budget_for("commodity-15m"))
+            * float(desk_roi_plan.DAILY_R_USD),
+            2,
+        )
+    except Exception:
+        cap = 40.0
+    if cap <= 0:
+        return 1.0
+    frac = min(1.0, (-today) / cap)
+    mult = 1.0 - frac * (1.0 - RED_DAY_FLOOR)
+    return round(max(RED_DAY_FLOOR, min(1.0, mult)), 4)
+
+
+def commodity_same_day_skip(closed, series, prob, side, now: dt.datetime | None = None) -> str:
+    """Skip a series × side × bucket that already lost money today.
+
+    The reason is the exit on that close. A different series or a higher
+    probability bucket can still be bought, at the red-day size. Yesterday's
+    Chicago closes do not count.
+    """
+    series_n = str(series or "").strip()
+    side_n = str(side or "").upper()
+    if not series_n or not side_n:
+        return ""
+    try:
+        desk = _desk()
+        bucket = desk.prob_bucket(prob)
     except Exception:
         return ""
-    if budget_r <= 0 or r_usd <= 0:
+    if not bucket:
         return ""
-    target = round(budget_r * r_usd, 2)
-    try:
-        today = float(today_pnl)
-    except (TypeError, ValueError):
+    day = chicago_day_label(now)
+    pnl = 0.0
+    n = 0
+    why = ""
+    for pos in closed or []:
+        if not isinstance(pos, dict):
+            continue
+        if closed_stamp_chicago_day(pos.get("closed")) != day:
+            continue
+        if str(pos.get("series") or "").strip() != series_n:
+            continue
+        if str(pos.get("side") or "").upper() != side_n:
+            continue
+        held_p = pos.get("fair_at_entry")
+        if held_p is None:
+            held_p = pos.get("p")
+        try:
+            if desk.prob_bucket(held_p) != bucket:
+                continue
+            pnl += float(pos.get("pnl") or 0)
+        except (TypeError, ValueError):
+            continue
+        n += 1
+        why = str(pos.get("exit") or why or "")
+    if n <= 0 or pnl >= 0:
         return ""
-    if today != today or today > -target:
-        return ""
+    reason = why or "loss"
     return (
-        f"daily loss stop for commodity-15m: "
-        f"today ${today:.2f} ≤ -{budget_r:g}R (${target:.0f}) — settle-only"
-    )
+        f"same-day miss {series_n} {side_n} {bucket}: "
+        f"today ${pnl:.2f} after {reason} — skip the repeat"
+    )[:200]
 
 
 def _chicago_hour(stamp=None, now: dt.datetime | None = None) -> int | None:
@@ -1124,6 +1182,12 @@ def paper_buy(state: dict, ev: dict) -> str:
     learn = commodity_learning_block(ev.get("series"), ev.get("p"), ev.get("side"))
     if learn:
         return learn
+    # A shape that already lost today is the lesson. Other setups still trade.
+    repeat = commodity_same_day_skip(
+        state.get("closed"), ev.get("series"), ev.get("p"), ev.get("side"),
+    )
+    if repeat:
+        return repeat
     fam = series_family(str(ev.get("series") or ""))
     if fam in ("energy", "metal") and fam in open_families(state):
         return (
@@ -1209,6 +1273,19 @@ def paper_buy(state: dict, ev: dict) -> str:
             notes.append(conf_note)
             plan["notes"] = notes
             plan["commodity_confidence_stake"] = stake
+        # Red Chicago day: cut whatever the ladder and haircuts already decided.
+        # Does not raise a green day and does not move the 0.05 floor.
+        day_mult = commodity_red_day_mult(sum_chicago_today_pnl(state.get("closed")))
+        if day_mult < 1.0 - 1e-12:
+            before = float(stake)
+            stake = round(before * day_mult, 2)
+            if 0 < stake < 1.0:
+                stake = 0.0
+            plan = dict(plan or {})
+            notes = list(plan.get("notes") or [])
+            notes.append(f"red-day adjust × {day_mult:.2f} (${before:.2f} → ${stake:.2f})")
+            plan["notes"] = notes
+            plan["commodity_red_day_mult"] = day_mult
         contracts = desk.contracts_for_stake(per, stake)
     except Exception as exc:
         return f"Desk sizing failed: {type(exc).__name__}"
@@ -1983,12 +2060,14 @@ def main() -> int:
             print(f"Settle-only: {r_block}")
             max_buys_eff = 0
             _densify_gate_skip(r_block, note="commodity daily-r densify")
-        # Loss side of the same 2.0R. +$40 stays in daily_r_blocks. Exits stay on.
-        loss_block = commodity_loss_stop(today_pnl)
-        if loss_block:
-            print(f"Settle-only: {loss_block}")
-            max_buys_eff = 0
-            _densify_gate_skip(loss_block, note="commodity daily-loss densify")
+        elif today_pnl < 0:
+            # Still trading. Smaller, and only one new buy, so a red day can adjust.
+            day_mult = commodity_red_day_mult(today_pnl)
+            print(
+                f"Red-day adjust: today ${today_pnl:.2f} "
+                f"size ×{day_mult:.2f}, one new buy"
+            )
+            max_buys_eff = min(int(max_buys_eff), 1)
     except Exception:
         pass
     for row in ranked:
