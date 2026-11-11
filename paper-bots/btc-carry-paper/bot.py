@@ -38,6 +38,7 @@ VENUE_FLOOR = 0.02  # registry lock. Not a monthly hurdle. Not the btc15m 0.05 f
 
 FLAT_CARD = "flat - BTC spot long / perp short not open; 0.30% round trip unpaid"
 HOLD_CARD = "holding unlevered BTC spot long / perp short; red month is a mark, not a flip"
+HOLD_EXIT = "hold — red month is a mark"
 
 
 def densified_hold_card(state: dict) -> str:
@@ -514,7 +515,163 @@ def empty_state(cfg: dict) -> dict:
     }
 
 
-def hold_step(state: dict, marks: dict, cfg: dict, now: dt.datetime, *, block_entries: bool = False) -> dict:
+def write_open_intent(path, *, fill_id, notional, exit_fee, premium):
+    """The crash intent. The $500 pair and the reserved exit fee are required."""
+    notional_n = _num(notional)
+    fee_n = _num(exit_fee)
+    prem = _public_print(premium)
+    reserved = round(NOTIONAL * EXIT_FEE_RATE, 4)
+    if (
+        not path
+        or notional_n is None
+        or abs(notional_n - NOTIONAL) > 1e-9
+        or fee_n is None
+        or abs(fee_n - reserved) > 1e-9
+        or prem is None
+        or not str(fill_id or "").strip()
+    ):
+        raise ValueError("open intent needs the $500 pair and the reserved exit fee")
+    payload = {
+        "tower": "btc-carry",
+        "fill_id": str(fill_id).strip(),
+        "symbol": "BTCUSDT",
+        "notional": NOTIONAL,
+        "leverage": 1,
+        "exit_fee_reserved": reserved,
+        "exit_name": HOLD_EXIT,
+        "premium": prem,
+        "paper_only": True,
+        "status": "intent",
+    }
+    _write_json(path, payload)
+    return payload
+
+
+def reconcile_open_intent(state, path) -> str:
+    """Match an intent to the book. Never create a pair or a premium."""
+    if not path or not os.path.exists(path):
+        return "none"
+    try:
+        with open(path, encoding="utf-8") as handle:
+            intent = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return "none"
+    if not isinstance(intent, dict):
+        return "none"
+    fid = str(intent.get("fill_id") or "")
+    book = state if isinstance(state, dict) else {}
+    opens = [row for row in book.get("open") or [] if isinstance(row, dict)]
+    if fid and any(str(row.get("fill_id") or "") == fid for row in opens):
+        status = "open"
+    else:
+        status = "abandoned"
+    intent["status"] = status
+    intent["paper_only"] = True
+    intent["exit_name"] = HOLD_EXIT
+    intent["leverage"] = 1
+    intent["notional"] = NOTIONAL
+    _write_json(path, intent)
+    return status
+
+
+def place_open(state, decision, marks, *, intent_path, now) -> dict:
+    """Write the hold intent before cash. One unlevered pair.
+
+    A restart that already has the pair buys nothing. A refused decision
+    does not invent a position. The reserved exit fee is not spent.
+    """
+    book = state if isinstance(state, dict) else {}
+    cash_before = _num(book.get("cash"))
+    if cash_before is None:
+        cash_before = NOTIONAL
+
+    def refuse(reason):
+        return {
+            "bought": False,
+            "reason": reason,
+            "fill": False,
+            "leverage": 1,
+            "sold": False,
+            "paper_only": True,
+            "cash": cash_before,
+        }
+
+    opens = [row for row in (book.get("open") or []) if isinstance(row, dict)]
+    if opens:
+        return refuse("one pair")
+    if not isinstance(decision, dict) or decision.get("action") != "open":
+        return refuse(str((decision or {}).get("reason") or "hold rule not met"))
+    floor = _num(decision.get("floor"))
+    if floor is None or floor + 1e-12 < VENUE_FLOOR:
+        return refuse("floor stays 0.02")
+    scanned = scan_marks(marks if isinstance(marks, dict) else {})
+    if scanned["data_skip"] or not scanned["funding"] or not scanned["premium"]:
+        return refuse(str(scanned.get("reason") or "data no archive rows"))
+    when = now if isinstance(now, dt.datetime) else _parse_time(now)
+    if when is None:
+        return refuse("missing clock")
+    when = _as_utc(when)
+    entry = _latest_at_or_before(scanned["premium"], when) or scanned["premium"][-1]
+    premium = _public_print(entry.get("close"))
+    if premium is None:
+        return refuse("missing premium")
+    entry_fee = round(NOTIONAL * ENTRY_FEE_RATE, 4)
+    exit_fee = round(NOTIONAL * EXIT_FEE_RATE, 4)
+    if cash_before + 1e-9 < entry_fee:
+        return refuse("shadow cash below the open fee")
+    fill_id = f"btc-carry|{when.isoformat(timespec='seconds')}"
+    try:
+        write_open_intent(
+            intent_path,
+            fill_id=fill_id,
+            notional=NOTIONAL,
+            exit_fee=exit_fee,
+            premium=premium,
+        )
+    except (TypeError, ValueError, OSError):
+        return refuse("open intent needs the $500 pair and the reserved exit fee")
+    book["cash"] = round(cash_before - entry_fee, 4)
+    book["entry_fees"] = int(book.get("entry_fees") or 0) + 1
+    book.setdefault("open", []).append({
+        "ticker": "BTCUSDT",
+        "team": "BTC carry",
+        "side": "long spot / short perp",
+        "contracts": 1,
+        "cost": NOTIONAL,
+        "notional": NOTIONAL,
+        "leverage": 1,
+        "entry_fee": entry_fee,
+        "exit_fee_reserved": exit_fee,
+        "exit_name": HOLD_EXIT,
+        "funding_pnl": 0.0,
+        "basis_pnl": 0.0,
+        "premium": premium,
+        "premium_time": entry.get("time"),
+        "opened": when.isoformat(timespec="seconds"),
+        "applied": [],
+        "months": {},
+        "sealed": [],
+        "why": "held unlevered carry; round trip is not paid every month",
+        "price_source": "https://data.binance.vision/",
+        "price_at": entry.get("time"),
+        "paper_only": True,
+        "shadow_only": True,
+        "fill_id": fill_id,
+        "exit_plan": _exit_plan(),
+    })
+    return {
+        "bought": True,
+        "fill_id": fill_id,
+        "exit_name": HOLD_EXIT,
+        "notional": NOTIONAL,
+        "leverage": 1,
+        "exit_fee_reserved": exit_fee,
+        "sold": False,
+        "cash": book["cash"],
+    }
+
+
+def hold_step(state: dict, marks: dict, cfg: dict, now: dt.datetime, *, block_entries: bool = False, intent_path=None) -> dict:
     """Apply the hold. Never flips. Never adds a second leg after a red month."""
     cfg = locked_cfg(cfg)
     now = _as_utc(now)
@@ -530,38 +687,14 @@ def hold_step(state: dict, marks: dict, cfg: dict, now: dt.datetime, *, block_en
         if block_entries or not premium or not funding:
             state["last_action"] = "flat"
             return state
-        entry = _latest_at_or_before(premium, now) or premium[-1]
-        notional = float(cfg["notional_usd"])
-        fee = round(notional * ENTRY_FEE_RATE, 4)
-        state["cash"] = round(float(state.get("cash") or cfg["starter_cash"]) - fee, 4)
-        state["entry_fees"] = int(state.get("entry_fees") or 0) + 1
-        state["open"].append({
-            "ticker": cfg["symbol"],
-            "team": "BTC carry",
-            "side": "long spot / short perp",
-            "contracts": 1,
-            "cost": notional,
-            "notional": notional,
-            "leverage": 1,
-            "entry_fee": fee,
-            "exit_fee_reserved": round(notional * EXIT_FEE_RATE, 4),
-            "funding_pnl": 0.0,
-            "basis_pnl": 0.0,
-            "premium": entry["close"],
-            "premium_time": entry["time"],
-            "opened": now.isoformat(timespec="seconds"),
-            "applied": [],
-            "months": {},
-            "sealed": [],
-            "why": "held unlevered carry; round trip is not paid every month",
-            "price_source": "https://data.binance.vision/",
-            "price_at": entry["time"],
-            "paper_only": True,
-            "shadow_only": True,
-            "fill_id": f"btc-carry|{now.isoformat(timespec='seconds')}",
-            "exit_plan": _exit_plan(),
-        })
-        state["last_action"] = "open"
+        placed = place_open(
+            state,
+            {"action": "open", "floor": cfg["venue_min_edge"]},
+            {"symbol": cfg.get("symbol") or "BTCUSDT", "funding": funding, "premium": premium},
+            intent_path=intent_path,
+            now=now,
+        )
+        state["last_action"] = "open" if placed.get("bought") else "flat"
         return state
     pos = state["open"][0]
     pos["notional"] = NOTIONAL
@@ -712,6 +845,8 @@ def run_once(
     if scanned["data_skip"] and not str(marks.get("error") or "").strip():
         detail = str(scanned["reason"] or "")
         marks["error"] = detail[5:] if detail.startswith("data ") else detail
+    intent_path = os.path.join(tower, "buy_intent.json")
+    reconcile_open_intent(state, intent_path)
     blocked = os.environ.get("DESK_BLOCK_ENTRIES") == "1"
     before = len(state.get("open") or [])
     decision = decide_hold(
@@ -720,6 +855,7 @@ def run_once(
     state = hold_step(
         state, marks, cfg, now,
         block_entries=(blocked and before == 0) or decision["action"] != "open",
+        intent_path=intent_path,
     )
     state["decision"] = decision["action"]
     state["floor"] = decision["floor"]
