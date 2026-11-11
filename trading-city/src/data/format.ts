@@ -18,10 +18,10 @@ export const BEAM_COLORS = [
   '#b388ff', // lilac — Exclusive set (shadow logger)
   '#ff5c8a', // rose — Point spread
   '#00c2b8', // teal — Game total
-  '#d6ff4a', // chartreuse — Commodity calendar
+  '#d6ff4a', // spare
   '#ff9f1c', // orange — Player props
   '#7aa2ff', // periwinkle — Period winner
-  '#ff6b35', // vermilion — BTC options
+  '#ff6b35', // spare
   '#b14dff', // violet — Champions League
   '#3ddc97', // mint green — Polymarket mentions
   '#ff4d6d', // crimson — Esports match
@@ -45,10 +45,8 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'exclusive-set': '#b388ff',
   'point-spread': '#ff5c8a',
   'game-total': '#00c2b8',
-  'commodity-calendar': '#d6ff4a',
   'player-props': '#ff9f1c',
   'period-winner': '#7aa2ff',
-  'btc-options': '#ff6b35',
   'champions-league': '#b14dff',
   'polymarket-mentions': '#3ddc97',
   'esports-match': '#ff4d6d',

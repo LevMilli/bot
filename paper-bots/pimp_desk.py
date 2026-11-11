@@ -4751,7 +4751,7 @@ _ZERO_STAKE_IDS = frozenset()
 
 
 def _install_shadow_loggers() -> None:
-    """Register the nine log-only towers. Does not change an existing buy plan."""
+    """Register the seven log-only towers. Does not change an existing buy plan."""
     global BOTS, AUTO, SETTLEMENT_FILES, _ZERO_STAKE_IDS
     import shadow_missing
 
