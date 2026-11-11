@@ -181,6 +181,103 @@ def save_account(state: dict) -> None:
     os.replace(tmp, path)
 
 
+BUY_EXIT_NAME = "commodity model-flip"
+BUY_INTENT = os.path.join(HERE, "buy_intent.json")
+
+
+def buy_exit_name(series) -> str:
+    """The intent names commodity model-flip and this series."""
+    name = str(series or "").strip()
+    if not name:
+        raise ValueError("buy intent needs the series")
+    return f"{BUY_EXIT_NAME} {name}"
+
+
+def _atomic_json(dest, payload):
+    tmp = dest + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+        handle.write("\n")
+        handle.flush()
+    os.replace(tmp, dest)
+
+
+def load_buy_intent():
+    if not os.path.exists(BUY_INTENT):
+        return None
+    try:
+        with open(BUY_INTENT, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_buy_intent(*, fill_id, ticker, series, side, contracts, stake, ask):
+    """Write the crash intent before cash moves. The ask has to be a real quote."""
+    try:
+        ask_n = float(ask)
+        stake_n = float(stake)
+    except (TypeError, ValueError):
+        raise ValueError("buy intent needs the real ask and the stake") from None
+    if ask_n != ask_n or ask_n <= 0 or stake_n != stake_n or stake_n <= 0:
+        raise ValueError("buy intent needs the real ask and the stake")
+    payload = {
+        "tower": "commodity-15m",
+        "fill_id": str(fill_id),
+        "ticker": str(ticker or ""),
+        "series": str(series or "").strip(),
+        "side": str(side or ""),
+        "contracts": int(contracts),
+        "stake": round(stake_n, 2),
+        "ask": ask_n,
+        "exit_rule": buy_exit_name(series),
+        "paper_only": True,
+        "status": "intent",
+    }
+    if not payload["fill_id"] or not payload["ticker"] or not payload["series"]:
+        raise ValueError("buy intent needs a fill id, a ticker, and the series")
+    _atomic_json(BUY_INTENT, payload)
+    return payload
+
+
+def reconcile_buy_intent(state):
+    """Match an intent to the saved book. Never create a position or a price."""
+    intent = load_buy_intent()
+    if not isinstance(intent, dict):
+        return "none"
+    fid = str(intent.get("fill_id") or "")
+    opens = [p for p in (state or {}).get("open") or [] if isinstance(p, dict)]
+    closed = [p for p in (state or {}).get("closed") or [] if isinstance(p, dict)]
+    if fid and any(str(p.get("fill_id") or "") == fid for p in opens):
+        status = "open"
+    elif fid and any(str(p.get("fill_id") or "") == fid for p in closed):
+        status = "closed"
+    else:
+        status = "abandoned"
+    if intent.get("status") != status or intent.get("paper_only") is not True:
+        intent["status"] = status
+        intent["paper_only"] = True
+        if intent.get("series"):
+            intent["exit_rule"] = buy_exit_name(intent.get("series"))
+        _atomic_json(BUY_INTENT, intent)
+    return status
+
+
+def average_block(state, series) -> str:
+    """Do not add a contract onto a series that is already open.
+
+    A red book is not a reason to average the open ticket.
+    """
+    want = str(series or "").strip()
+    if not want:
+        return ""
+    for pos in (state or {}).get("open") or []:
+        if isinstance(pos, dict) and str(pos.get("series") or "").strip() == want:
+            return "do not add a contract to average an open series"
+    return ""
+
+
 def phi(z: float) -> float:
     return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
 
@@ -1257,6 +1354,9 @@ def paper_buy(state: dict, ev: dict, buys_this_check: int = 0) -> str:
     ticker = ev["ticker"]
     if any(isinstance(p, dict) and p.get("ticker") == ticker for p in state.get("open") or []):
         return none_msg + " already open."
+    averaged = average_block(state, ev.get("series"))
+    if averaged:
+        return averaged
     if os.environ.get("DESK_BLOCK_ENTRIES") == "1":
         # Prefer-1: honor stored DESK_BLOCK_REASON — do not invent bland entry_gate.
         try:
@@ -1436,8 +1536,21 @@ def paper_buy(state: dict, ev: dict, buys_this_check: int = 0) -> str:
     cash = float(state.get("cash") or 0)
     if cost > cash + 1e-9 or len(state.get("open") or []) >= 12:
         return none_msg + " cash/open cap."
-    state["cash"] = round(cash - cost, 2)
     opened = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    fill_id = f"{ticker}|{opened}"
+    try:
+        write_buy_intent(
+            fill_id=fill_id,
+            ticker=ticker,
+            series=ev.get("series"),
+            side=ev["side"],
+            contracts=contracts,
+            stake=cost,
+            ask=ask,
+        )
+    except (TypeError, ValueError):
+        return none_msg
+    state["cash"] = round(cash - cost, 2)
     vol = (plan or {}).get("vol") or {}
     perf = (plan or {}).get("perf") or {}
     try:
@@ -1462,7 +1575,8 @@ def paper_buy(state: dict, ev: dict, buys_this_check: int = 0) -> str:
         "risk_factor": risk_factor,
         "opened": opened,
         "close_time": ev["close_time"].isoformat(),
-        "fill_id": f"{ticker}|{opened}",
+        "fill_id": fill_id,
+        "exit_rule": buy_exit_name(ev.get("series")),
         "price_source": KALSHI,
         "price_at": opened,
         "paper_only": True,
@@ -1563,6 +1677,7 @@ def main() -> int:
     except Exception:
         pass
     account = load_account()
+    reconcile_buy_intent(account)
     settle_account(account)
     save_account(account)
     try:
