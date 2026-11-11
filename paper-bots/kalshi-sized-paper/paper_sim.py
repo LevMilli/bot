@@ -247,6 +247,68 @@ def apply_failsafe(state, pos, bid, *, floor=0.50, quote_ticker=None):
     return sale
 
 
+def header_only_note(text) -> bool:
+    """A title with no closed row. It is not a sample fill."""
+    lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
+    if not lines:
+        return True
+    return all(ln.startswith("#") for ln in lines)
+
+
+def record_close(pos, *, bankroll, reason, bid=None, root=None):
+    """Closed row with the bid and the reason already on the book.
+
+    A header-only note is not turned into a sample fill. A bid is stored only
+    when it is a real quote. A settle does not invent one. P/L is not retyped.
+    The same fill and reason are not written twice.
+    """
+    raw = str(reason or "").strip()
+    if header_only_note(raw):
+        return {"fill": False, "fact": "header-only learning file", "paper_only": True}
+    if not _sized_row(pos):
+        return None
+    label = raw or str(pos.get("exit") or "").strip()
+    if not label:
+        return {"fill": False, "fact": "header-only learning file", "paper_only": True}
+    pnl_before = pos.get("pnl")
+    try:
+        pos["bankroll_after"] = round(float(bankroll), 4)
+    except (TypeError, ValueError):
+        pass
+    if not pos.get("exit"):
+        pos["exit"] = label
+    if pnl_before is not None:
+        pos["pnl"] = pnl_before
+    stored = real_side_bid(bid)
+    if stored is not None and pos.get("exit_price") is None:
+        pos["exit_price"] = stored
+    fee_for_journal = pos.get("exit_fee")
+    if fee_for_journal is None:
+        fee_for_journal = pos.get("fee")
+    journal_root = root if root is not None else os.path.dirname(HERE)
+    try:
+        if journal_root not in sys.path:
+            sys.path.insert(0, journal_root)
+        import desk_brain
+        return desk_brain.record_decision(
+            journal_root,
+            bot="kalshi-sized",
+            action="settle" if label == "settled" else "sell",
+            ticker=str(pos.get("ticker") or ""),
+            side=str(pos.get("side") or ""),
+            reasons=[label],
+            note=label[:240],
+            fill_id=str(pos.get("fill_id") or ""),
+            bid=stored,
+            stake=pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
+            exit_name=label,
+            fee=fee_for_journal,
+            cash=pos.get("bankroll_after"),
+        )
+    except Exception:
+        return None
+
+
 def taker_fee(contracts, price, rate=None):
     """Kalshi taker fee, rounded up to the cent. Tiny epsilon avoids 0.26000000001 -> 0.27."""
     rate = CFG["taker_fee_rate"] if rate is None else rate
