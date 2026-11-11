@@ -1348,8 +1348,8 @@ def commodity_learning_row(pos: dict, pnl, closed_at: str = "") -> dict | None:
     if prob_n != prob_n or stake_n != stake_n or pnl_n != pnl_n:
         return None
     at = str(closed_at or pos.get("closed") or "")
+    label = exit_that_fired(pos.get("exit_name") or pos.get("exit") or "")
     row = {
-        "result": "hit" if pnl_n > 0 else "miss",
         "market": series,
         "prob": prob_n,
         "stake": stake_n,
@@ -1357,6 +1357,11 @@ def commodity_learning_row(pos: dict, pnl, closed_at: str = "") -> dict | None:
         "side": str(pos.get("side") or "").upper(),
         "at": at,
     }
+    # A model-flip is the failsafe. It is not a hit or a miss.
+    if label != "model-flip":
+        row["result"] = "hit" if pnl_n > 0 else "miss"
+    if label:
+        row["reason"] = label
     hour_ct = _chicago_hour(at)
     if hour_ct is not None:
         row["hour_ct"] = hour_ct
