@@ -456,15 +456,12 @@ def scan(st, stats):
     entries_today, pnl_today = trades_today()
     open_mints = {p["mint"] for p in st["open"]}
     stats["candidates"] = len(mints)
-    red_lock = float(getattr(C, "RED_DAY_ENTRY_LOCK_USD", 20) or 20)
     max_open_eff = int(C.MAX_OPEN)
     if pnl_today < 0:
         max_open_eff = min(max_open_eff, int(getattr(C, "MAX_OPEN_RED", 2) or 2))
-    if pnl_today <= -red_lock:
-        print(
-            f"  RED-DAY LOCK: today ${pnl_today:.2f} <= −${red_lock:.0f} — "
-            "new entries off (exits already ran)"
-        )
+    locked = decide_skip(pnl_today)
+    if locked:
+        print(f"  RED-DAY LOCK: {locked} — new entries off (exits already ran)")
         stats["red_day_lock"] = 1
         return
 
@@ -625,9 +622,9 @@ def scan(st, stats):
                     try:
                         desk = _desk()
                         venue = float(desk.venue_min_edge("solana_dex", desk.load_settings(os.path.dirname(BASE))))
-                        need_venue = venue + (0.02 if lane == "speed" else 0.0)
+                        need_venue = decide_floor(venue) + (0.02 if lane == "speed" else 0.0)
                     except Exception:
-                        need_venue = 0.02 + (0.02 if lane == "speed" else 0.0)
+                        need_venue = decide_floor(0.02) + (0.02 if lane == "speed" else 0.0)
                     gate_reason = facts_fee_skip(
                         True, conf, lane=str(lane or ""), venue_need=need_venue,
                     )
@@ -683,7 +680,10 @@ def scan(st, stats):
             except Exception:
                 pass
             continue
-        ticket = apply_entry_cuts(ticket_for(st, conf, lane), st, lane, pnl_today)
+        ladder = confidence_buy_in(conf, lane)
+        ticket = decide_size(
+            ladder, adapt_ticket(ladder), pnl_today, st.get("cash_usd"), lane,
+        )
         if ticket < C.MIN_TICKET_USD:
             if pnl_today < 0:
                 red_cap = float(getattr(C, "RED_DAY_TICKET_USD", C.MIN_TICKET_USD) or C.MIN_TICKET_USD)
@@ -790,6 +790,97 @@ def refuse_conf_residual_as_edge(conf, *, lane: str = "", venue_need: float = 0.
         f"refuse conf−0.5 residual {raw:.3f} as fee-aware edge "
         f"(rt_fee={rt:.3f}; after_fee={after:.3f}{need_s}{lane_s}) — starve honesty"
     )
+
+
+def decide_floor(edge) -> float:
+    """0.02 on the fee-aware edge. A higher bar stays. A lower number is put back."""
+    floor = 0.02
+    try:
+        n = float(edge)
+    except (TypeError, ValueError):
+        return floor
+    if n != n or n < floor:
+        return floor
+    return n
+
+
+def decide_skip(today_pnl) -> str:
+    """Today at or under −$5 is a skip. The exit path stays awake."""
+    lock = 5.0
+    try:
+        configured = float(getattr(C, "RED_DAY_ENTRY_LOCK_USD", lock) or lock)
+    except (TypeError, ValueError):
+        configured = lock
+    if configured == configured and 0 < configured < lock:
+        lock = configured
+    try:
+        pnl = float(today_pnl)
+    except (TypeError, ValueError):
+        return ""
+    if pnl != pnl or pnl > -lock:
+        return ""
+    return f"today ${pnl:.2f} <= −${lock:.0f}"
+
+
+def red_day_ceiling() -> float:
+    """The $10 red-day ceiling. A higher number is put back."""
+    cap = 10.0
+    try:
+        n = float(getattr(C, "RED_DAY_TICKET_USD", cap) or cap)
+    except (TypeError, ValueError):
+        return cap
+    if n != n or n <= 0 or n > cap:
+        return cap
+    return n
+
+
+def adapt_ticket(ladder) -> float:
+    """Adapt may shrink the ladder. A miss leaves the ladder. It does not lift it."""
+    try:
+        base = float(ladder)
+    except (TypeError, ValueError):
+        return 0.0
+    if base != base or base <= 0:
+        return 0.0
+    try:
+        desk_root = os.path.dirname(BASE)
+        if desk_root not in sys.path:
+            sys.path.insert(0, desk_root)
+        import desk_adapt
+        adapted, _plan = desk_adapt.adapt_stake(base, history=[], series="solana_dex")
+        return float(adapted)
+    except Exception:
+        return base
+
+
+def decide_size(ladder, adapted, today_pnl, cash, lane: str = "") -> float:
+    """Ladder, then the $10 red-day ceiling, then Adapt. Adapt cannot lift the ceiling.
+
+    A day at or under −$5 is a skip, so the size is zero. Cash caps the ticket.
+    """
+    if decide_skip(today_pnl):
+        return 0.0
+    try:
+        base = float(ladder)
+        got = float(adapted)
+        cash_n = float(cash)
+    except (TypeError, ValueError):
+        return 0.0
+    if base != base or got != got or cash_n != cash_n or base <= 0 or got < 0 or cash_n <= 0:
+        return 0.0
+    ceiling = min(base, cash_n)
+    if str(lane or "").lower() == "speed":
+        ceiling = min(ceiling, float(C.MIN_TICKET_USD))
+    try:
+        pnl = float(today_pnl)
+    except (TypeError, ValueError):
+        pnl = 0.0
+    if pnl == pnl and pnl < 0:
+        ceiling = min(ceiling, red_day_ceiling())
+    stake = min(got, ceiling)
+    if stake + 1e-9 < float(C.MIN_TICKET_USD):
+        return 0.0
+    return round(stake, 2)
 
 
 def confidence_buy_in(conf, lane: str = "") -> float:
