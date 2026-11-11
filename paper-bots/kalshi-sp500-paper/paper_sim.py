@@ -62,6 +62,40 @@ def bid_under_exit(bid, floor=0.50) -> bool:
     return mark < bar
 
 
+def failsafe_sale(pos, bid, *, floor=0.50):
+    """Sell one Kalshi S&P contract at the real bid minus the taker.
+
+    A sized-Kalshi contract is not sold. This does not open another ticket.
+    """
+    if not isinstance(pos, dict):
+        return None
+    owner = str(pos.get("tower") or pos.get("bot") or "kalshi-sp")
+    if owner != "kalshi-sp" or pos.get("sized"):
+        return None
+    mark = real_side_bid(bid)
+    if not bid_under_exit(bid, floor):
+        return None
+    try:
+        contracts = float(pos.get("contracts") or 0)
+        cost = float(pos.get("cost") or 0)
+        entry_fee = float(pos.get("fee") or 0)
+    except (TypeError, ValueError):
+        return None
+    if contracts <= 0 or mark is None:
+        return None
+    fee = taker_fee(contracts, mark)
+    proceeds = round(contracts * mark - fee, 4)
+    pnl = round(proceeds - cost - entry_fee, 4)
+    return {
+        "exit": BUY_EXIT_RULE,
+        "exit_price": mark,
+        "exit_fee": fee,
+        "payout": proceeds,
+        "pnl": pnl,
+        "opens_new_ticket": False,
+    }
+
+
 def second_fill_block(trades_today, max_trades=1) -> str:
     """One paper buy per Chicago day. A later candidate is a skip."""
     try:
