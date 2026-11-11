@@ -361,7 +361,34 @@ def step_scan(args, state, day):
     if args.dry_run:
         print(alerts.format_trade_note(preview, state["bankroll"] - preview["cost"] - fee, dry_run=True))
         return
-    pos = paper_sim.open_position(state, day, ev, pick, n, now.isoformat(timespec="seconds"))
+    if paper_sim.second_fill_block(paper_sim.trades_on(state, day), CFG["max_trades_per_day"]):
+        reason = paper_sim.second_fill_block(
+            paper_sim.trades_on(state, day), CFG["max_trades_per_day"],
+        )
+        print(alerts.format_skip_note(day, reason))
+        if not args.dry_run:
+            logger.learn(f"{day}: no trade - {reason}", "skip")
+            _densify_scan_skip(reason)
+        return
+    entry_time = now.isoformat(timespec="seconds")
+    fill_id = f"{pick['ticker']}|{entry_time}"
+    stake = round(n * float(pick["ask"]) + fee, 2)
+    try:
+        paper_sim.write_buy_intent(
+            fill_id=fill_id,
+            ticker=pick["ticker"],
+            side=pick["side"],
+            contracts=n,
+            stake=stake,
+            ask=pick["ask"],
+        )
+    except ValueError as exc:
+        reason = f"buy intent not written ({exc})"
+        print(alerts.format_skip_note(day, reason))
+        logger.learn(f"{day}: no trade - {reason}", "skip")
+        _densify_scan_skip(reason)
+        return
+    pos = paper_sim.open_position(state, day, ev, pick, n, entry_time)
     try:
         import desk_profit
         pos["risk_factor"] = desk_profit.risk_factor_for("kalshi-sp", pick["side"])
@@ -570,6 +597,8 @@ def main():
         logger.ensure_files()
     existed = os.path.exists(paper_sim.STATE_PATH)
     state = paper_sim.load_state()
+    if not args.dry_run:
+        paper_sim.reconcile_buy_intent(state)
     if not existed and not args.dry_run:
         paper_sim.save_state(state)
     {"brief": step_brief, "scan": step_scan, "settle": step_settle}[args.step](args, state, day)
