@@ -226,6 +226,21 @@ def explain_buy(bot: str, side: str, ticker: str, edge, confidence, depth=None) 
     return f"{bot}: " + ", ".join(parts) + "."
 
 
+def _journal_number(value, places, *, positive=False):
+    """A real number already on the ticket. Missing or unreadable stays missing."""
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number:
+        return None
+    if positive and number <= 0:
+        return None
+    return round(number, places)
+
+
 def record_decision(
     root: str | None,
     *,
@@ -239,14 +254,20 @@ def record_decision(
     reasons: list | None = None,
     score=None,
     note: str = "",
+    fill_id: str = "",
+    bid=None,
+    stake=None,
+    exit_name: str = "",
+    fee=None,
+    cash=None,
 ) -> dict:
-    """Append one observe/score/gate/buy/skip decision to the durable journal."""
+    """Append one observe/score/gate/buy/skip/close decision to the durable journal."""
     state = load_journal(root)
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     row = {
         "at": now,
         "bot": bot,
-        "action": action,  # buy | skip | flip | settle | observe
+        "action": action,  # buy | skip | flip | settle | sell | observe
         "ticker": ticker,
         "side": side,
         "edge": None if edge is None else round(float(edge), 4),
@@ -256,6 +277,33 @@ def record_decision(
         "reasons": list(reasons or []),
         "note": note[:240],
     }
+    fill = str(fill_id or "").strip()
+    exit_label = str(exit_name or "").strip()
+    if fill:
+        row["fill_id"] = fill
+    if exit_label:
+        row["exit_name"] = exit_label[:120]
+    bid_n = _journal_number(bid, 4, positive=True)
+    if bid_n is not None:
+        row["bid"] = bid_n
+    stake_n = _journal_number(stake, 2)
+    if stake_n is not None:
+        row["stake"] = stake_n
+    fee_n = _journal_number(fee, 4)
+    if fee_n is not None:
+        row["fee"] = fee_n
+    cash_n = _journal_number(cash, 2)
+    if cash_n is not None:
+        row["cash"] = cash_n
+    if fill and exit_label:
+        for prev in state.get("decisions") or []:
+            if (
+                isinstance(prev, dict)
+                and prev.get("bot") == bot
+                and str(prev.get("fill_id") or "") == fill
+                and str(prev.get("exit_name") or "") == exit_label
+            ):
+                return prev
     state.setdefault("decisions", []).append(row)
     state["last_at"] = now
     bot_row = state.setdefault("by_bot", {}).setdefault(
