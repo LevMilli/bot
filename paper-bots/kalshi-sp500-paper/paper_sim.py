@@ -96,6 +96,48 @@ def failsafe_sale(pos, bid, *, floor=0.50):
     }
 
 
+def record_close(pos, *, bankroll, reason, bid=None, root=None):
+    """Stamp the bankroll, fee, and reason already on the close. Do not edit P/L.
+
+    A bid is stored only when it is a real quote. The same fill and reason are
+    not written twice.
+    """
+    if not isinstance(pos, dict):
+        return None
+    try:
+        pos["bankroll_after"] = round(float(bankroll), 4)
+    except (TypeError, ValueError):
+        pass
+    label = str(reason or pos.get("exit") or "")
+    if label and not pos.get("exit"):
+        pos["exit"] = label
+    fee_for_journal = pos.get("exit_fee")
+    if fee_for_journal is None:
+        fee_for_journal = pos.get("fee")
+    journal_root = root if root is not None else os.path.dirname(HERE)
+    try:
+        if journal_root not in sys.path:
+            sys.path.insert(0, journal_root)
+        import desk_brain
+        return desk_brain.record_decision(
+            journal_root,
+            bot="kalshi-sp",
+            action="settle" if label == "settled" else "sell",
+            ticker=str(pos.get("ticker") or ""),
+            side=str(pos.get("side") or ""),
+            reasons=[label],
+            note=label[:240],
+            fill_id=str(pos.get("fill_id") or ""),
+            bid=bid,
+            stake=pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
+            exit_name=label,
+            fee=fee_for_journal,
+            cash=pos.get("bankroll_after"),
+        )
+    except Exception:
+        return None
+
+
 def second_fill_block(trades_today, max_trades=1) -> str:
     """One paper buy per Chicago day. A later candidate is a skip."""
     try:

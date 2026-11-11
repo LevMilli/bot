@@ -459,6 +459,13 @@ def step_settle(args, state, day):
                     "pnl": pnl,
                     "settled_at": dt.datetime.now().isoformat(timespec="seconds"),
                 })
+                paper_sim.record_close(
+                    pos,
+                    bankroll=state["bankroll"],
+                    reason=sale["exit"],
+                    bid=bid,
+                    root=DESK_ROOT,
+                )
                 state["open"] = [p for p in state["open"] if p is not pos]
                 state["closed"].append(pos)
                 paper_sim.save_state(state)
@@ -531,6 +538,12 @@ def step_settle(args, state, day):
                   f"{paper_sim.trade_pnl(pos['side'], won, pos['contracts'], pos['ask'], pos['fee']):+.2f}")
             continue
         paper_sim.settle_position(state, pos, m["result"])
+        paper_sim.record_close(
+            pos,
+            bankroll=state["bankroll"],
+            reason="settled",
+            root=DESK_ROOT,
+        )
         paper_sim.save_state(state)
         try:
             desk = _desk()
