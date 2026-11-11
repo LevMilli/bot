@@ -5271,6 +5271,46 @@ def _chicago_day_label(closed_at) -> str | None:
         return None
 
 
+def _weekly_scorecard_upsert_cards(cards: list, card: dict) -> list:
+    """Keep one card per label — densify must refresh the day, not append clones."""
+    label = str((card or {}).get("label") or "").strip()
+    out: list = []
+    replaced = False
+    for existing in cards or []:
+        if not isinstance(existing, dict):
+            continue
+        if label and str(existing.get("label") or "").strip() == label:
+            if not replaced:
+                out.append(card)
+                replaced = True
+            continue
+        out.append(existing)
+    if not replaced:
+        out.append(card)
+    return out[-52:]
+
+
+def _weekly_scorecard_unique_by_label(cards: list) -> list:
+    """Latest card per label (by captured_at), ordered by label ascending."""
+    best: dict[str, dict] = {}
+    order: list[str] = []
+    for card in cards or []:
+        if not isinstance(card, dict):
+            continue
+        label = str(card.get("label") or "").strip()
+        if not label:
+            continue
+        prev = best.get(label)
+        if prev is None:
+            best[label] = card
+            order.append(label)
+            continue
+        if str(card.get("captured_at") or "") >= str(prev.get("captured_at") or ""):
+            best[label] = card
+    labels = sorted(order)
+    return [best[lab] for lab in labels]
+
+
 def repair_weekly_sports_m1(root: str | None = None, *, fill_tax: float = 0.01) -> dict:
     """Backfill / refresh sports_m1 on weekly/day scorecards from that day's closes.
 
@@ -5279,6 +5319,9 @@ def repair_weekly_sports_m1(root: str | None = None, *, fill_tax: float = 0.01) 
     n/expectancy no longer matches that Chicago day's closes (stale copy from
     a prior day DROPs honest week evidence). Day-sliced taxed expectancy only —
     no invent. Observe only; never LIVE; never arms.
+
+    Compacts duplicate same-label cards left by pre-upsert densify appends so
+    green_boost cannot count one Chicago day as multiple weeks.
     """
     path = _path(WEEKLY_SCORECARD, root)
     store = _load(path, {"paper_only": True, "cards": []})
@@ -5288,11 +5331,15 @@ def repair_weekly_sports_m1(root: str | None = None, *, fill_tax: float = 0.01) 
             "ok": True,
             "repaired": 0,
             "kept": 0,
+            "compacted": 0,
             "paper_only": True,
             "observe_only": True,
             "auto_promote": False,
             "note": "no weekly cards",
         }
+    before_n = len(cards)
+    cards = _weekly_scorecard_unique_by_label(cards)
+    compacted = max(0, before_n - len(cards))
     hist = _sports_closed_history_from_account(root)
     by_day: dict[str, list[float]] = {}
     for row in hist:
@@ -5329,7 +5376,7 @@ def repair_weekly_sports_m1(root: str | None = None, *, fill_tax: float = 0.01) 
         card["sports_m1_n"] = new_n
         card["sports_m1_repaired"] = True
         repaired += 1
-    if repaired:
+    if repaired or compacted:
         store["cards"] = cards[-52:]
         if isinstance(store.get("latest"), dict):
             latest_label = str((store.get("latest") or {}).get("label") or "")
@@ -5343,13 +5390,15 @@ def repair_weekly_sports_m1(root: str | None = None, *, fill_tax: float = 0.01) 
         "ok": True,
         "repaired": repaired,
         "kept": len(cards),
+        "compacted": compacted,
         "paper_only": True,
         "observe_only": True,
         "auto_promote": False,
         "live": False,
         "note": (
             "Backfilled/refreshed sports_m1 from Chicago-day closed fills "
-            "(missing or stale n/expectancy). Never LIVE; never arms."
+            "(missing or stale n/expectancy); compacted same-label clones. "
+            "Never LIVE; never arms."
         ),
     }
 
@@ -5380,10 +5429,12 @@ def sports_green_boost_status(
         pass
     clv_n = int(clv.get("n") or 0)
     clv_rate = _finite(clv.get("beat_close_rate"))
-    # Last two weekly scorecards with sports_m1.
+    # Last two unique-label scorecards with sports_m1.
+    # Densify used to append same-day clones; never count one label twice.
     store = _load(_path(WEEKLY_SCORECARD, root), {"paper_only": True, "cards": []})
-    cards = [c for c in (store.get("cards") or []) if isinstance(c, dict)]
-    cards = sorted(cards, key=lambda c: str(c.get("label") or ""))
+    cards = _weekly_scorecard_unique_by_label(
+        [c for c in (store.get("cards") or []) if isinstance(c, dict)]
+    )
     sports_weeks = [
         c for c in cards
         if _finite(c.get("sports_m1")) is not None
@@ -15352,9 +15403,12 @@ def capture_weekly_scorecard(
     }
     path = _path(WEEKLY_SCORECARD, root)
     store = _load(path, {"paper_only": True, "cards": []})
-    store.setdefault("cards", []).append(card)
-    store["cards"] = store["cards"][-52:]
+    # Upsert by label — master/densify refresh same Chicago day in place.
+    # Appending clones made green_boost count one day as multiple weeks.
+    existing = [c for c in (store.get("cards") or []) if isinstance(c, dict)]
+    store["cards"] = _weekly_scorecard_upsert_cards(existing, card)
     store["latest"] = card
+    store["paper_only"] = True
     _save(path, store)
     return card
 

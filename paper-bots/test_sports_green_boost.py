@@ -255,6 +255,66 @@ class SportsGreenBoost(unittest.TestCase):
             self.assertIn("ready", st["label"])
             self.assertEqual(st["green_boost"], 1)
 
+    def test_capture_weekly_scorecard_upserts_same_label(self):
+        """Densify/master refresh must replace the day card, not append clones."""
+        with tempfile.TemporaryDirectory() as tmp:
+            hist = [{"pnl": 0.10, "contracts": 1} for _ in range(5)]
+            bots_a = [{"id": "sports-gap", "today": 1.0, "history": hist, "gate_a": {"ready": True}}]
+            bots_b = [{"id": "sports-gap", "today": 2.5, "history": hist, "gate_a": {"ready": True}}]
+            desk_roi_plan.capture_weekly_scorecard(tmp, bots=bots_a, label="2026-11-10")
+            desk_roi_plan.capture_weekly_scorecard(tmp, bots=bots_b, label="2026-11-10")
+            path = os.path.join(tmp, desk_roi_plan.WEEKLY_SCORECARD)
+            with open(path, encoding="utf-8") as fh:
+                cards = json.load(fh)["cards"]
+            self.assertEqual(len(cards), 1)
+            self.assertEqual(cards[0]["label"], "2026-11-10")
+            self.assertEqual(cards[0]["sports_today"], 2.5)
+
+    def test_green_boost_ignores_duplicate_same_label_cards(self):
+        """Poisoned scorecard with 52 clones of one day must count as weeks 1/2."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, desk_roi_plan.WEEKLY_SCORECARD)
+            clones = [
+                {
+                    "label": "2026-11-10",
+                    "sports_m1": -7.59,
+                    "sports_m1_n": 1,
+                    "captured_at": f"2026-11-11T00:{i:02d}:00Z",
+                }
+                for i in range(52)
+            ]
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"paper_only": True, "cards": clones}, fh)
+            st = desk_roi_plan.sports_green_boost_status(tmp, bots=[])
+            self.assertEqual(st["weeks_n"], 1)
+            self.assertFalse(st["weeks_ok"])
+            miss = " ".join(st.get("missing") or [])
+            self.assertIn("weeks 1/2", miss)
+            self.assertNotIn("weeks_m1<0", miss)
+
+    def test_repair_compacts_duplicate_labels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, desk_roi_plan.WEEKLY_SCORECARD)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({
+                    "paper_only": True,
+                    "cards": [
+                        {"label": "2026-11-10", "sports_m1": -1.0, "captured_at": "2026-11-11T00:00:00Z"},
+                        {"label": "2026-11-10", "sports_m1": -7.59, "captured_at": "2026-11-11T01:00:00Z"},
+                        {"label": "2026-11-09", "sports_m1": 0.5, "captured_at": "2026-11-10T12:00:00Z"},
+                    ],
+                }, fh)
+            out = desk_roi_plan.repair_weekly_sports_m1(tmp)
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out.get("compacted"), 1)
+            self.assertEqual(out["kept"], 2)
+            with open(path, encoding="utf-8") as fh:
+                cards = json.load(fh)["cards"]
+            labels = [c["label"] for c in cards]
+            self.assertEqual(sorted(labels), ["2026-11-09", "2026-11-10"])
+            by = {c["label"]: c for c in cards}
+            self.assertEqual(by["2026-11-10"]["sports_m1"], -7.59)
+
     def test_green_or_gone_flags_red_open(self):
         flags = desk_roi_plan.green_or_gone_status([
             {"id": "memecoin", "today": -5.0, "open_risk": 8.0, "gate_a": {"ready": False}},
