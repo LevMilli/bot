@@ -1,0 +1,10 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "buys": false,
+  "stake_usd": 0,
+  "starter_cash": 0,
+  "venue_min_edge": 0.06,
+  "note": "A player stat contract on the six leagues. Props are a different settle from the game winner. Clears the sports floor 0.06 once a series exists. Buying the favorite is not a fill."
+}
