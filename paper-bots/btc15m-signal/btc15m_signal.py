@@ -1059,6 +1059,48 @@ def eth_early_should_buy(regime, reasons=None, *, delay_eth: bool = False) -> bo
     return not bool(reasons or [])
 
 
+def late_single_ready(ev, *, min_cushion: float, edge_floor: float) -> bool:
+    """One paper single inside 1–5 minutes. Does not lower the fee floor.
+
+    The early path still wants ≥10 minutes. This path buys alone only when
+    the model is at least 0.80, the cushion is still the dollar floor (not
+    waived because z is large), and the ask clears 70–92¢ plus the 0.05
+    floor. Under 1 minute stays too late. A speed-lane print does not qualify.
+    """
+    if not isinstance(ev, dict) or ev.get("reasons"):
+        return False
+    try:
+        minutes = float(ev.get("min_left"))
+        prob = float(ev.get("p"))
+        cushion = float(ev.get("cushion"))
+        ask = float(ev.get("ask"))
+        edge = float(ev.get("edge"))
+        spread = float(ev.get("spread"))
+        depth = float(ev.get("depth"))
+    except (TypeError, ValueError):
+        return False
+    floor = max(float(edge_floor), float(EDGE_BUFFER))
+    if minutes + 1e-12 < float(PARLAY_MIN_MIN) or minutes - 1e-12 > float(PARLAY_MAX_MIN):
+        return False
+    if prob + 1e-12 < float(MIN_MODEL_ACCURATE):
+        return False
+    if str(ev.get("lane") or "accurate") == "speed":
+        return False
+    if cushion + 1e-12 < float(min_cushion):
+        return False
+    if not (float(ASK_MIN) - 1e-12 <= ask <= float(ASK_MAX) + 1e-12):
+        return False
+    if edge + 1e-12 < floor:
+        return False
+    if spread > float(MAX_SPREAD) + 1e-9:
+        return False
+    if depth + 1e-12 < float(MIN_DEPTH):
+        return False
+    if ev.get("calendar_loaded") is not True or ev.get("news"):
+        return False
+    return True
+
+
 def _sigma_for(price, min_left, closes, dvol):
     """Return (sigma, realized, sig_dvol) for this window's minutes-left."""
     realized = None
@@ -1439,6 +1481,7 @@ def main():
     buys = 0
     skips = 0
     parlays = 0
+    late_singles = 0  # one 1–5m single per check; it does not wait for a second leg
     parlay_legs = []  # candidates for ≤5m combo
     skip_reasons = []  # first evaluate/ops skip → CARD densify (#396 sibling)
     last_sentence = "Checked all open BTC 15-minute markets. No paper buy."
@@ -1767,32 +1810,46 @@ def main():
                 except Exception:
                     pass
 
-        # Late window: defer singles into parlay candidate list if fee-aware fit
-        # (re-check without the early ≥10m time gate).
+        # Late window (1–5m): one 80% single when the cushion and the 0.05
+        # floor still clear. It does not wait for a second leg. A print that
+        # misses that bar can still sit as a parlay candidate. Under 1m is
+        # too late. The fee floor is not lowered.
         if regime == "parlay_window" and price is not None:
             late = evaluate_window(
                 m, price, closes, dvol, coinbase_only, edge_buf,
                 book=books.get((m.get("ticker"), ev.get("side") or ("YES" if price > m["target"] else "NO"))),
                 min_minutes_left=PARLAY_MIN_MIN,
             )
-            late_reasons = [r for r in (late.get("reasons") or []) if "min left" not in r]
-            if not late_reasons and late.get("ask") is not None:
-                parlay_legs.append({
-                    "ticker": late["ticker"],
-                    "side": late["side"],
-                    "ask": late["ask"],
-                    "fee": late["fee"],
-                    "fair": late.get("p"),
-                    "close_time": m.get("close_time").isoformat() if hasattr(m.get("close_time"), "isoformat") else str(m.get("close_time") or ""),
-                    "series": "KXBTC15M",
-                    "edge": late.get("edge"),
-                    "confidence": late.get("p"),
-                    "depth": late.get("depth"),
-                })
-                print("  SIGNAL: PARLAY-CANDIDATE (≤5m) — waiting for combo legs")
-                reasons = ["deferred to ≤5m parlay candidate"]
+            ready = late_single_ready(
+                late, min_cushion=MIN_CUSHION_USD, edge_floor=edge_buf,
+            )
+            if ready and late_singles < 1:
+                ev = late
+                regime = "late_single"
+                reasons = []
+                late_singles += 1
+                print("  LATE SINGLE: 1–5m BTC, one contract, fee floor unchanged")
+            elif ready:
+                reasons = ["late single already taken this check"]
             else:
-                reasons = late_reasons or reasons
+                late_reasons = [r for r in (late.get("reasons") or []) if "min left" not in r]
+                if not late_reasons and late.get("ask") is not None:
+                    parlay_legs.append({
+                        "ticker": late["ticker"],
+                        "side": late["side"],
+                        "ask": late["ask"],
+                        "fee": late["fee"],
+                        "fair": late.get("p"),
+                        "close_time": m.get("close_time").isoformat() if hasattr(m.get("close_time"), "isoformat") else str(m.get("close_time") or ""),
+                        "series": "KXBTC15M",
+                        "edge": late.get("edge"),
+                        "confidence": late.get("p"),
+                        "depth": late.get("depth"),
+                    })
+                    print("  SIGNAL: PARLAY-CANDIDATE (≤5m) — waiting for combo legs")
+                    reasons = ["deferred to ≤5m parlay candidate"]
+                else:
+                    reasons = late_reasons or reasons
 
         if reasons or regime in ("volatile_hold", "parlay_window", "too_late"):
             if regime == "confident_early" and not reasons:
@@ -2325,30 +2382,120 @@ def main():
                 m, eth_price, eth_closes, dvol, False, edge_buf,
                 book=eth_books.get(key), min_minutes_left=PARLAY_MIN_MIN, min_cushion=MIN_CUSHION_ETH,
             )
-            late_reasons = [r for r in (late.get("reasons") or []) if "min left" not in r]
-            if not late_reasons and late.get("ask") is not None:
-                parlay_legs.append({
-                    "ticker": late["ticker"], "side": late["side"], "ask": late["ask"],
-                    "fee": late["fee"], "fair": late.get("p"),
-                    "close_time": m["close_time"].isoformat(),
-                    "series": "KXETH15M", "edge": late.get("edge"),
-                    "confidence": late.get("p"), "depth": late.get("depth"),
-                })
-                print("  ETH PARLAY-CANDIDATE")
-            else:
-                skips += 1
-                eth_parlay = "; ".join(late_reasons or ["ETH parlay_window skip"])
-                skip_reasons.append(eth_parlay)
-                _densify_skip_brain(
-                    reasons=[eth_parlay],
-                    ticker=str(m.get("ticker") or ""),
-                    side=str(ev_early.get("side") or late.get("side") or ""),
-                    edge=late.get("edge") if isinstance(late, dict) else ev_early.get("edge"),
-                    confidence=(
-                        late.get("p") if isinstance(late, dict) else None
-                    ) or ev_early.get("p"),
-                    note="ETH parlay densify",
+            ready = late_single_ready(
+                late, min_cushion=MIN_CUSHION_ETH, edge_floor=edge_buf,
+            )
+            if ready and late_singles < 1 and buys < max_buys_eff:
+                tp = min(round(float(late["ask"]) + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP)
+                print(
+                    f"  SIGNAL: BUY ETH LATE SINGLE {late['side']} on {m['ticker']} "
+                    f"at <= {late['ask']:.2f} (fee {late['fee']:.2f}). "
+                    f"Take-profit {tp:.2f} will paper-sell. One contract, no second leg."
                 )
+                sentence = paper_buy(
+                    account, m["ticker"], late["side"], late["ask"], late["fee"],
+                    late["p"], m["close_time"], True, edge=late.get("edge"),
+                    vol_kwargs={
+                        "cushion": late.get("cushion"), "sigma": late.get("sigma"),
+                        "spread": late.get("spread"), "minutes_left": late.get("min_left"),
+                        "ask": late.get("ask"), "ticker": m["ticker"], "series": "KXETH15M",
+                        "calendar_loaded": bool(late.get("calendar_loaded")),
+                    },
+                )
+                print(f"  ETH late single: {sentence}")
+                late_singles += 1
+                if "Paper buy" in sentence and "No paper buy" not in sentence:
+                    buys += 1
+                    last_sentence = sentence
+                    if kalshi_history is not None:
+                        try:
+                            kalshi_history.clear_hold(DESK_ROOT, str(m.get("ticker") or ""))
+                        except Exception:
+                            pass
+                    if desk_brain and not IS_SHADOW:
+                        try:
+                            note = desk_brain.explain_buy(
+                                "btc15m", late["side"], m["ticker"], late.get("edge"),
+                                late.get("p"), late.get("depth"),
+                            )
+                            print(f"  BRAIN: {note}")
+                            desk_brain.record_decision(
+                                DESK_ROOT, bot="btc15m", action="buy",
+                                ticker=str(m.get("ticker") or ""), side=late.get("side") or "",
+                                edge=late.get("edge"), confidence=late.get("p"),
+                                depth=late.get("depth"), note=note,
+                            )
+                        except Exception:
+                            pass
+                else:
+                    skips += 1
+                    eth_block = str(sentence)[:160] or "ETH late single blocked"
+                    skip_reasons.append(eth_block)
+                    _densify_skip_brain(
+                        reasons=[eth_block],
+                        ticker=str(m.get("ticker") or ""),
+                        side=str(late.get("side") or ""),
+                        edge=late.get("edge"),
+                        confidence=late.get("p"),
+                        depth=late.get("depth"),
+                        note="ETH late-single block",
+                    )
+            elif ready and late_singles >= 1:
+                eth_late = "late single already taken this check"
+                print(f"  ETH LATE SINGLE skip: {eth_late}")
+                skips += 1
+                skip_reasons.append(eth_late)
+                _densify_skip_brain(
+                    reasons=[eth_late],
+                    ticker=str(m.get("ticker") or ""),
+                    side=str(late.get("side") or ""),
+                    edge=late.get("edge"),
+                    confidence=late.get("p"),
+                    depth=late.get("depth"),
+                    note="ETH late-single cap",
+                )
+            elif ready:
+                # Cap already full. A zero cap is a gate on the card; do not
+                # invent a second "max buys (0)" line over that gate.
+                skips += 1
+                if max_buys_eff > 0:
+                    eth_late = f"max buys this check ({max_buys_eff})"
+                    print(f"  ETH LATE SINGLE skip: {eth_late}")
+                    skip_reasons.append(eth_late)
+                    _densify_skip_brain(
+                        reasons=[eth_late],
+                        ticker=str(m.get("ticker") or ""),
+                        side=str(late.get("side") or ""),
+                        edge=late.get("edge"),
+                        confidence=late.get("p"),
+                        depth=late.get("depth"),
+                        note="ETH late-single cap",
+                    )
+            else:
+                late_reasons = [r for r in (late.get("reasons") or []) if "min left" not in r]
+                if not late_reasons and late.get("ask") is not None:
+                    parlay_legs.append({
+                        "ticker": late["ticker"], "side": late["side"], "ask": late["ask"],
+                        "fee": late["fee"], "fair": late.get("p"),
+                        "close_time": m["close_time"].isoformat(),
+                        "series": "KXETH15M", "edge": late.get("edge"),
+                        "confidence": late.get("p"), "depth": late.get("depth"),
+                    })
+                    print("  ETH PARLAY-CANDIDATE")
+                else:
+                    skips += 1
+                    eth_parlay = "; ".join(late_reasons or ["ETH parlay_window skip"])
+                    skip_reasons.append(eth_parlay)
+                    _densify_skip_brain(
+                        reasons=[eth_parlay],
+                        ticker=str(m.get("ticker") or ""),
+                        side=str(ev_early.get("side") or late.get("side") or ""),
+                        edge=late.get("edge") if isinstance(late, dict) else ev_early.get("edge"),
+                        confidence=(
+                            late.get("p") if isinstance(late, dict) else None
+                        ) or ev_early.get("p"),
+                        note="ETH parlay densify",
+                    )
         elif regime == "volatile_hold":
             if kalshi_history is not None:
                 try:
