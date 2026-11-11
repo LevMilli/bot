@@ -241,6 +241,9 @@ def commit_paper_buy(st, *, mint, symbol, pair, price, liq, ticket, conf, lane, 
 
     An open falling name is not averaged. A second ticket on the same mint is refused.
     """
+    blocked = same_mint_block(mint, (st or {}).get("sold_this_check"))
+    if blocked:
+        return blocked
     averaged = average_block(st, mint, price)
     if averaged:
         return averaged
@@ -380,14 +383,19 @@ def sell(st, pos, frac_of_original, reason, price, liq, full=False):
     if full:
         try:
             desk = _desk()
-            desk.record_learning(os.path.dirname(BASE), {
-                "result": "hit" if pnl > 0 else "miss",
+            row = {
                 "market": pos.get("mint") or pos.get("symbol") or "",
                 "prob": pos.get("confidence"),
                 "stake": pos.get("cost_usd"),
                 "fill_id": f"{pos.get('mint')}|{pos.get('entry_iso')}",
                 "side": pos.get("lane") or pos.get("side") or "long",
-            })
+            }
+            reason_s = str(reason or "")
+            if reason_s in ("model-flip −6%", "stop −12%"):
+                row["reason"] = reason_s
+            else:
+                row["result"] = "hit" if pnl > 0 else "miss"
+            desk.record_learning(os.path.dirname(BASE), row)
         except Exception:
             pass
 
@@ -468,9 +476,50 @@ def watch_opens(state, prices):
     return notes
 
 
+def failsafe_sale(pos, price, *, mint=None):
+    """Sell this held name at the real mark when −6% or −12% is hit.
+
+    A missing price is not a sale. A different mint is not this name.
+    The result names which exit fired. It does not buy the name back.
+    """
+    if not isinstance(pos, dict):
+        return None
+    held = str(pos.get("mint") or "").strip()
+    want = held if mint is None else str(mint or "").strip()
+    if not held or want != held:
+        return None
+    mark = real_mark(price)
+    if mark is None:
+        return None
+    try:
+        entry = float(pos.get("entry_market_price"))
+    except (TypeError, ValueError):
+        return None
+    if entry != entry or entry <= 0:
+        return None
+    pct = (mark / entry - 1.0) * 100.0
+    if pct <= HARD_EXIT_PCT:
+        which = "stop −12%"
+    elif pct <= FIRST_EXIT_PCT:
+        which = "model-flip −6%"
+    else:
+        return None
+    return {"mint": held, "mark": mark, "exit": which, "sold": True}
+
+
+def same_mint_block(mint, sold_this_check) -> str:
+    """After a sell, that name is not bought again on this pass."""
+    want = str(mint or "").strip()
+    sold = {str(item or "").strip() for item in (sold_this_check or []) if str(item or "").strip()}
+    if want and want in sold:
+        return "same name already sold this pass"
+    return ""
+
+
 def manage(st):
     E = C.EXIT
     still = []
+    st["sold_this_check"] = []
     for pos in st["open"]:
         price, liq = pair_now(pos["pair"])
         watch_open(pos, price)
@@ -486,14 +535,13 @@ def manage(st):
         from_peak = (1 - price / pos["peak_price"]) * 100
         print(f"  {pos['symbol']}: {pct:+.1f}% from entry, {from_peak:.1f}% off peak, liq {liq_drop:+.1f}% drop, held {held_h:.2f}h")
         exit_reason = None
-        # Model-flip before hard stop: adverse move / momentum collapse.
-        floor_m = float(E.get("model_flip_momentum_h1_floor") or -8)
-        if pct <= floor_m and pct > float(E["stop_pct"]):
-            exit_reason = f"model-flip momentum {pct:.1f}% <= {floor_m:.1f}%"
-        if exit_reason is None and liq_drop >= E["liq_drop_pct"]:
+        sale = failsafe_sale(pos, price)
+        if sale:
+            exit_reason = sale["exit"]
+            pos["exit_name"] = sale["exit"]
+            pos["exit_mark"] = sale["mark"]
+        elif liq_drop >= E["liq_drop_pct"]:
             exit_reason = f"liq_drop {liq_drop:.1f}% >= {E['liq_drop_pct']}%"
-        elif exit_reason is None and pct <= E["stop_pct"]:
-            exit_reason = f"stop {pct:.1f}% <= {E['stop_pct']}%"
         if not exit_reason:
             for i, (lvl, frac) in enumerate(E["ladder"]):
                 if pct >= lvl and i not in pos.setdefault("ladder_done", []):
@@ -506,6 +554,8 @@ def manage(st):
                 exit_reason = f"time_stop {held_h:.1f}h and only {pct:+.1f}% < {E['time_stop_min_pct']}%"
         if exit_reason and pos["tokens_left"] > 0:
             sell(st, pos, 1, exit_reason, price, liq, full=True)
+            if sale:
+                st["sold_this_check"].append(str(pos.get("mint") or ""))
         if pos["tokens_left"] <= 1e-12:
             st["cooldown"][pos["mint"]] = NOW
             print(f"  {pos['symbol']}: CLOSED, cooldown {C.COOLDOWN_HOURS}h")
@@ -817,7 +867,10 @@ def scan(st, stats):
         # risk gates
         cd = st["cooldown"].get(mint)
         gate_reason = None
-        if mint in open_mints:
+        blocked = same_mint_block(mint, st.get("sold_this_check"))
+        if blocked:
+            gate_reason = blocked
+        elif mint in open_mints:
             try:
                 mark = float(p.get("priceUsd"))
             except (TypeError, ValueError, AttributeError):
