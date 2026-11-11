@@ -56,7 +56,7 @@ class SizedKalshiScan(unittest.TestCase):
         with open(os.path.join(ROOT, "kalshi-sized-paper", "bot.py"), encoding="utf-8") as handle:
             src = handle.read()
         self.assertLess(src.find("def outside_scan_window"), src.find("def step_scan"))
-        self.assertLess(src.find("outside_scan_window("), src.find("open_position("))
+        self.assertLess(src.find("outside_scan_window("), src.find("place_paper_buy("))
 
     def test_the_best_refused_edge_needs_a_real_ask(self):
         bot = _load()

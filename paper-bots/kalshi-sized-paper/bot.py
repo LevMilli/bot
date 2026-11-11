@@ -10,6 +10,7 @@ Stake comes from the desk (Kelly-lite + starve), not a flat $25 ticket.
 """
 import argparse
 import datetime as dt
+import importlib.util
 import json
 import os
 import sys
@@ -24,10 +25,21 @@ if SIBLING not in sys.path:
 import data_feed as feed  # noqa: E402
 import signal_engine  # noqa: E402
 
-import risk_manager  # noqa: E402  (local)
-import paper_sim  # noqa: E402
-import logger  # noqa: E402
-import alerts  # noqa: E402
+
+def _load_local(name):
+    """This tower's own module. The sibling folder is on the path for Kalshi reads."""
+    path = os.path.join(HERE, name + ".py")
+    spec = importlib.util.spec_from_file_location("sized_" + name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+risk_manager = _load_local("risk_manager")
+paper_sim = _load_local("paper_sim")
+logger = _load_local("logger")
+alerts = _load_local("alerts")
 
 CFG = json.load(open(os.path.join(HERE, "config.json")))
 CT = ZoneInfo(CFG["timezone"])
@@ -592,7 +604,18 @@ def step_scan(args, state, day):
     if args.dry_run:
         print(alerts.format_trade_note(preview, state["bankroll"] - preview["cost"] - fee, dry_run=True))
         return
-    pos = paper_sim.open_position(state, day, ev, pick, n, now.isoformat(timespec="seconds"))
+    held = paper_sim.already_open(state)
+    if held:
+        print(alerts.format_skip_note(day, held))
+        logger.learn(f"{day}: no trade - {held}", "skip")
+        return
+    pos = paper_sim.place_paper_buy(
+        state, day, ev, pick, n, now.isoformat(timespec="seconds"),
+    )
+    if not isinstance(pos, dict):
+        print(alerts.format_skip_note(day, str(pos)))
+        logger.learn(f"{day}: no trade - {pos}", "skip")
+        return
     pos["why"] = (
         f"Sized paper buy (Φ fair). Ask in band; desk Kelly-lite sized {n} contracts."
     )
@@ -797,6 +820,7 @@ def main():
         logger.ensure_files()
     existed = os.path.exists(paper_sim.STATE_PATH)
     state = paper_sim.load_state()
+    paper_sim.reconcile_buy_intent(state)
     if not existed and not args.dry_run:
         paper_sim.save_state(state)
     {"brief": step_brief, "scan": step_scan, "settle": step_settle}[args.step](args, state, day)
