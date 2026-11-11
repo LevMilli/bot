@@ -82,6 +82,17 @@ class SportsBuyIntent(unittest.TestCase):
     def test_fee_floor_unchanged(self):
         self.assertEqual(gap_bot.MIN_GAP, 0.06)
 
+    def test_exit_this_check_blocks_a_replacement(self):
+        self.assertEqual(
+            gap_bot.replacement_block("g1", {}, {"g1"}),
+            "no replacement after an exit this check",
+        )
+        self.assertEqual(
+            gap_bot.replacement_block("g1", {"g1": {}}, set()),
+            "already holding this game",
+        )
+        self.assertEqual(gap_bot.replacement_block("g2", {}, set()), "")
+
 
 if __name__ == "__main__":
     unittest.main()

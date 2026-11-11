@@ -299,6 +299,15 @@ BUY_INTENT = os.path.join(HERE, "buy_intent.json")
 BUY_EXIT_RULE = "sports-gap live exit"
 
 
+def replacement_block(game_key, open_by_game, exited_this_check) -> str:
+    """A game already held, or closed this check, is not bought again."""
+    if game_key in (open_by_game or {}):
+        return "already holding this game"
+    if game_key in (exited_this_check or ()):
+        return "no replacement after an exit this check"
+    return ""
+
+
 def _atomic_json(path, payload):
     dest = path
     if os.path.islink(dest):
@@ -1337,6 +1346,7 @@ def run():
 
     # ---- exits / settlement (before new paper buys) ----
     still = []
+    exited_this_check = set()
     for p in s["open"]:
         info = live_info.get(p["game_key"])
         if info is None:
@@ -1393,6 +1403,8 @@ def run():
                 "final_score": f"{as_}-{hs}",
             })
             s["closed"].append(p)
+            if p.get("game_key"):
+                exited_this_check.add(p.get("game_key"))
             if desk is not None:
                 desk.record_learning(DESK_ROOT, {
                     "result": "hit" if pnl > 0 else "miss",
@@ -1861,6 +1873,8 @@ def run():
                 p.update({"closed": ts, "exit": exit_reason, "exit_price": bid, "payout": proceeds,
                           "pnl": pnl, "fair_at_exit": fair_exit})
                 s["closed"].append(p)
+                if p.get("game_key"):
+                    exited_this_check.add(p.get("game_key"))
                 # Adverse cool-off when mark dropped hard vs entry ask.
                 try:
                     if DESK_ROOT not in sys.path:
@@ -2204,8 +2218,8 @@ def run():
             reason = f"max buys this check ({max_buys_eff})"
         elif red_pnl < 0 and str(c.get("lane") or "") == "speed":
             reason = f"speed lane off on red sports book (red ${red_pnl:.2f})"
-        elif key in open_by_game:
-            reason = "already holding this game"
+        elif replacement_block(key, open_by_game, exited_this_check):
+            reason = replacement_block(key, open_by_game, exited_this_check)
         elif len(s["open"]) >= max_open:
             reason = "max open positions"
         local_open_risk = sum(
