@@ -774,6 +774,108 @@ def failsafe_hold(state, marks=None, *, close_reason="") -> dict:
     }
 
 
+def _brain(root):
+    if DESK_ROOT not in sys.path:
+        sys.path.insert(0, DESK_ROOT)
+    import desk_brain
+    return desk_brain, DESK_ROOT if root is None else root
+
+
+def _printed_premium(state, row) -> float | None:
+    """The premium that printed. A typed number and a spot dollar price are not it."""
+    if isinstance(row, dict):
+        printed = _public_print(row.get("premium"))
+        if printed is not None:
+            return printed
+    for pos in (state.get("open") or []) if isinstance(state, dict) else []:
+        if not isinstance(pos, dict):
+            continue
+        for source in (pos.get("failsafe_premium"), pos.get("premium"), pos.get("last_mark")):
+            printed = _public_print(source)
+            if printed is not None:
+                return printed
+    return None
+
+
+def _write_month(row: dict, premium, root):
+    """Journal the month-mark. The reserved exit fee is not spent."""
+    brain, base = _brain(root)
+    month = str(row.get("month") or "")
+    fill = f"BTCUSDT|{month}" if month else "BTCUSDT|month-mark"
+    saved = brain.record_decision(
+        base,
+        bot="btc-carry",
+        action="month-mark",
+        ticker=str(row.get("ticker") or "BTCUSDT"),
+        side="long spot / short perp",
+        reasons=["month-mark"],
+        note="month-mark; reserved exit fee stays reserved",
+        fill_id=fill,
+        exit_name="month-mark",
+        stake=row.get("cost") if row.get("cost") is not None else NOTIONAL,
+    )
+    journal = brain.load_journal(base)
+    for prev in journal.get("decisions") or []:
+        if not isinstance(prev, dict):
+            continue
+        if prev.get("bot") != "btc-carry" or str(prev.get("fill_id") or "") != fill:
+            continue
+        if str(prev.get("exit_name") or "") != "month-mark":
+            continue
+        if premium is None:
+            prev.pop("premium", None)
+        else:
+            prev["premium"] = premium
+        prev["fee_spent"] = False
+        prev["exit_fee"] = "reserved"
+        prev.pop("fee", None)
+        prev.pop("hit", None)
+        prev.pop("result", None)
+        saved = prev
+        break
+    brain.save_journal(journal, base)
+    return saved
+
+
+def record_month(state, claimed=None, *, root=None) -> dict:
+    """Write the month-mark with the premium that printed.
+
+    A number passed in is not that premium. The reserved exit fee stays
+    reserved. The pair is not journaled as closed.
+    """
+    book = state if isinstance(state, dict) else {}
+    _public_print(claimed)
+    marks = [
+        row for row in (book.get("closed") or [])
+        if isinstance(row, dict) and row.get("exit") == "month-mark"
+    ]
+    if not marks:
+        return {
+            "recorded": False,
+            "rows": [],
+            "fee_spent": False,
+            "sold": False,
+            "open": len([row for row in (book.get("open") or []) if isinstance(row, dict)]),
+        }
+    written = []
+    for row in marks:
+        premium = _printed_premium(book, row)
+        saved = _write_month(row, premium, root)
+        if premium is not None:
+            row["premium"] = premium
+        row["fee_spent"] = False
+        row.pop("hit", None)
+        row.pop("result", None)
+        written.append(saved)
+    return {
+        "recorded": True,
+        "rows": written,
+        "fee_spent": False,
+        "sold": False,
+        "open": len([row for row in (book.get("open") or []) if isinstance(row, dict)]),
+    }
+
+
 def hold_step(state: dict, marks: dict, cfg: dict, now: dt.datetime, *, block_entries: bool = False, intent_path=None) -> dict:
     """Apply the hold. Never flips. Never adds a second leg after a red month."""
     cfg = locked_cfg(cfg)
@@ -965,6 +1067,7 @@ def run_once(
     state["floor"] = decision["floor"]
     state["checks"] = int(state.get("checks") or 0) + 1
     state["last_check"] = now.isoformat(timespec="seconds")
+    record_month(state, root=desk_root)
     _record_month_marks(desk_root, state)
     _write_json(path, state)
     _append_research(tower, now, state, marks)
