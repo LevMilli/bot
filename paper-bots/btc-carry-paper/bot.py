@@ -39,6 +39,7 @@ VENUE_FLOOR = 0.02  # registry lock. Not a monthly hurdle. Not the btc15m 0.05 f
 FLAT_CARD = "flat - BTC spot long / perp short not open; 0.30% round trip unpaid"
 HOLD_CARD = "holding unlevered BTC spot long / perp short; red month is a mark, not a flip"
 HOLD_EXIT = "hold — red month is a mark"
+HOLD_SENTENCE = "hold, not a sell"
 
 
 def densified_hold_card(state: dict) -> str:
@@ -720,6 +721,59 @@ def watch_pair(state, marks, now) -> dict:
     }
 
 
+def failsafe_hold(state, marks=None, *, close_reason="") -> dict:
+    """Confirm the hold. A red month is not a close, and a missing premium is not a close.
+
+    The pair stays open. This records the real premium and the words
+    hold, not a sell. It does not sell.
+    """
+    book = state if isinstance(state, dict) else {}
+    opens = [row for row in (book.get("open") or []) if isinstance(row, dict)]
+    scanned = scan_marks(marks if isinstance(marks, dict) else {})
+    premium = None
+    for row in scanned["premium"]:
+        close = _public_print(row.get("close"))
+        if close is not None:
+            premium = close
+    asked = str(close_reason or "")
+    red_only = "red" in asked.lower() and "month" in asked.lower()
+    if not opens:
+        book["failsafe"] = HOLD_SENTENCE
+        return {
+            "sold": False,
+            "closed": False,
+            "hold": True,
+            "hit": False,
+            "sentence": HOLD_SENTENCE,
+            "premium": None,
+            "open": 0,
+            "reason": "flat sleeve has nothing to close",
+        }
+    pos = opens[0]
+    pos["failsafe"] = HOLD_SENTENCE
+    if premium is None:
+        kept = _public_print(pos.get("failsafe_premium"))
+        if kept is None:
+            kept = _public_print(pos.get("premium"))
+        note = "missing premium is not a close"
+    else:
+        pos["failsafe_premium"] = premium
+        kept = premium
+        note = HOLD_SENTENCE
+    book["open"] = [pos]
+    return {
+        "sold": False,
+        "closed": False,
+        "hold": True,
+        "hit": False,
+        "sentence": HOLD_SENTENCE,
+        "premium": kept,
+        "open": 1,
+        "refused_red_month": red_only,
+        "reason": note,
+    }
+
+
 def hold_step(state: dict, marks: dict, cfg: dict, now: dt.datetime, *, block_entries: bool = False, intent_path=None) -> dict:
     """Apply the hold. Never flips. Never adds a second leg after a red month."""
     cfg = locked_cfg(cfg)
@@ -783,6 +837,7 @@ def hold_step(state: dict, marks: dict, cfg: dict, now: dt.datetime, *, block_en
     # clock by weeks; doctor must not read that lag as a dead book.
     pos["price_at"] = now.isoformat(timespec="seconds")
     watch_pair(state, {"funding": funding, "premium": premium, "symbol": "BTCUSDT"}, now)
+    failsafe_hold(state, {"funding": funding, "premium": premium, "symbol": "BTCUSDT"})
     state["pass_bar"] = _pass_bar(state)
     state["last_action"] = "hold"
     if len(state["open"]) != 1:
