@@ -929,6 +929,35 @@ def sum_chicago_today_pnl(closed, now: dt.datetime | None = None) -> float:
     return total
 
 
+def commodity_loss_stop(today_pnl) -> str:
+    """Settle-only when the Chicago day is down 2.0R ($40). Exits stay on.
+
+    The shared profit lock only fires at +$40. This is the loss side, local to
+    this tower. It does not change daily_r_blocks, the fee floor, or size.
+    """
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        budget_r = float(desk_roi_plan.daily_r_budget_for("commodity-15m"))
+        r_usd = float(desk_roi_plan.DAILY_R_USD)
+    except Exception:
+        return ""
+    if budget_r <= 0 or r_usd <= 0:
+        return ""
+    target = round(budget_r * r_usd, 2)
+    try:
+        today = float(today_pnl)
+    except (TypeError, ValueError):
+        return ""
+    if today != today or today > -target:
+        return ""
+    return (
+        f"daily loss stop for commodity-15m: "
+        f"today ${today:.2f} ≤ -{budget_r:g}R (${target:.0f}) — settle-only"
+    )
+
+
 def _chicago_hour(stamp=None, now: dt.datetime | None = None) -> int | None:
     """Hour in America/Chicago for a close stamp, or for `now` when no stamp."""
     from zoneinfo import ZoneInfo
@@ -1954,6 +1983,12 @@ def main() -> int:
             print(f"Settle-only: {r_block}")
             max_buys_eff = 0
             _densify_gate_skip(r_block, note="commodity daily-r densify")
+        # Loss side of the same 2.0R. +$40 stays in daily_r_blocks. Exits stay on.
+        loss_block = commodity_loss_stop(today_pnl)
+        if loss_block:
+            print(f"Settle-only: {loss_block}")
+            max_buys_eff = 0
+            _densify_gate_skip(loss_block, note="commodity daily-loss densify")
     except Exception:
         pass
     for row in ranked:
