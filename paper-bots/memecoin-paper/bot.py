@@ -392,11 +392,88 @@ def sell(st, pos, frac_of_original, reason, price, liq, full=False):
             pass
 
 
+FIRST_EXIT_PCT = -6.0
+HARD_EXIT_PCT = -12.0
+
+
+def real_mark(price):
+    """A live price strictly above zero. A missing quote is not a mark."""
+    try:
+        n = float(price)
+    except (TypeError, ValueError):
+        return None
+    if n != n or n <= 0:
+        return None
+    return n
+
+
+def watch_open(pos, price):
+    """Mark the held name at a real price. Does not sell.
+
+    Momentum at or under −6% is the first exit. −12% is the hard exit.
+    A missing price is not assumed to be −12%.
+    """
+    if not isinstance(pos, dict):
+        return None
+    try:
+        entry = float(pos.get("entry_market_price"))
+    except (TypeError, ValueError):
+        entry = None
+    if entry != entry or entry is None or entry <= 0:
+        entry = None
+    mark = real_mark(price)
+    if mark is None:
+        pos["watch"] = {
+            "last_mark": pos.get("last_mark"),
+            "entry": entry,
+            "marked": False,
+            "momentum_pct": None,
+            "first_exit": False,
+            "hard_exit": False,
+            "sold": False,
+        }
+        return pos["watch"]
+    pct = None if entry is None else (mark / entry - 1.0) * 100.0
+    first = pct is not None and pct <= FIRST_EXIT_PCT and pct > HARD_EXIT_PCT
+    hard = pct is not None and pct <= HARD_EXIT_PCT
+    pos["last_mark"] = mark
+    pos["last_price"] = mark
+    pos["watch"] = {
+        "last_mark": mark,
+        "entry": entry,
+        "marked": True,
+        "momentum_pct": None if pct is None else round(pct, 4),
+        "first_exit": first,
+        "hard_exit": hard,
+        "sold": False,
+    }
+    return pos["watch"]
+
+
+def watch_opens(state, prices):
+    """Mark every open name at its own real price. Does not sell."""
+    book = prices if isinstance(prices, dict) else {}
+    notes = []
+    for pos in list((state or {}).get("open") or []):
+        if not isinstance(pos, dict):
+            continue
+        mint = str(pos.get("mint") or "")
+        watch = watch_open(pos, book.get(mint))
+        if not watch:
+            continue
+        notes.append(
+            f"WATCH: {pos.get('symbol') or mint} mark={watch.get('last_mark')} "
+            f"first={watch.get('first_exit')} hard={watch.get('hard_exit')} sold=False"
+        )
+    return notes
+
+
 def manage(st):
     E = C.EXIT
     still = []
     for pos in st["open"]:
         price, liq = pair_now(pos["pair"])
+        watch_open(pos, price)
         if price is None or liq is None:
             print(f"  {pos['symbol']}: no live price/liquidity this run -> HOLD (never invent a price)")
             still.append(pos)
