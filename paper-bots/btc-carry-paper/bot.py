@@ -876,6 +876,69 @@ def record_month(state, claimed=None, *, root=None) -> dict:
     }
 
 
+def learn_buys(reason=None) -> bool:
+    """A month-mark does not authorize a buy, and it is not a settle."""
+    return False
+
+
+def learning_row(pos) -> dict | None:
+    """One month-mark. A close that did not happen is not a row."""
+    if not isinstance(pos, dict):
+        return None
+    if str(pos.get("exit") or "") != "month-mark":
+        return None
+    month = str(pos.get("month") or "").strip()
+    if not month:
+        return None
+    stake = _num(pos.get("cost") if pos.get("cost") is not None else pos.get("stake"))
+    if stake is None or stake <= 0:
+        stake = NOTIONAL
+    return {
+        "market": "BTC-CARRY",
+        "bucket": "month-mark",
+        "stake": stake,
+        "fill_id": f"BTCUSDT|{month}",
+        "reason": f"month-mark; {HOLD_SENTENCE}",
+        "side": "HOLD",
+        "paper_only": True,
+    }
+
+
+def tell_learning(pos, root) -> str:
+    """Write one month-mark. The same month is not written twice."""
+    row = learning_row(pos)
+    if not row:
+        return "empty"
+    if DESK_ROOT not in sys.path:
+        sys.path.insert(0, DESK_ROOT)
+    import pimp_desk
+    fill = row["fill_id"]
+    if any(str(item.get("fill_id") or "") == fill for item in pimp_desk.load_learning(root)):
+        return "duplicate"
+    pimp_desk.record_learning(root, row)
+    return "recorded"
+
+
+def learn_book(state, root=None) -> dict:
+    """The learning book gets the month-mark and the hold sentence.
+
+    A flat book writes nothing. A settle that did not happen is not invented.
+    This does not buy.
+    """
+    book = state if isinstance(state, dict) else {}
+    marks = [row for row in (book.get("closed") or []) if learning_row(row)]
+    if not marks:
+        return {"wrote": 0, "settle": False, "buy": False, "rows": []}
+    wrote = 0
+    rows = []
+    for pos in marks:
+        status = tell_learning(pos, root)
+        rows.append(status)
+        if status == "recorded":
+            wrote += 1
+    return {"wrote": wrote, "settle": False, "buy": learn_buys(None), "rows": rows}
+
+
 def hold_step(state: dict, marks: dict, cfg: dict, now: dt.datetime, *, block_entries: bool = False, intent_path=None) -> dict:
     """Apply the hold. Never flips. Never adds a second leg after a red month."""
     cfg = locked_cfg(cfg)
@@ -1068,6 +1131,7 @@ def run_once(
     state["checks"] = int(state.get("checks") or 0) + 1
     state["last_check"] = now.isoformat(timespec="seconds")
     record_month(state, root=desk_root)
+    learn_book(state, root=desk_root)
     _record_month_marks(desk_root, state)
     _write_json(path, state)
     _append_research(tower, now, state, marks)
