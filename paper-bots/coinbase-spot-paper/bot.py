@@ -591,6 +591,84 @@ def record_close(state, claimed=None, *, root=None) -> dict:
     }
 
 
+def series_key(product) -> str:
+    """This tower's learning key. ETH and SOL do not share one."""
+    name = str(product or "").strip()
+    if not name:
+        return ""
+    return f"COINBASE-{name}"
+
+
+def floor_stays(edge=None) -> float:
+    """0.05 stays. An empty book and a cold series do not lower it."""
+    n = _num(edge)
+    if n is None or n < LOCKED_FLOOR:
+        return LOCKED_FLOOR
+    return n
+
+
+def learn_buys(reason=None) -> bool:
+    """A learning reason does not authorize the next buy."""
+    return False
+
+
+def learning_row(pos) -> dict | None:
+    """One close under its series key. A failsafe is not a hit and not a settle."""
+    if not _real_close(pos):
+        return None
+    product = str(pos.get("ticker") or "").strip()
+    key = series_key(product)
+    label = _exit_label(pos)
+    stake = _num(pos.get("stake") if pos.get("stake") is not None else pos.get("cost"))
+    if not key or label not in KNOWN_EXITS or stake is None or stake <= 0:
+        return None
+    if label == "settled":
+        return None
+    return {
+        "market": key,
+        "bucket": key,
+        "stake": stake,
+        "fill_id": str(pos.get("fill_id") or "").strip(),
+        "reason": label,
+        "side": "BUY",
+        "paper_only": True,
+    }
+
+
+def tell_learning(pos, root) -> str:
+    """Write one close. The same fill id is not written twice."""
+    row = learning_row(pos)
+    if not row:
+        return "empty"
+    if DESK_ROOT not in sys.path:
+        sys.path.insert(0, DESK_ROOT)
+    import pimp_desk
+    fill = row["fill_id"]
+    if any(str(item.get("fill_id") or "") == fill for item in pimp_desk.load_learning(root)):
+        return "duplicate"
+    pimp_desk.record_learning(root, row)
+    return "recorded"
+
+
+def learn_book(state, root=None) -> dict:
+    """Closes that exist go to the learning book. A flat day writes nothing.
+
+    No settle is invented. The book does not buy.
+    """
+    book = state if isinstance(state, dict) else {}
+    closes = [row for row in (book.get("closed") or []) if learning_row(row)]
+    if not closes:
+        return {"wrote": 0, "settle": False, "buy": learn_buys(None), "rows": []}
+    rows = []
+    wrote = 0
+    for pos in closes:
+        status = tell_learning(pos, root)
+        rows.append(status)
+        if status == "recorded":
+            wrote += 1
+    return {"wrote": wrote, "settle": False, "buy": learn_buys(None), "rows": rows}
+
+
 def empty_state(cfg: dict) -> dict:
     return {
         "cash": float(cfg["starter_cash"]),
@@ -941,6 +1019,7 @@ def run_once(
             decision["action"] = "skip"
             decision["reason"] = "research only — btc15m owns this factor"
     record_close(state, root=desk_root)
+    learn_book(state, root=desk_root)
     state["checks"] = int(state.get("checks") or 0) + 1
     state["last_check"] = now.isoformat(timespec="seconds")
     _write_json(os.path.join(tower, "paper_account.json"), state)
