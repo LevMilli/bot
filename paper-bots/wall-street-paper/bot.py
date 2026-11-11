@@ -6,6 +6,9 @@ send orders. A check always skips.
 """
 from __future__ import annotations
 
+import json
+import math
+import os
 import sys
 
 # House count. The city pit draws this many seats. Stay above 100.
@@ -52,6 +55,68 @@ DEPARTMENTS = (
 )
 
 
+def _num(value):
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(n):
+        return None
+    return n
+
+
+def read_book(snapshot=None) -> dict:
+    """Read the city book the towers already wrote.
+
+    A missing snapshot has no P/L. A number that is not already on the book
+    is not filled in. This does not trade.
+    """
+    if not isinstance(snapshot, dict):
+        return {
+            "read": False,
+            "pnl": None,
+            "rows": [],
+            "bought": False,
+            "sold": False,
+            "reason": "snapshot missing",
+        }
+    rows = []
+    for bot in snapshot.get("bots") or []:
+        if not isinstance(bot, dict):
+            continue
+        name = str(bot.get("id") or "").strip()
+        if not name:
+            continue
+        realized = _num(bot.get("realized")) if "realized" in bot else None
+        rows.append({"id": name, "realized": realized})
+    desk = snapshot.get("desk") if isinstance(snapshot.get("desk"), dict) else {}
+    if "realized" in desk:
+        city = _num(desk.get("realized"))
+    elif "pnl" in snapshot:
+        city = _num(snapshot.get("pnl"))
+    else:
+        city = None
+    return {
+        "read": True,
+        "pnl": city,
+        "rows": rows,
+        "bought": False,
+        "sold": False,
+        "reason": "city book",
+    }
+
+
+def _load_snapshot(path: str):
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def evaluate() -> dict:
     seats = sum(int(row["seats"]) for row in DEPARTMENTS)
     if seats != HEADCOUNT:
@@ -70,6 +135,7 @@ def main() -> int:
         print("reset paper account")
         return 0
     row = evaluate()
+    read_book(_load_snapshot(os.path.join(os.path.dirname(os.path.abspath(__file__)), "city_book.json")))
     print("SIGNAL: SKIP " + row["reason"])
     print("CARD: " + row["reason"])
     print("no trade")
