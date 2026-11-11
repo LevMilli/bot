@@ -386,6 +386,45 @@ def grok_veto(pair, facts, conf):
 
 
 # ------------------------------------------------------------------ scan
+def scored_mints(st) -> set:
+    """Mints this tower already holds or has already cooled. A new feed name is not one."""
+    out = set()
+    if not isinstance(st, dict):
+        return out
+    for pos in st.get("open") or []:
+        if isinstance(pos, dict):
+            mint = str(pos.get("mint") or "").strip()
+            if mint:
+                out.add(mint)
+    cool = st.get("cooldown") or {}
+    if isinstance(cool, dict):
+        for mint in cool:
+            name = str(mint or "").strip()
+            if name:
+                out.add(name)
+    return out
+
+
+def scan_mints(feed, known) -> dict:
+    """Keep the names the tower already scores. Do not add a feed name to find cash."""
+    allowed = {str(mint) for mint in (known or set()) if str(mint or "").strip()}
+    kept = {}
+    for mint, tag in (feed or {}).items():
+        name = str(mint or "").strip()
+        if name and name in allowed:
+            kept[name] = tag
+    return kept
+
+
+def facts_fee_skip(facts_passed, conf, *, lane="", venue_need=0.0) -> str:
+    """A facts pass that still fails the fee is a skip. It does not become a buy."""
+    if not facts_passed:
+        return ""
+    return refuse_conf_residual_as_edge(
+        conf, lane=str(lane or ""), venue_need=float(venue_need or 0.0),
+    )
+
+
 def candidates():
     found = {}
     for path, tag in (("/token-profiles/latest/v1", "profiles"), ("/token-boosts/latest/v1", "boosts_latest"),
@@ -405,7 +444,8 @@ def candidates():
 
 def scan(st, stats):
     F = C.FACTS
-    cands = candidates()
+    known = scored_mints(st)
+    cands = scan_mints(candidates() if known else {}, known)
     mints = list(cands)
     pairs_by_mint = {}
     for i in range(0, len(mints), 30):  # DexScreener allows up to 30 addresses per call
@@ -588,8 +628,8 @@ def scan(st, stats):
                         need_venue = venue + (0.02 if lane == "speed" else 0.0)
                     except Exception:
                         need_venue = 0.02 + (0.02 if lane == "speed" else 0.0)
-                    gate_reason = refuse_conf_residual_as_edge(
-                        conf, lane=str(lane or ""), venue_need=need_venue,
+                    gate_reason = facts_fee_skip(
+                        True, conf, lane=str(lane or ""), venue_need=need_venue,
                     )
         row["risk_gates_ok"] = "PASS" if not gate_reason else "FAIL"
         if gate_reason:
