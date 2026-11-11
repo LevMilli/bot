@@ -535,13 +535,103 @@ def manage_take_profits(state, bid, fee, ticker=None, market=None, model_side=No
     return sold
 
 
+BUY_EXIT_RULE = "take-profit +15¢ cap 99¢ / model-flip"
+BUY_INTENT = os.path.join(HERE, "buy_intent.json")
+
+
+def _atomic_json(dest, payload):
+    tmp = dest + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+        handle.write("\n")
+        handle.flush()
+    os.replace(tmp, dest)
+
+
+def load_buy_intent():
+    if not os.path.exists(BUY_INTENT):
+        return None
+    try:
+        with open(BUY_INTENT, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_buy_intent(*, fill_id, ticker, side, contracts, stake, ask):
+    """Write the crash intent before cash moves. The ask has to be a real quote."""
+    try:
+        ask_n = float(ask)
+        stake_n = float(stake)
+    except (TypeError, ValueError):
+        raise ValueError("buy intent needs the real ask and the stake") from None
+    if ask_n != ask_n or ask_n <= 0 or stake_n != stake_n or stake_n <= 0:
+        raise ValueError("buy intent needs the real ask and the stake")
+    payload = {
+        "tower": "btc15m",
+        "fill_id": str(fill_id),
+        "ticker": str(ticker or ""),
+        "side": str(side or ""),
+        "contracts": int(contracts),
+        "stake": round(stake_n, 2),
+        "ask": ask_n,
+        "exit_rule": BUY_EXIT_RULE,
+        "paper_only": True,
+        "status": "intent",
+    }
+    if not payload["fill_id"] or not payload["ticker"]:
+        raise ValueError("buy intent needs a fill id and a ticker")
+    _atomic_json(BUY_INTENT, payload)
+    return payload
+
+
+def reconcile_buy_intent(state):
+    """Match an intent to the saved book. Never create a position or a price."""
+    intent = load_buy_intent()
+    if not isinstance(intent, dict):
+        return "none"
+    fid = str(intent.get("fill_id") or "")
+    opens = [p for p in (state or {}).get("open") or [] if isinstance(p, dict)]
+    closed = [p for p in (state or {}).get("closed") or [] if isinstance(p, dict)]
+    if fid and any(str(p.get("fill_id") or "") == fid for p in opens):
+        status = "open"
+    elif fid and any(str(p.get("fill_id") or "") == fid for p in closed):
+        status = "closed"
+    else:
+        status = "abandoned"
+    if intent.get("status") != status or intent.get("paper_only") is not True:
+        intent["status"] = status
+        intent["paper_only"] = True
+        intent["exit_rule"] = BUY_EXIT_RULE
+        _atomic_json(BUY_INTENT, intent)
+    return status
+
+
+def second_side_block(state, ticker, side):
+    """One paper buy for this window. The other side is not a hedge."""
+    want = str(side or "").upper()
+    book = list((state or {}).get("open") or []) + list((state or {}).get("closed") or [])
+    for pos in book:
+        if not isinstance(pos, dict):
+            continue
+        if str(pos.get("ticker") or "") != str(ticker or ""):
+            continue
+        held = str(pos.get("side") or "").upper()
+        if held and want and held != want:
+            return "second side of the same window is not a hedge"
+        return "one paper buy for that window"
+    return ""
+
+
 def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=None, vol_kwargs=None, series=None):
     """Paper fill only when the signal cleared the edge after fees. No order is sent."""
     none_msg = "Checked all open BTC 15-minute markets. No paper buy."
     if ask is None or not (0.05 <= float(ask) <= 0.95):
         return none_msg
-    if any(isinstance(pos, dict) and pos.get("ticker") == ticker for pos in state.get("open") or []):
-        return none_msg
+    held = second_side_block(state, ticker, side)
+    if held:
+        return held
     if not IS_SHADOW:
         try:
             import desk_roi_plan
@@ -614,12 +704,12 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
         float(p.get("risk") if p.get("risk") is not None else p.get("cost") or 0)
         for p in (state.get("open") or [])
     )
+    vk = dict(vol_kwargs or {})
+    vk.setdefault("ask", ask)
+    vk.setdefault("ticker", ticker)
     try:
         desk = _desk()
         cfg = desk.load_settings(DESK_ROOT)
-        vk = dict(vol_kwargs or {})
-        vk.setdefault("ask", ask)
-        vk.setdefault("ticker", ticker)
         stake, adapt_plan = desk.stake_dollars_for(
             "btc15m", prob, edge=edge_val, cfg=cfg, open_risk_used=open_risk, ask=ask,
             root=DESK_ROOT, vol_kwargs=vk, return_plan=True,
@@ -645,10 +735,18 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
     cash = float(state.get("cash") or 0)
     if cost > cash + 1e-9 or len(state.get("open") or []) >= 12:
         return none_msg
+    opened = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    fill_id = f"{ticker}|{opened}"
+    try:
+        write_buy_intent(
+            fill_id=fill_id, ticker=ticker, side=side,
+            contracts=contracts, stake=cost, ask=ask,
+        )
+    except (TypeError, ValueError):
+        return none_msg
     state["cash"] = round(cash - cost, 2)
     reward = round(contracts * 1.0 - cost, 2)
     why = "Paper buy. The BTC 15-minute signal cleared its checks on this window."
-    opened = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     try:
         import desk_profit
         risk_factor = desk_profit.risk_factor_for("btc15m", side)
@@ -675,7 +773,7 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
         "risk_factor": risk_factor,
         "opened": opened,
         "close_time": close_time.isoformat() if hasattr(close_time, "isoformat") else str(close_time or ""),
-        "fill_id": f"{ticker}|{opened}",
+        "fill_id": fill_id,
         "price_source": KALSHI,
         "price_at": opened,
         "paper_only": True,
@@ -698,6 +796,7 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
             "calendar_scanner" if vk.get("calendar_loaded") else str(vk.get("helper_source") or "")
         ),
         "take_profit": min(round(float(ask) + TAKE_PROFIT_ADD, 2), TAKE_PROFIT_CAP),
+        "exit_rule": BUY_EXIT_RULE,
     })
     try:
         if DESK_ROOT not in sys.path:
@@ -1384,6 +1483,7 @@ def main():
         except Exception:
             pass
     account = load_account()
+    reconcile_buy_intent(account)
     if not os.path.exists(ACCOUNT):
         save_account(account)
     try:
