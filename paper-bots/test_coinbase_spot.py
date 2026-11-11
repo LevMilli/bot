@@ -97,7 +97,7 @@ class CoinbaseSpotRules(unittest.TestCase):
             }
             out = _capture(bot, tmp, cfg, books)
             self.assertIn("no trade", out)
-            self.assertIn("SKIP BTC-USD", out)
+            self.assertIn("LOG BTC-USD", out)
             self.assertIn("research only", out)
             state = json.load(open(os.path.join(tmp, "coinbase-spot-paper", "paper_account.json"), encoding="utf-8"))
             self.assertEqual(state["open"], [])

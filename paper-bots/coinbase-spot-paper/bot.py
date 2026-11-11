@@ -258,6 +258,62 @@ def empty_state(cfg: dict) -> dict:
     }
 
 
+def read_closes(closes):
+    """Real positive closes. A hole or a wipe stays missing."""
+    if not isinstance(closes, (list, tuple)) or not closes:
+        return None
+    out = []
+    for px in closes:
+        n = _num(px)
+        if n is None or n <= 0:
+            return None
+        out.append(n)
+    return out
+
+
+def scan_book(product, closes, error=None, cfg=None) -> dict:
+    """Read ETH-USD and SOL-USD. Log BTC-USD. Do not score BTC as a buy.
+
+    A failed candle is a data skip. The last close is stored only when it is real.
+    """
+    cfg = locked_cfg(cfg)
+    name = str(product or "")
+    row = {
+        "product": name,
+        "action": "skip",
+        "reason": "",
+        "last": None,
+        "scored_as_buy": False,
+        "paper_only": True,
+    }
+    cleaned = None if error else read_closes(closes)
+    if cleaned is None:
+        row["reason"] = f"data {error or 'candle'}"
+        row["data_skip"] = True
+        return row
+    row["last"] = cleaned[-1]
+    research = {str(item) for item in (cfg.get("products_research_only") or ["BTC-USD"])}
+    if name == "BTC-USD" or name in research:
+        row["action"] = "log"
+        row["reason"] = "research only — logged, not scored as a buy"
+        return row
+    row["action"] = "read"
+    row["reason"] = "candle read"
+    row["bars"] = len(cleaned)
+    return row
+
+
+def scan_card(rows) -> str:
+    """A failed candle wins the card over a story about edge."""
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        reason = str(row.get("reason") or "").strip()
+        if row.get("data_skip") or reason.lower().startswith("data "):
+            return reason or "data candle"
+    return ""
+
+
 def fetch_closes(product: str, granularity: int = 900) -> list[float]:
     url = CANDLE_URL.format(product=product, granularity=int(granularity))
     req = urllib.request.Request(url, headers=UA)
@@ -310,13 +366,16 @@ def run_once(
             errors[product] = exc.__class__.__name__
             books[product] = []
     decisions = {}
+    research = {str(item) for item in cfg["products_research_only"]}
     for product, closes in books.items():
-        returns = closes_to_returns(closes)
-        decision = evaluate_returns(returns, cfg, product=product)
-        if product in errors and not closes:
-            decision["action"] = "skip"
-            decision["reason"] = f"data {errors[product]}"
-        decision["observe_return"] = horizon_return(closes, int(cfg["observe_bars"]))
+        err = errors.get(product)
+        if product == "BTC-USD" or product in research or (err and not closes) or read_closes(closes) is None:
+            decision = scan_book(product, closes, err or ("candle" if read_closes(closes) is None else None), cfg)
+        else:
+            decision = evaluate_returns(closes_to_returns(closes), cfg, product=product)
+            decision["last"] = closes[-1]
+            decision["scored_as_buy"] = decision.get("action") == "buy"
+        decision["observe_return"] = horizon_return(closes if isinstance(closes, list) else [], int(cfg["observe_bars"]))
         decisions[product] = decision
     blocked = os.environ.get("DESK_BLOCK_ENTRIES") == "1"
     btc_open = btc_yes_open(desk_root)
@@ -424,15 +483,9 @@ def _card_skip_reason(decisions: dict, cfg: dict | None = None) -> str:
     Ordinary z/edge skips also densify the locked fee-bar need so the city card
     is not read as a missed plan trade (#cb-carry tip twin).
     """
-    data_reasons = []
-    for decision in (decisions or {}).values():
-        if not isinstance(decision, dict):
-            continue
-        reason = str(decision.get("reason") or "").strip()
-        if reason.lower().startswith("data "):
-            data_reasons.append(reason)
-    if data_reasons:
-        return data_reasons[0]
+    data = scan_card(list((decisions or {}).values()))
+    if data:
+        return data
     first = next(iter((decisions or {}).values()), {}) if decisions else {}
     if not isinstance(first, dict):
         return "no fee-clear long"
