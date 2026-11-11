@@ -510,7 +510,7 @@
       "paused": false,
       "shadow_only": true,
       "feed": null,
-      "why": "Ordinary 15m bars do not clear the Coinbase taker.",
+      "why": "Replayed 15m longs lose after the 2% round trip. A past bar is not a fill.",
       "skip": "edge below floor",
       "idle_copy": "Shadow sleeve. No desk cash.",
       "empty": "",
@@ -522,7 +522,7 @@
       "blurb": "Shadow Coinbase spot paper tower. Public candles. Spends no desk cash.",
       "plans": {
         "buy": [
-          "ETH-USD / SOL-USD only when edge after the 0.90% taker clears 0.05"
+          "ETH-USD / SOL-USD only when a replayed up-bar long clears 0.05 after the 2% round trip"
         ],
         "sell": [
           "Stop \u22121.5%, take-profit, model-flip, 24h time stop"

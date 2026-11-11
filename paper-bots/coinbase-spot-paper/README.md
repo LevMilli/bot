@@ -15,13 +15,16 @@ maker or EU rate.
 | Taker | 0.90% each side |
 | Slippage | 0.10% each side |
 | Round trip | 2.00% |
-| Capture haircut | 25% of the last 15-minute move |
 | Venue floor `coinbase_spot` | 0.05 excess return after that round trip |
-| z | ≥ 2 versus the prior 15-minute sigma |
+| Sample | n ≥ 20, hit ≥ 40%, median > 0, mean ≥ 0.05, latest 20 included |
+| History | 45 days of completed 15-minute candles |
 
-A buy needs a 15-minute bar of about **28%** (`(0.02 + 0.05) / 0.25`) and z ≥ 2.
-Ordinary ETH and SOL bars are a few tenths of a percent, so edge is negative.
-The check records the skip and does not invent a fill. Pace does not waive the floor.
+A buy is a replay of an up bar held to the stop, the fee-floor take-profit, a
+z ≤ −2 flip, or 24 hours, after the 2% round trip. The bar that already printed
+is not the profit. Scoring 25% of that bar asked for a ~28% print and skipped
+small up bars that also lose the fee. The check records the skip and does not
+invent a fill. Pace does not waive the floor. The haircut stays capped at 0.25
+and is not used to turn a past bar into an entry.
 
 ## What it will and will not trade
 

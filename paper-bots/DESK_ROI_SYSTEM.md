@@ -94,8 +94,8 @@ Bot-local stops that are **tighter** than desk (Kalshi −$50, meme −$50, max 
 
 ### Coinbase spot → **partial**, shadow only
 - Public 15m candles. ETH-USD and SOL-USD longs. BTC-USD research-only.
-- Edge = 25% of the last move minus the US intro taker round trip (0.90% + 0.10% slip each side). Buy only if that edge ≥ 0.05 and z ≥ 2.
-- Ordinary bars skip. That skip is the base.
+- A buy waits on the forward result of an up-bar long: stop −1.5%, take-profit at round-trip + floor, z flip, 24h hold, then the US intro taker round trip (0.90% + 0.10% slip each side). The sample must clear 0.05 mean, median > 0, hit ≥ 40%, n ≥ 20, including the latest 20.
+- The bar that already printed is not a fill. A skip on a losing replay is the base.
 - Exits: −1.5% stop, take-profit at round-trip + floor, model-flip, 24h time stop.
 - Own $500 sleeve, fixed $25, max 1 open. No desk cash and no tower risk share until a person graduates incubation (n ≥ 50).
 - Waiver: `fixed_ticket_25`, `shadow_only`.

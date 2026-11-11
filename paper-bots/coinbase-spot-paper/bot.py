@@ -2,18 +2,18 @@
 """Coinbase spot paper tower — shadow sleeve, public candles, no key.
 
 The desk already trades BTC 15-minute Kalshi contracts. This tower does not
-copy that book. It paper-trades Coinbase spot (ETH-USD, SOL-USD) only when a
-15-minute move still clears costs:
+copy that book. It paper-trades Coinbase spot (ETH-USD, SOL-USD) only when
+replaying that same long, with this tower's exits, still clears costs:
 
     round trip = 2 * (US intro taker 0.90% + 0.10% slippage) = 2.00%
-    expected capture = 25% of the last completed 15m move
-    edge = expected capture - round trip
-    buy only if the move is up, z >= 2, and edge >= locked floor 0.05
+    a finished replay exits on the -1.5% stop, the fee-floor take-profit,
+    a z <= -2 flip, or the 24h hold, then subtracts the round trip
+    buy only if the up bar's replay has n >= 20, hit >= 40%, median > 0,
+    and mean >= locked floor 0.05, and the latest 20 trades do too
 
-A normal bar is a few tenths of a percent, so edge is negative and the check
-skips. That is the base, not a missed trade. BTC-USD is logged and never
-bought. Shorts are refused (spot cash cannot short). Nothing here sends an
-order.
+The size of the bar that already printed is not the profit. BTC-USD is logged
+and never bought. Shorts are refused (spot cash cannot short). Nothing here
+sends an order.
 """
 from __future__ import annotations
 
@@ -32,7 +32,10 @@ LOCKED_FLOOR = 0.05
 LOCKED_HAIRCUT_MAX = 0.25
 LOCKED_TAKER_MIN = 0.009  # US Advanced intro taker, 16 Sep 2026 schedule
 LOCKED_SLIP_MIN = 0.001
-CANDLE_URL = "https://api.exchange.coinbase.com/products/{product}/candles?granularity={granularity}"
+CANDLE_URL = (
+    "https://api.exchange.coinbase.com/products/{product}/candles"
+    "?granularity={granularity}&start={start}&end={end}"
+)
 UA = {"User-Agent": "coinbase-spot-paper/1.0 (paper-only; no key)"}
 KEY_ENV = ("COINBASE_API_KEY", "COINBASE_API_SECRET", "COINBASE_API_SECRET_KEY")
 
@@ -70,6 +73,7 @@ def locked_cfg(cfg: dict | None = None) -> dict:
     raw["learn_min_settles"] = int(raw.get("learn_min_settles") or 8)
     raw["learn_hit_rate"] = _num(raw.get("learn_hit_rate")) or 0.40
     raw["observe_bars"] = int(raw.get("observe_bars") or 16)
+    raw["history_days"] = max(45, int(_num(raw.get("history_days")) or 45))
     raw["products_trade"] = list(raw.get("products_trade") or ["ETH-USD", "SOL-USD"])
     raw["products_research_only"] = list(raw.get("products_research_only") or ["BTC-USD"])
     raw["paper_only"] = True
@@ -99,9 +103,11 @@ def research_card(cfg: dict | None = None) -> dict:
         "stake_usd": cfg["stake_usd"],
         "starter_cash": cfg["starter_cash"],
         "base": (
-            "A 15m bar must be about "
-            f"{need:.0%} with z>={cfg['min_z']:g} before a long clears fees. "
-            "Ordinary bars skip. That is the trading base."
+            "A buy waits until replaying up-bar longs through the stop, "
+            "fee-floor take-profit, z flip, and 24h hold clears "
+            f"{cfg['venue_min_edge']:.0%} after the {trip:.0%} round trip "
+            "(n>=20, hit>=40%, median>0, latest 20 included). "
+            "The bar that already printed is not a fill."
         ),
     }
 
@@ -173,6 +179,155 @@ def evaluate_returns(returns: list[float], cfg: dict, *, product: str = "") -> d
     row["action"] = "buy"
     row["reason"] = "fee-clear long"
     return row
+
+
+def _hold_bars(cfg: dict) -> int:
+    gran = int(cfg.get("granularity_sec") or 900)
+    hours = float(cfg.get("time_stop_hours") or 24.0)
+    return max(1, int(round(hours * 3600.0 / max(gran, 1))))
+
+
+def replay_up_longs(closes: list[float], cfg: dict) -> list[float]:
+    """After-fee result of buying an up bar and using this tower's exits.
+
+    The past bar is not the profit. Each finished replay exits on the stop,
+    the fee-floor take-profit, a z flip, or the 24h hold, then subtracts the
+    taker round trip. A trade that is still open on the last bar is left out.
+    """
+    cfg = locked_cfg(cfg)
+    if len(closes) < 12:
+        return []
+    trip = round_trip(cfg)
+    stop = float(cfg["stop_pct"])
+    take = trip + float(cfg["venue_min_edge"])
+    hold = _hold_bars(cfg)
+    min_z = float(cfg["min_z"])
+    rets = closes_to_returns(closes)
+    sigma_at = _population_sigma(rets)
+    nets: list[float] = []
+    i = 8
+    n = len(closes)
+    while i < len(rets) - 1:
+        if rets[i] <= 0:
+            i += 1
+            continue
+        entry_i = i + 1
+        entry = closes[entry_i]
+        if entry <= 0 or entry_i >= n - 1:
+            break
+        exit_i = None
+        exit_px = None
+        for j in range(1, hold + 1):
+            k = entry_i + j
+            if k >= n or k - 1 >= len(rets):
+                break
+            px = closes[k]
+            move = px / entry - 1.0
+            if move <= -stop + 1e-12:
+                exit_i, exit_px = k, px
+                break
+            if move + 1e-12 >= take:
+                exit_i, exit_px = k, px
+                break
+            if k - 1 >= 8:
+                sigma = sigma_at[k - 2] if k - 2 < len(sigma_at) else 0.0
+                if sigma > 1e-12 and rets[k - 1] / sigma <= -min_z + 1e-12:
+                    exit_i, exit_px = k, px
+                    break
+        else:
+            k = entry_i + hold
+            if k < n:
+                exit_i, exit_px = k, closes[k]
+        if exit_i is None or exit_px is None or exit_i >= n - 1:
+            break
+        nets.append(exit_px / entry - 1.0 - trip)
+        i = exit_i
+    return nets
+
+
+def _population_sigma(values: list[float]) -> list[float]:
+    """sigma[t] is the population stdev of values[:t+1]."""
+    n = 0
+    mean = 0.0
+    m2 = 0.0
+    out: list[float] = []
+    for value in values:
+        n += 1
+        delta = value - mean
+        mean += delta / n
+        m2 += delta * (value - mean)
+        out.append(math.sqrt(m2 / n) if n > 1 else 0.0)
+    return out
+
+
+def _trade_stats(trades: list[float]) -> dict:
+    if not trades:
+        return {"n": 0, "hit": None, "mean": None, "median": None}
+    n = len(trades)
+    return {
+        "n": n,
+        "hit": sum(1 for trade in trades if trade > 0) / n,
+        "mean": sum(trades) / n,
+        "median": float(statistics.median(trades)),
+    }
+
+
+def _sample_clears(stats: dict, cfg: dict) -> bool:
+    if int(stats["n"]) < 20 or stats["mean"] is None or stats["median"] is None or stats["hit"] is None:
+        return False
+    return (
+        float(stats["mean"]) + 1e-12 >= float(cfg["venue_min_edge"])
+        and float(stats["median"]) > 0
+        and float(stats["hit"]) + 1e-12 >= 0.40
+    )
+
+
+def forward_block_reason(trades: list[float], cfg: dict) -> str:
+    """Empty when the replayed trades clear the locked floor. Otherwise the card line."""
+    cfg = locked_cfg(cfg)
+    full = _trade_stats(trades)
+    recent = _trade_stats(trades[-20:] if trades else [])
+    if not _sample_clears(full, cfg):
+        n = int(full["n"])
+        if n < 20 or full["median"] is None or full["hit"] is None or full["mean"] is None:
+            return f"flat: forward sample n={n} needs 20 closed longs"
+        if float(full["median"]) <= 0 or float(full["hit"]) + 1e-12 < 0.40:
+            return (
+                f"flat: skipped 15m longs lose after the 2% round trip "
+                f"(n={n} hit {float(full['hit']):.0%} median {float(full['median']):.1%})"
+            )
+        return (
+            f"flat: mean after fees {float(full['mean']):.1%} "
+            f"is under the {float(cfg['venue_min_edge']):.0%} floor (n={n})"
+        )
+    if not _sample_clears(recent, cfg):
+        return (
+            f"flat: recent 15m longs lose after the 2% round trip "
+            f"(last {int(recent['n'])} hit {float(recent['hit']):.0%} "
+            f"median {float(recent['median']):.1%})"
+        )
+    return ""
+
+
+def apply_forward_gate(decision: dict, closes: list[float], cfg: dict) -> dict:
+    """A past bar is not a fill. Buy only when replaying that entry cleared the floor."""
+    trades = replay_up_longs(closes, cfg)
+    stats = _trade_stats(trades)
+    if stats["mean"] is not None:
+        decision["edge"] = stats["mean"]
+    decision["sample_n"] = stats["n"]
+    reason = forward_block_reason(trades, cfg)
+    if reason:
+        decision["action"] = "skip"
+        decision["reason"] = reason
+        return decision
+    if decision.get("ret") is None or float(decision["ret"]) <= 0:
+        decision["action"] = "skip"
+        decision["reason"] = "spot cash book is long-only"
+        return decision
+    decision["action"] = "buy"
+    decision["reason"] = "fee-clear long"
+    return decision
 
 
 def learning_block(state: dict, product: str, cfg: dict) -> str:
@@ -258,19 +413,66 @@ def empty_state(cfg: dict) -> dict:
     }
 
 
-def fetch_closes(product: str, granularity: int = 900) -> list[float]:
-    url = CANDLE_URL.format(product=product, granularity=int(granularity))
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=8) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
-    rows = [row for row in payload if isinstance(row, list) and len(row) >= 5]
-    rows.sort(key=lambda row: row[0])
-    closes = []
-    for row in rows:
-        px = _num(row[4])
-        if px is not None and px > 0:
+def drop_open_candle(
+    stamps: list[int],
+    closes: list[float],
+    now: dt.datetime,
+    granularity: int,
+) -> list[float]:
+    """Keep buckets that have already ended. The current 15m bar is not a close."""
+    gran = max(60, int(granularity))
+    now_ts = int(now.timestamp())
+    kept = []
+    for ts, px in zip(stamps, closes):
+        if int(ts) + gran <= now_ts and px > 0:
+            kept.append(px)
+    return kept
+
+
+def fetch_closes(
+    product: str,
+    granularity: int = 900,
+    history_days: int = 45,
+    now: dt.datetime | None = None,
+) -> list[float]:
+    """Public candles, paged. Coinbase returns at most 300 rows per call."""
+    gran = max(60, int(granularity))
+    clock = now or dt.datetime.now(dt.timezone.utc)
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=dt.timezone.utc)
+    clock = clock.astimezone(dt.timezone.utc).replace(microsecond=0)
+    days = max(45, int(history_days))
+    cursor = clock - dt.timedelta(days=days)
+    step = dt.timedelta(seconds=gran * 280)
+    pages = max(4, int(days * 86400 / (gran * 280)) + 3)
+    closes: list[float] = []
+    seen: list[int] = []
+    for _ in range(pages):
+        if cursor >= clock:
+            break
+        nxt = min(cursor + step, clock)
+        url = CANDLE_URL.format(
+            product=product,
+            granularity=gran,
+            start=cursor.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            end=nxt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        )
+        req = urllib.request.Request(url, headers=UA)
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        rows = [row for row in payload if isinstance(row, list) and len(row) >= 5]
+        rows.sort(key=lambda row: row[0])
+        for row in rows:
+            ts = int(row[0])
+            if seen and ts <= seen[-1]:
+                continue
+            px = _num(row[4])
+            if px is None or px <= 0:
+                continue
+            seen.append(ts)
             closes.append(px)
-    return closes
+        cursor = nxt
+    return drop_open_candle(seen, closes, clock, gran)
 
 
 def run_once(
@@ -295,7 +497,14 @@ def run_once(
     state["paper_only"] = True
     state["shadow_only"] = True
     state["live_orders"] = False
-    fetch = fetch or (lambda product: fetch_closes(product, int(cfg.get("granularity_sec") or 900)))
+    fetch = fetch or (
+        lambda product: fetch_closes(
+            product,
+            int(cfg.get("granularity_sec") or 900),
+            int(cfg.get("history_days") or 45),
+            now,
+        )
+    )
     products = list(dict.fromkeys(list(cfg["products_trade"]) + list(cfg["products_research_only"])))
     for pos in state["open"]:
         ticker = str(pos.get("ticker") or "")
@@ -316,6 +525,8 @@ def run_once(
         if product in errors and not closes:
             decision["action"] = "skip"
             decision["reason"] = f"data {errors[product]}"
+        elif closes:
+            decision = apply_forward_gate(decision, closes, cfg)
         decision["observe_return"] = horizon_return(closes, int(cfg["observe_bars"]))
         decisions[product] = decision
     blocked = os.environ.get("DESK_BLOCK_ENTRIES") == "1"
@@ -345,9 +556,11 @@ def run_once(
     if gate:
         for product in cfg["products_trade"]:
             decision = decisions.get(product)
-            if decision and decision.get("action") == "buy":
+            if not decision:
+                continue
+            if decision.get("action") == "buy":
                 decision["action"] = "skip"
-                decision["reason"] = gate
+            decision["reason"] = gate
     else:
         for product in cfg["products_trade"]:
             decision = decisions.get(product) or {}
@@ -416,14 +629,14 @@ def run_once(
 
 
 def _card_skip_reason(decisions: dict, cfg: dict | None = None) -> str:
-    """CARD must densify feed-down, not false-friend as the first z/edge skip.
+    """CARD must densify feed-down, not the first quiet product.
 
-    Prefer any ``data *`` reason (candle TimeoutError / fetch fail) over ordinary
-    model skips when products_trade puts a quiet bar first (#457 Prefer-1).
-
-    Ordinary z/edge skips also densify the locked fee-bar need so the city card
-    is not read as a missed plan trade (#cb-carry tip twin).
+    Prefer any ``data *`` reason (candle TimeoutError / fetch fail) over a
+    profit skip when products_trade puts ETH first (#457 Prefer-1).
+    A forward-sample skip is shown as written. The past bar's size is not
+    appended as if a 28% print were the trade.
     """
+    del cfg
     data_reasons = []
     for decision in (decisions or {}).values():
         if not isinstance(decision, dict):
@@ -435,31 +648,8 @@ def _card_skip_reason(decisions: dict, cfg: dict | None = None) -> str:
         return data_reasons[0]
     first = next(iter((decisions or {}).values()), {}) if decisions else {}
     if not isinstance(first, dict):
-        return "no fee-clear long"
-    reason = str(first.get("reason") or "no fee-clear long").strip() or "no fee-clear long"
-    low = reason.lower()
-    if not (
-        low.startswith("z ")
-        or low.startswith("edge ")
-        or "long-only" in low
-        or reason == "no fee-clear long"
-    ):
-        return reason
-    card = research_card(cfg)
-    need = float(card["bar_return_to_clear"])
-    trip = float(card["round_trip"])
-    floor = float(card["floor"])
-    edge = first.get("edge")
-    edge_bit = ""
-    if edge is not None:
-        try:
-            edge_bit = f"; edge {float(edge):.4f}"
-        except (TypeError, ValueError):
-            edge_bit = ""
-    return (
-        f"{reason}{edge_bit}; 15m needs ~{need:.0%} bar to clear "
-        f"{trip:.0%} RT+{floor:g} floor (ordinary bars skip)"
-    )
+        return "flat"
+    return str(first.get("reason") or "flat").strip() or "flat"
 
 
 def _record_incubation(desk_root: str, product: str, pnl) -> None:
