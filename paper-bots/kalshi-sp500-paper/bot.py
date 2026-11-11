@@ -438,19 +438,21 @@ def step_settle(args, state, day):
                 pass
             if (
                 flip_on
-                and paper_sim.bid_under_exit(raw_bid, CFG["invalidation_log_below"])
                 and not args.dry_run
             ):
-                bid = mark
-                # Paper sell at bid minus taker fee (honest EV; matches sports sell path).
-                contracts = float(pos.get("contracts") or 0)
-                sell_fee = float(paper_sim.taker_fee(contracts, bid))
-                proceeds = round(contracts * float(bid) - sell_fee, 4)
-                pnl = round(proceeds - float(pos.get("cost") or 0) - float(pos.get("fee") or 0), 4)
+                sale = paper_sim.failsafe_sale(
+                    pos, raw_bid, floor=CFG["invalidation_log_below"],
+                )
+                if sale is None or sale.get("opens_new_ticket"):
+                    continue
+                bid = sale["exit_price"]
+                sell_fee = sale["exit_fee"]
+                proceeds = sale["payout"]
+                pnl = sale["pnl"]
                 state["bankroll"] = round(float(state["bankroll"]) + proceeds, 4)
                 pos.update({
                     "status": "sold",
-                    "exit": "model-flip bid under 50c",
+                    "exit": sale["exit"],
                     "exit_price": bid,
                     "exit_fee": sell_fee,
                     "payout": proceeds,
@@ -463,7 +465,7 @@ def step_settle(args, state, day):
                 try:
                     desk = _desk()
                     desk.record_learning(DESK_ROOT, {
-                        "result": "hit" if pnl > 0 else "miss",
+                        "reason": sale["exit"],
                         "market": "S&P",
                         "prob": pos.get("ask"),
                         "stake": pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
