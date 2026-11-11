@@ -1,4 +1,4 @@
-"""Nine paper shadows log a public book and buy nothing. No network."""
+"""Seven paper shadows log a public book and buy nothing. No network."""
 from __future__ import annotations
 
 import importlib.util
@@ -55,10 +55,14 @@ class ShadowMissingTests(unittest.TestCase):
         self.assertEqual(desk_profit.DEFAULT_VENUE_MIN_EDGE["kalshi_econ"], 0.05)
         self.assertFalse(desk_roi_plan.LIVE_ORDERS_ENABLED)
         self.assertFalse(pimp_desk.LIVE_SWITCH_BUILT)
-        self.assertEqual(len(shadow_missing.TOWERS), 9)
+        self.assertEqual(len(shadow_missing.TOWERS), 7)
+        gone = {"btc-options", "commodity-calendar"}
+        self.assertTrue(gone.isdisjoint(spec["id"] for spec in shadow_missing.TOWERS))
+        self.assertTrue(gone.isdisjoint(row["id"] for row in pimp_desk.BOTS))
+        self.assertTrue(gone.isdisjoint(slot["id"] for slot in pimp_desk.AUTO))
+        self.assertTrue(gone.isdisjoint(desk_profit.BOT_VENUE))
 
     def test_each_logger_buys_nothing_and_does_not_say_the_repo(self):
-        absent = {"commodity-calendar", "btc-options"}
         for spec in shadow_missing.TOWERS:
             with self.subTest(spec["id"]):
                 _load(spec["folder"])
@@ -81,14 +85,11 @@ class ShadowMissingTests(unittest.TestCase):
                     self.assertEqual(state["stake_usd"], 0.0)
                     self.assertIsNone(state["fair"])
                     self.assertIsNone(state["fill"])
-                    self.assertEqual(state["ticker_missing"], spec["id"] in absent)
+                    self.assertFalse(state["ticker_missing"])
                     self.assertTrue(state["shadow_only"])
                     self.assertFalse(state["live_orders"])
-                    if spec["id"] in absent:
-                        self.assertIn("does not list", out)
-                    else:
-                        self.assertIn("Listed", out)
-                        self.assertIn("No fill", out)
+                    self.assertIn("Listed", out)
+                    self.assertIn("No fill", out)
                     with open(os.path.join(tower, "evidence.jsonl"), encoding="utf-8") as handle:
                         evidence = [json.loads(line) for line in handle if line.strip()]
                     self.assertEqual(len(evidence), 1)
@@ -130,52 +131,6 @@ class ShadowMissingTests(unittest.TestCase):
         self.assertNotIn("KXUFCFIGHT", esports["series"])
         self.assertFalse(esports["ticker_missing"])
         self.assertFalse(esports["buys_favorite"])
-
-    def test_commodity_calendar_does_not_inherit_the_ladder(self):
-        row = shadow_missing.evaluate("commodity-calendar")
-        self.assertEqual(row["front_symbols"], ["CL=F", "GC=F"])
-        self.assertIn("KXGOLD15M", row["rejected_series"])
-        self.assertIn("KXWTI15M", row["rejected_series"])
-        self.assertTrue(row["ticker_missing"])
-        self.assertIsNone(row["commission"])
-        self.assertIn("does not list a WTI or gold calendar-spread series", row["reason"])
-        self.assertNotIn("not in the repo", row["reason"])
-        self.assertNotIn("KXWTI", row["series"])
-        self.assertNotIn("KXGOLD15M", row["series"])
-        self.assertTrue(row["binary_floor_not_a_fee"])
-        self.assertFalse(row["inherits_15m_ladder"])
-        self.assertEqual(row["stake_usd"], 0.0)
-        self.assertEqual(row["floor"], 0.05)
-        self.assertNotEqual(row["stake_usd"], 6.0)
-        self.assertNotEqual(row["stake_usd"], 15.0)
-        cfg = shadow_missing.locked_cfg(
-            shadow_missing.spec_for("commodity-calendar"),
-            {"stake_usd": 15, "venue_min_edge": 0.02, "live_orders": True},
-        )
-        self.assertEqual(cfg["stake_usd"], 0.0)
-        self.assertGreaterEqual(cfg["venue_min_edge"], 0.05)
-        self.assertFalse(cfg["live_orders"])
-
-    def test_btc_options_refuses_the_fifteen_minute_series(self):
-        row = shadow_missing.evaluate("btc-options")
-        self.assertEqual(set(row["rejected_series"]), {"KXBTC15M", "KXETH15M", "KXBTCD"})
-        self.assertEqual(row["series"], [])
-        self.assertTrue(row["ticker_missing"])
-        self.assertIn("does not list a BTC options series", row["reason"])
-        self.assertNotIn("not in the repo", row["reason"])
-        self.assertIsNone(row["commission"])
-        self.assertIsNone(row["implied"])
-        self.assertIsNone(row["realized"])
-        self.assertIsNone(row["gap"])
-        self.assertEqual(row["sells"], 0)
-        self.assertTrue(row["binary_floor_not_a_fee"])
-        forced = shadow_missing.evaluate("btc-options", registry={
-            "assignments": {"BTC_OPTIONS_SERIES": ["KXBTC15M"]},
-        })
-        self.assertEqual(forced["series"], [])
-        self.assertTrue(forced["ticker_missing"])
-        self.assertEqual(forced["buys"], 0)
-        self.assertIsNone(forced["fair"])
 
     def test_mentions_use_the_repo_taker_and_clear_005(self):
         row = shadow_missing.evaluate("polymarket-mentions")
@@ -253,55 +208,6 @@ class ShadowMissingTests(unittest.TestCase):
             self.assertFalse(state["live_orders"])
             self.assertFalse(state["ticker_missing"])
             self.assertGreater(state["book_n"], 0)
-
-    def test_calendar_and_options_searches_do_not_adopt_the_wrong_book(self):
-        def calendar(url):
-            self.assertNotIn("KXINXU", url)
-            return json.dumps({"current_page": [
-                {"series_ticker": "KXWTI", "series_title": "WTI oil on day"},
-                {"series_ticker": "KXGOLD15M", "series_title": "Gold 15-minute"},
-                {"series_ticker": "KXWTI15M", "series_title": "WTI 15-minute"},
-                {"series_ticker": "KXGOLDMON", "series_title": "Gold Monthly Price"},
-            ]}).encode()
-
-        def options(url):
-            return json.dumps({"current_page": [
-                {"series_ticker": "KXBTC15M", "series_title": "Bitcoin 15 minute options"},
-                {"series_ticker": "KXBTCD", "series_title": "Bitcoin options above/below"},
-                {"series_ticker": "KXETH15M", "series_title": "Ethereum 15 minute options"},
-                {"series_ticker": "KXPUBLICOPTIONHOUSE", "series_title": "House passage of a public health insurance option"},
-                {"series_ticker": "KXBTCMINMON", "series_title": "BTC one touch minimum"},
-            ]}).encode()
-
-        with tempfile.TemporaryDirectory() as tmp:
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                shadow_missing.run_once("commodity-calendar", desk_root=tmp, opener=calendar)
-            out = buf.getvalue()
-            self.assertIn("does not list a WTI or gold calendar-spread series", out)
-            self.assertNotIn("KXWTI", out)
-            self.assertNotIn("KXGOLD15M", out)
-            self.assertNotIn("BUY", out)
-            row = shadow_missing.evaluate(
-                "commodity-calendar",
-                book=shadow_missing.load_public_book(
-                    shadow_missing.spec_for("commodity-calendar"), {}, calendar,
-                ),
-            )
-            self.assertEqual(row["series"], [])
-            self.assertTrue(row["ticker_missing"])
-            self.assertEqual(row["buys"], 0)
-
-        with tempfile.TemporaryDirectory() as tmp:
-            buf = io.StringIO()
-            with redirect_stdout(buf):
-                shadow_missing.run_once("btc-options", desk_root=tmp, opener=options)
-            out = buf.getvalue()
-            self.assertIn("does not list a BTC options series", out)
-            self.assertNotIn("KXBTC15M", out)
-            self.assertNotIn("KXBTCD", out)
-            self.assertNotIn("BUY", out)
-            self.assertEqual(shadow_missing.evaluate("btc-options")["sells"], 0)
 
     def test_polymarket_stub_logs_the_mention_slug(self):
         slug = "will-cisco-say-ai-25-during-earnings-call-november-12"

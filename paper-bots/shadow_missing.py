@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared engine for the nine paper shadows that buy nothing.
+"""Shared engine for the seven paper shadows that buy nothing.
 
 Each tower reads its series from the public API. A game-winner ticker, a
 15-minute series, or a spot symbol is not that series. A listed series logs
@@ -104,29 +104,6 @@ TOWERS = (
         "floor_line": "Sports floor 0.06 cannot be lowered",
     },
     {
-        "id": "commodity-calendar",
-        "name": "Commodity calendar",
-        "folder": "commodity-calendar-paper",
-        "venue": "kalshi_commodity15m",
-        "floor": BINARY_FLOOR,
-        "series_attrs": ("CALENDAR_SERIES", "COMMODITY_CALENDAR_SERIES"),
-        "public_series": (),
-        "book": "kalshi",
-        "discover": {"queries": ("WTI calendar", "gold calendar"), "mode": "calendar"},
-        "absent": "Kalshi does not list a WTI or gold calendar-spread series. This check skips.",
-        "reject_attrs": ("SERIES",),
-        "commission_attrs": ("CALENDAR_COMMISSION", "COMMODITY_CALENDAR_COMMISSION"),
-        "deferred_attrs": ("DEFERRED_MONTH", "CALENDAR_MONTHS"),
-        "front_symbols": ("CL=F", "GC=F"),
-        "binary_floor_not_a_fee": True,
-        "rule": (
-            "Listed calendar in WTI or gold. CL=F and GC=F are 15-minute spot inputs, not this spread. "
-            "The commodity 0.05 floor is a binary lock and is not a futures commission. "
-            "This tower does not inherit the 15-minute stake ladder."
-        ),
-        "floor_line": "Commodity binary floor 0.05 stays locked and is not this spread's commission",
-    },
-    {
         "id": "player-props",
         "name": "Player props",
         "folder": "player-props-paper",
@@ -159,28 +136,6 @@ TOWERS = (
             "A full-game win probability is not this fair. Clears the sports floor 0.06 once a series exists."
         ),
         "floor_line": "Sports floor 0.06 cannot be lowered",
-    },
-    {
-        "id": "btc-options",
-        "name": "BTC options",
-        "folder": "btc-options-paper",
-        "venue": "kalshi_btc15m",
-        "floor": BINARY_FLOOR,
-        "series_attrs": ("BTC_OPTIONS_SERIES", "OPTIONS_SERIES"),
-        "public_series": (),
-        "book": "kalshi",
-        "discover": {"queries": ("bitcoin option", "BTC options"), "mode": "btc-option"},
-        "absent": "Kalshi does not list a BTC options series. This check skips.",
-        "reject_attrs": ("CRYPTO_SERIES",),
-        "commission_attrs": ("OPTIONS_COMMISSION", "BTC_OPTIONS_COMMISSION"),
-        "binary_floor_not_a_fee": True,
-        "logs_gap": True,
-        "rule": (
-            "Listed BTC options, implied versus later realized. "
-            "Does not trade KXBTC15M, KXETH15M, or KXBTCD. "
-            "The BTC 0.05 floor is the binary lock, not an options commission. This tower does not sell options."
-        ),
-        "floor_line": "BTC binary floor 0.05 stays locked and is not an options commission",
     },
     {
         "id": "champions-league",
@@ -319,12 +274,7 @@ def evaluate(
     series = view["series"]
     reason = view["reason"]
     if series and spec.get("commission_attrs") and commission is None:
-        note = "No public commission is on file for this series."
-        if spec["id"] == "btc-options":
-            note = "No public options commission is on file."
-        if spec["id"] == "commodity-calendar":
-            note = "No public futures commission is on file."
-        reason = _fit([reason, note])
+        reason = _fit([reason, "No public commission is on file for this series."])
     row = {
         "tower": spec["id"],
         "action": "skip",
