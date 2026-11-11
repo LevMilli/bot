@@ -1,5 +1,6 @@
 checks.csv
 positions.json
 trades.csv
+buy_intent.json
 __pycache__/
 *.pyc
