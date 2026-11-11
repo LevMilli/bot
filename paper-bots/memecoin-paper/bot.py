@@ -563,17 +563,34 @@ def scan(st, stats):
             if ticket < C.MIN_TICKET_USD:
                 gate_reason = f"paper cash ${st['cash_usd']:.2f} < min ticket ${C.MIN_TICKET_USD}"
             else:
-                # conf−0.5 residual is not fee-aware EV (rt swap ~2%). Refuse like INX
-                # residual-as-edge — stay starved. Fail closed if desk settings missing.
+                # Shared learning book can only add a skip. It cannot buy and
+                # it cannot lower the DEX floor. Market key is the mint.
+                learn_skip = ""
                 try:
                     desk = _desk()
-                    venue = float(desk.venue_min_edge("solana_dex", desk.load_settings(os.path.dirname(BASE))))
-                    need_venue = venue + (0.02 if lane == "speed" else 0.0)
+                    learn_skip = desk.learning_skip(
+                        desk.load_learning(os.path.dirname(BASE)),
+                        mint or row.get("symbol") or "",
+                        desk.prob_bucket(conf),
+                        side=str(lane or "long"),
+                        hour_ct=datetime.now(CT).hour,
+                    ) or ""
                 except Exception:
-                    need_venue = 0.02 + (0.02 if lane == "speed" else 0.0)
-                gate_reason = refuse_conf_residual_as_edge(
-                    conf, lane=str(lane or ""), venue_need=need_venue,
-                )
+                    learn_skip = ""
+                if learn_skip:
+                    gate_reason = learn_skip
+                else:
+                    # conf−0.5 residual is not fee-aware EV (rt swap ~2%). Refuse like INX
+                    # residual-as-edge — stay starved. Fail closed if desk settings missing.
+                    try:
+                        desk = _desk()
+                        venue = float(desk.venue_min_edge("solana_dex", desk.load_settings(os.path.dirname(BASE))))
+                        need_venue = venue + (0.02 if lane == "speed" else 0.0)
+                    except Exception:
+                        need_venue = 0.02 + (0.02 if lane == "speed" else 0.0)
+                    gate_reason = refuse_conf_residual_as_edge(
+                        conf, lane=str(lane or ""), venue_need=need_venue,
+                    )
         row["risk_gates_ok"] = "PASS" if not gate_reason else "FAIL"
         if gate_reason:
             record("SKIP", gate_reason)
