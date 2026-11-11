@@ -65,6 +65,9 @@ BOT_VENUE = {
     "sports-sharp-lag": "kalshi_sports",
     # FedWatch→Kalshi relative value. Economics floor 0.05. Idea-bank for main AUTO.
     "fed-watch": "kalshi_econ",
+    # Exclusive-set logger. Registry shows the sports lock. Non-sports sets
+    # use 0.05 inside the tower and never the INX 0.02 floor.
+    "exclusive-set": "kalshi_sports",
 }
 
 

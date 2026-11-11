@@ -71,6 +71,7 @@ export const FLOORS: FloorDef[] = [
       { officeId: 'tape-helper', botId: null, label: 'Tape scout', helper: true },
       { officeId: 'sports-sharp-lag', botId: 'sports-sharp-lag', label: 'Sports sharp lag' },
       { officeId: 'fed-watch', botId: 'fed-watch', label: 'Fed Watch' },
+      { officeId: 'exclusive-set', botId: 'exclusive-set', label: 'Exclusive set' },
     ],
   },
   {
