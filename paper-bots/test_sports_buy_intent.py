@@ -16,6 +16,7 @@ if GAP_DIR not in sys.path:
 
 import desk_brain
 import gap_bot
+import pimp_desk
 
 
 class SportsBuyIntent(unittest.TestCase):
@@ -143,6 +144,66 @@ class SportsBuyIntent(unittest.TestCase):
             self.assertEqual(written["exit_name"], "settled")
             self.assertEqual(written["action"], "settle")
             self.assertEqual(row["pnl"], -4.0)
+
+    def test_failsafe_reason_is_not_a_hit_and_not_a_second_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pimp_desk.record_learning(tmp, {
+                "reason": "gap-decay",
+                "market": "NBA",
+                "bucket": "0.8-0.9",
+                "stake": 6,
+                "fill_id": "g|1",
+                "side": "home",
+                "hour_ct": 11,
+            })
+            pimp_desk.record_learning(tmp, {
+                "result": "hit",
+                "reason": "gap-decay",
+                "market": "NBA",
+                "bucket": "0.8-0.9",
+                "stake": 6,
+                "fill_id": "g|1",
+                "side": "home",
+            })
+            rows = pimp_desk.load_learning(tmp)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["reason"], "gap-decay")
+            self.assertNotIn("result", rows[0])
+            self.assertEqual(
+                pimp_desk.learning_skip(rows, "NBA", "0.8-0.9", side="home", hour_ct=11),
+                "",
+            )
+
+    def test_cold_bucket_still_skips_and_a_sell_does_not_count_as_a_hit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for i in range(8):
+                pimp_desk.record_learning(tmp, {
+                    "result": "miss",
+                    "reason": "settled",
+                    "market": "NBA",
+                    "bucket": "0.8-0.9",
+                    "stake": 6,
+                    "fill_id": f"settle-{i}",
+                    "side": "home",
+                    "hour_ct": 11,
+                })
+            pimp_desk.record_learning(tmp, {
+                "reason": "model-flip fair Δ≥0.08",
+                "market": "NBA",
+                "bucket": "0.8-0.9",
+                "stake": 6,
+                "fill_id": "sold-green",
+                "side": "home",
+                "hour_ct": 11,
+            })
+            rows = pimp_desk.load_learning(tmp)
+            self.assertEqual(len(rows), 9)
+            self.assertNotIn("result", rows[-1])
+            self.assertEqual(rows[-1]["reason"], "model-flip fair Δ≥0.08")
+            skip = pimp_desk.learning_skip(rows, "NBA", "0.8-0.9", side="home", hour_ct=11)
+            self.assertIn("0/8", skip)
+            self.assertIn("under 40%", skip.lower())
+            self.assertEqual(gap_bot.MIN_GAP, 0.06)
 
 
 if __name__ == "__main__":

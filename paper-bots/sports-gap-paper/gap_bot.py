@@ -1459,7 +1459,8 @@ def run():
                 exited_this_check.add(p.get("game_key"))
             if desk is not None:
                 desk.record_learning(DESK_ROOT, {
-                    "result": "hit" if pnl > 0 else "miss",
+                    "result": "hit" if won else "miss",
+                    "reason": "settled",
                     "market": p.get("league") or "",
                     "bucket": desk.prob_bucket(p.get("fair_at_entry")),
                     "stake": p.get("risk") if p.get("risk") is not None else p.get("cost"),
@@ -2008,7 +2009,7 @@ def run():
                     pass
                 if desk is not None:
                     desk.record_learning(DESK_ROOT, {
-                        "result": "hit" if pnl > 0 else "miss",
+                        "reason": str(exit_reason or "")[:120],
                         "market": p.get("league") or "",
                         "bucket": desk.prob_bucket(p.get("fair_at_entry")),
                         "stake": p.get("risk") if p.get("risk") is not None else p.get("cost"),
