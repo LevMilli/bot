@@ -77,6 +77,44 @@ def stake_contracts(ask, max_stake=None, bankroll=None):
     return max(n, 0)
 
 
+def capped_adapt_stake(base, *, history=None, vol_kwargs=None, series="KXINXU"):
+    """Adapt may shrink the $25 stake. It may not raise it.
+
+    The one-fill cap and the daily loss limit are not inputs here.
+    """
+    try:
+        base_n = float(base)
+    except (TypeError, ValueError):
+        return 0.0, {"stake": 0.0, "capped": True, "notes": ["bad stake"]}
+    if base_n != base_n or base_n <= 0:
+        return 0.0, {"stake": 0.0, "capped": True, "notes": ["bad stake"]}
+    try:
+        import desk_adapt
+    except Exception:
+        import sys
+        parent = os.path.dirname(HERE)
+        if parent not in sys.path:
+            sys.path.insert(0, parent)
+        import desk_adapt
+    adapted, plan = desk_adapt.adapt_stake(
+        base_n,
+        history=history,
+        vol_kwargs=vol_kwargs,
+        series=series,
+    )
+    plan = dict(plan or {})
+    notes = list(plan.get("notes") or [])
+    if float(adapted) > base_n + 1e-9:
+        notes.append(f"adapt ${float(adapted):.2f} capped at ${base_n:.2f}")
+        adapted = round(base_n, 2)
+        plan["capped"] = True
+    else:
+        plan["capped"] = float(adapted) + 1e-9 < base_n
+    plan["notes"] = notes
+    plan["stake"] = round(float(adapted), 2)
+    return plan["stake"], plan
+
+
 def check_can_trade(day, bankroll, trades_today, realised_pnl_today, cfg=CFG, ignore_calendar=False):
     """Return (ok, reason). ok=False means do NOT trade."""
     if bankroll <= cfg["kill_switch_bankroll"]:

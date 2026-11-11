@@ -323,9 +323,33 @@ def step_scan(args, state, day):
             # densify_skip also records features (replaces prior local-only block).
             _densify_scan_skip(reason)
         return
-    n = risk_manager.stake_contracts(pick["ask"], bankroll=state["bankroll"])
+    stake_cap = float(CFG["max_stake_dollars"])
+    history = []
+    try:
+        if desk is not None:
+            runs = desk._load_runs(DESK_ROOT)
+            for spec in desk.BOTS:
+                if spec.get("id") != "kalshi-sp":
+                    continue
+                view = desk._bot_view(spec, DESK_ROOT, runs, desk._today())
+                history = list(view.get("history") or [])
+                break
+    except Exception:
+        history = []
+    stake_for_n, _adapt_plan = risk_manager.capped_adapt_stake(
+        stake_cap,
+        history=history,
+        vol_kwargs={"ask": pick.get("ask")},
+        series=str(CFG.get("series") or "KXINXU"),
+    )
+    n = risk_manager.stake_contracts(
+        pick["ask"], max_stake=stake_for_n, bankroll=state["bankroll"],
+    )
     if n < 1:
-        reason = "not enough paper bankroll for 1 contract after fee"
+        if stake_for_n + 1e-9 < stake_cap:
+            reason = "adapt shrunk the $25 stake below 1 contract"
+        else:
+            reason = "not enough paper bankroll for 1 contract after fee"
         print(alerts.format_skip_note(day, reason))
         if not args.dry_run:
             logger.learn(f"{day}: no trade - bankroll too small after fee", "skip")
