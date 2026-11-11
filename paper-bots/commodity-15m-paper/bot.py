@@ -417,6 +417,10 @@ def paper_sell(state: dict, pos: dict, bid: float, fee: float, reason: str) -> f
             )
     except Exception:
         pass
+    try:
+        tell_commodity_learning(closed, pnl, str(closed.get("closed") or ""))
+    except Exception:
+        pass
     return pnl
 
 
@@ -655,6 +659,29 @@ def settle_account(state: dict) -> None:
                             pos["time_stop_shadowed"] = True
         except Exception:
             pass
+        try:
+            tell_commodity_learning(pos, pnl, str(pos.get("closed") or ""))
+        except Exception:
+            pass
+        # A binary miss is the drop adapt should see. Winners stay unmarked.
+        # Time-stop stays shadow; this only cools the next new buy.
+        if float(pnl) < 0:
+            try:
+                import desk_roi_plan
+                desk_roi_plan.record_adverse_fill(
+                    DESK_ROOT,
+                    bot="commodity-15m",
+                    ticker=str(pos.get("ticker") or ""),
+                    entry_price=(
+                        pos.get("ask") if pos.get("ask") is not None
+                        else pos.get("entry") if pos.get("entry") is not None
+                        else pos.get("price")
+                    ),
+                    mark_price=0.0,
+                    note="commodity settle miss",
+                )
+            except Exception:
+                pass
     state["open"] = still
 
 
@@ -902,6 +929,136 @@ def sum_chicago_today_pnl(closed, now: dt.datetime | None = None) -> float:
     return total
 
 
+def _chicago_hour(stamp=None, now: dt.datetime | None = None) -> int | None:
+    """Hour in America/Chicago for a close stamp, or for `now` when no stamp."""
+    from zoneinfo import ZoneInfo
+    when = now
+    if when is None and stamp:
+        raw = str(stamp).strip()
+        if raw.endswith(" UTC"):
+            try:
+                when = dt.datetime.strptime(raw[:-4].strip(), "%Y-%m-%d %H:%M:%S").replace(
+                    tzinfo=dt.timezone.utc
+                )
+            except ValueError:
+                when = None
+        if when is None and raw:
+            try:
+                when = _as_utc(dt.datetime.fromisoformat(raw.replace("Z", "+00:00")))
+            except ValueError:
+                when = None
+    if when is None:
+        return None
+    try:
+        return int(_as_utc(when).astimezone(ZoneInfo("America/Chicago")).hour)
+    except Exception:
+        return None
+
+
+def commodity_learning_row(pos: dict, pnl, closed_at: str = "") -> dict | None:
+    """One real commodity close for the learning journal.
+
+    Series is the market, so a cold gold bucket does not block WTI. A missing
+    series, fill, model probability, or stake is left out — nothing is invented.
+    """
+    if not isinstance(pos, dict):
+        return None
+    series = str(pos.get("series") or "").strip()
+    fill_id = str(pos.get("fill_id") or "").strip()
+    if not series or not fill_id:
+        return None
+    prob = pos.get("fair_at_entry")
+    if prob is None:
+        prob = pos.get("p")
+    stake = pos.get("risk") if pos.get("risk") is not None else pos.get("cost")
+    try:
+        prob_n = float(prob)
+        stake_n = float(stake)
+        pnl_n = float(pnl)
+    except (TypeError, ValueError):
+        return None
+    if prob_n != prob_n or stake_n != stake_n or pnl_n != pnl_n:
+        return None
+    at = str(closed_at or pos.get("closed") or "")
+    row = {
+        "result": "hit" if pnl_n > 0 else "miss",
+        "market": series,
+        "prob": prob_n,
+        "stake": stake_n,
+        "fill_id": fill_id,
+        "side": str(pos.get("side") or "").upper(),
+        "at": at,
+    }
+    hour_ct = _chicago_hour(at)
+    if hour_ct is not None:
+        row["hour_ct"] = hour_ct
+    return row
+
+
+def tell_commodity_learning(pos: dict, pnl, closed_at: str = "") -> str:
+    """Write one close into pimp-learning. Duplicate fill_id is a no-op."""
+    row = commodity_learning_row(pos, pnl, closed_at)
+    if not row:
+        return "skip"
+    try:
+        desk = _desk()
+        rows = desk.load_learning(DESK_ROOT)
+        fill_id = row["fill_id"]
+        if any(str(item.get("fill_id") or "") == fill_id for item in rows):
+            return "duplicate"
+        desk.record_learning(DESK_ROOT, row)
+        return "recorded"
+    except Exception:
+        return "error"
+
+
+def backfill_commodity_learning(state: dict) -> int:
+    """Teach learning from closes already on the paper book. New rows only."""
+    n = 0
+    for pos in (state or {}).get("closed") or []:
+        if not isinstance(pos, dict):
+            continue
+        if tell_commodity_learning(pos, pos.get("pnl"), str(pos.get("closed") or "")) == "recorded":
+            n += 1
+    return n
+
+
+def commodity_learning_block(series, prob, side) -> str:
+    """Skip a series × bucket that is already cold. Desk error does not block."""
+    try:
+        from zoneinfo import ZoneInfo
+        desk = _desk()
+        hour_ct = dt.datetime.now(ZoneInfo("America/Chicago")).hour
+        return desk.learning_skip(
+            desk.load_learning(DESK_ROOT),
+            str(series or ""),
+            desk.prob_bucket(prob),
+            side=side,
+            hour_ct=hour_ct,
+        ) or ""
+    except Exception:
+        return ""
+
+
+def drop_worth_watching(entry, mark) -> bool:
+    """Held bid is down at least the desk adverse bar versus the entry ask."""
+    try:
+        e = float(entry)
+        m = float(mark)
+    except (TypeError, ValueError):
+        return False
+    if e != e or m != m or e <= 0:
+        return False
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import desk_roi_plan
+        bar = float(desk_roi_plan.ADVERSE_MARK_DROP)
+    except Exception:
+        return False
+    return (e - m) + 1e-12 >= bar
+
+
 def paper_buy(state: dict, ev: dict) -> str:
     none_msg = "No commodity paper buy."
     if ev.get("reasons"):
@@ -933,6 +1090,11 @@ def paper_buy(state: dict, ev: dict) -> str:
             return revenge
     except Exception:
         pass
+    # Cold series × probability bucket. Confident buckets that are still hitting
+    # stay at the $6-to-$15 ladder. This does not lower the entry bar.
+    learn = commodity_learning_block(ev.get("series"), ev.get("p"), ev.get("side"))
+    if learn:
+        return learn
     fam = series_family(str(ev.get("series") or ""))
     if fam in ("energy", "metal") and fam in open_families(state):
         return (
@@ -1156,6 +1318,12 @@ def main() -> int:
     account = load_account()
     settle_account(account)
     save_account(account)
+    try:
+        taught = backfill_commodity_learning(account)
+        if taught:
+            print(f"Learning taught from {taught} commodity closes")
+    except Exception:
+        pass
 
     try:
         import kalshi_tape
@@ -1384,8 +1552,6 @@ def main() -> int:
             for pos in list(account.get("open") or []):
                 if str(pos.get("ticker") or "") != tick:
                     continue
-                if pos.get("time_stop_shadowed"):
-                    continue
                 # Held-side listing bid — never complementary model-side ev["bid"]
                 # (BTC #456 sibling). Flip path clears open[] before all-opens densify.
                 held = str(pos.get("side") or "").upper()
@@ -1393,6 +1559,29 @@ def main() -> int:
                 if bid_ts is None and held == str(ev.get("side") or "").upper():
                     bid_ts = ev.get("bid")
                 if bid_ts is None:
+                    continue
+                entry_px = (
+                    pos.get("ask") if pos.get("ask") is not None
+                    else pos.get("entry") if pos.get("entry") is not None
+                    else pos.get("price")
+                )
+                if drop_worth_watching(entry_px, bid_ts):
+                    watched = desk_roi_plan.record_adverse_fill(
+                        DESK_ROOT,
+                        bot="commodity-15m",
+                        ticker=tick,
+                        entry_price=entry_px,
+                        mark_price=bid_ts,
+                        note="commodity open mark down — watch, no extra sell",
+                    )
+                    if watched.get("cooled") and not pos.get("drop_watch_logged"):
+                        pos["drop_watch_logged"] = True
+                        print(
+                            f"  DROP WATCH: {tick} entry={entry_px} bid={bid_ts} "
+                            f"drop={watched.get('drop')} cool={watched.get('minutes')}m"
+                        )
+                # Shadow note is once. The drop watch above still runs after that.
+                if pos.get("time_stop_shadowed"):
                     continue
                 hit = desk_roi_plan.commodity_time_stop_hit(
                     pos.get("close_time"),
