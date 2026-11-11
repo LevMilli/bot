@@ -422,8 +422,12 @@ def step_settle(args, state, day):
             print(f"Could not read {pos['ticker']} yet."); continue
         if m.get("result") not in ("yes", "no"):
             # still open: model-flip sell when desk enables it and side bid collapses under 50¢
-            bid = feed.dollars(m.get("yes_bid_dollars")) if pos["side"] == "yes" else feed.dollars(m.get("no_bid_dollars"))
-            note = f"{pos['ticker']} not settled yet (status {m.get('status')}); our side bid now {bid}"
+            raw_bid = feed.dollars(m.get("yes_bid_dollars")) if pos["side"] == "yes" else feed.dollars(m.get("no_bid_dollars"))
+            mark = paper_sim.mark_open(pos, raw_bid)
+            if mark is not None and not args.dry_run:
+                paper_sim.save_state(state)
+            shown = f"{mark:.2f}" if mark is not None else "missing"
+            note = f"{pos['ticker']} not settled yet (status {m.get('status')}); our side bid now {shown}"
             print(note)
             flip_on = True
             try:
@@ -434,10 +438,10 @@ def step_settle(args, state, day):
                 pass
             if (
                 flip_on
-                and bid is not None
-                and bid < CFG["invalidation_log_below"]
+                and paper_sim.bid_under_exit(raw_bid, CFG["invalidation_log_below"])
                 and not args.dry_run
             ):
+                bid = mark
                 # Paper sell at bid minus taker fee (honest EV; matches sports sell path).
                 contracts = float(pos.get("contracts") or 0)
                 sell_fee = float(paper_sim.taker_fee(contracts, bid))
@@ -513,8 +517,11 @@ def step_settle(args, state, day):
                 )
                 print(f"MODEL-FLIP SELL {pos['ticker']} @ {bid:.2f} pnl {pnl:+.2f}")
                 continue
-            if bid is not None and bid < CFG["invalidation_log_below"] and not args.dry_run:
-                logger.learn(f"INVALIDATION (log only): {pos['ticker']} {pos['side']} bid {bid:.2f} < 0.50", "invalidation")
+            if paper_sim.bid_under_exit(raw_bid, CFG["invalidation_log_below"]) and not args.dry_run:
+                logger.learn(
+                    f"INVALIDATION (log only): {pos['ticker']} {pos['side']} bid {mark:.2f} < 0.50",
+                    "invalidation",
+                )
             continue
         if args.dry_run:
             won = m["result"] == pos["side"]
