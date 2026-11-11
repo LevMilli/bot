@@ -294,6 +294,82 @@ def save_state(s):
         handle.flush()
     os.replace(tmp, path)
 
+
+BUY_INTENT = os.path.join(HERE, "buy_intent.json")
+BUY_EXIT_RULE = "sports-gap live exit"
+
+
+def _atomic_json(path, payload):
+    dest = path
+    if os.path.islink(dest):
+        dest = os.path.realpath(dest)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+    tmp = dest + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+        handle.write("\n")
+        handle.flush()
+    os.replace(tmp, dest)
+
+
+def load_buy_intent():
+    if not os.path.exists(BUY_INTENT):
+        return None
+    try:
+        with open(BUY_INTENT, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_buy_intent(*, fill_id, ticker, side, contracts, stake, ask):
+    """Write the crash intent before cash moves. The ask has to be a real quote."""
+    try:
+        ask_n = float(ask)
+        stake_n = float(stake)
+    except (TypeError, ValueError):
+        raise ValueError("buy intent needs the real ask and the stake") from None
+    if ask_n != ask_n or ask_n <= 0 or stake_n != stake_n or stake_n <= 0:
+        raise ValueError("buy intent needs the real ask and the stake")
+    payload = {
+        "tower": "sports-gap",
+        "fill_id": str(fill_id),
+        "ticker": str(ticker or ""),
+        "side": str(side or ""),
+        "contracts": int(contracts),
+        "stake": round(stake_n, 2),
+        "ask": ask_n,
+        "exit_rule": BUY_EXIT_RULE,
+        "paper_only": True,
+        "status": "intent",
+    }
+    if not payload["fill_id"] or not payload["ticker"]:
+        raise ValueError("buy intent needs a fill id and a ticker")
+    _atomic_json(BUY_INTENT, payload)
+    return payload
+
+
+def reconcile_buy_intent(state):
+    """Match an intent to the saved book. Never create a position or a price."""
+    intent = load_buy_intent()
+    if not isinstance(intent, dict):
+        return "none"
+    fid = str(intent.get("fill_id") or "")
+    opens = [p for p in (state or {}).get("open") or [] if isinstance(p, dict)]
+    closed = [p for p in (state or {}).get("closed") or [] if isinstance(p, dict)]
+    if fid and any(str(p.get("fill_id") or "") == fid for p in opens):
+        status = "open"
+    elif fid and any(str(p.get("fill_id") or "") == fid for p in closed):
+        status = "closed"
+    else:
+        status = "abandoned"
+    if intent.get("status") != status or intent.get("paper_only") is not True:
+        intent["status"] = status
+        intent["paper_only"] = True
+        _atomic_json(BUY_INTENT, intent)
+    return status
+
 def log(lines):
     if os.path.exists(LOG) and os.path.getsize(LOG) > 256 * 1024:
         with open(LOG, "rb") as handle:
@@ -843,6 +919,10 @@ def run():
     s = load_state()
     if not existed:
         save_state(s)
+    try:
+        reconcile_buy_intent(s)
+    except Exception:
+        pass
     # Living upgrade: CLI/standalone honors desk entry_gate (exits still run).
     try:
         if DESK_ROOT not in sys.path:
@@ -2240,6 +2320,22 @@ def run():
                         f"max open risk (${open_risk:.2f} + ${cost:.2f} > "
                         f"${max_open_risk:.2f})"
                     )
+        if reason is None:
+            fill_id = f"{m['ticker']}|{ts}"
+            if any(str(p.get("fill_id") or "") == fill_id for p in s.get("open") or []):
+                reason = "already holding this fill"
+            else:
+                try:
+                    write_buy_intent(
+                        fill_id=fill_id,
+                        ticker=m.get("ticker"),
+                        side=c.get("side"),
+                        contracts=n,
+                        stake=cost,
+                        ask=ask,
+                    )
+                except Exception as exc:
+                    reason = f"buy intent not written ({type(exc).__name__})"
         if reason:
             lines.append(row + gtxt + f" | {reason} |")
             summary_out["skips"].append(reason)
@@ -2367,7 +2463,7 @@ def run():
                "opened": ts, "score_at_entry": c["score"], "espn_id": c["g"]["id"], "espn_path": c["path"],
                "price_source": f"{KALSHI}/markets?series_ticker={c['series']}",
                "price_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-               "fill_id": f"{m['ticker']}|{ts}",
+               "fill_id": fill_id,
                "exit_plan": exit_plan}
         s["open"].append(pos)
         open_by_game[key] = pos
