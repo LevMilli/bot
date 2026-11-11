@@ -11,6 +11,7 @@ Rules (Market_Context.md + Strategy.md):
   5. Stake: floor($25 / ask) contracts, and never more than you can afford
      after Kalshi's taker fee (cost + fee ≤ bankroll). Zero contracts = no trade.
 """
+import datetime as dt
 import json
 import math
 import os
@@ -40,6 +41,19 @@ def news_skip_reason(day):
         return "WEEKEND"
     r = SKIP_DAYS.get(str(day))
     return "+".join(r) if r else None
+
+
+def noon_window_reason(now, day, entry_time_ct="12:00"):
+    """'clock' outside 12:00–2:00 PM CT. Inside that window, None.
+
+    The end is 2:00 PM. A later clock does not buy.
+    """
+    zone = getattr(now, "tzinfo", None)
+    start = dt.datetime.combine(day, dt.time.fromisoformat(str(entry_time_ct)), zone)
+    end = dt.datetime.combine(day, dt.time(14, 0), zone)
+    if start <= now <= end:
+        return None
+    return "clock"
 
 
 def _taker_fee(contracts, price, rate=None):
