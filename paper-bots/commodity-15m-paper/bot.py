@@ -846,6 +846,62 @@ def commodity_confidence_stake(
     return stake, note
 
 
+def _as_utc(when: dt.datetime) -> dt.datetime:
+    if when.tzinfo is None:
+        return when.replace(tzinfo=dt.timezone.utc)
+    return when.astimezone(dt.timezone.utc)
+
+
+def chicago_day_label(now: dt.datetime | None = None) -> str:
+    """YYYY-MM-DD in America/Chicago. The 2.0R day ends at Chicago midnight."""
+    from zoneinfo import ZoneInfo
+    if now is None:
+        now = dt.datetime.now(dt.timezone.utc)
+    return _as_utc(now).astimezone(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+
+
+def closed_stamp_chicago_day(stamp) -> str | None:
+    """Chicago day of a commodity close stamp.
+
+    Stamps are written as ``YYYY-MM-DD HH:MM:SS UTC``. The first ten characters
+    are the UTC date, which rolls at 6:00 PM CT. Parse the instant, then convert.
+    """
+    raw = str(stamp or "").strip()
+    if not raw:
+        return None
+    when = None
+    if raw.endswith(" UTC"):
+        try:
+            when = dt.datetime.strptime(raw[:-4].strip(), "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=dt.timezone.utc
+            )
+        except ValueError:
+            when = None
+    if when is None:
+        try:
+            when = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        when = _as_utc(when)
+    return chicago_day_label(when)
+
+
+def sum_chicago_today_pnl(closed, now: dt.datetime | None = None) -> float:
+    """PnL of closes that fall on the current America/Chicago day."""
+    day = chicago_day_label(now)
+    total = 0.0
+    for pos in closed or []:
+        if not isinstance(pos, dict):
+            continue
+        if closed_stamp_chicago_day(pos.get("closed")) != day:
+            continue
+        try:
+            total += float(pos.get("pnl") or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
 def paper_buy(state: dict, ev: dict) -> str:
     none_msg = "No commodity paper buy."
     if ev.get("reasons"):
@@ -1632,16 +1688,8 @@ def main() -> int:
         )
     except Exception:
         pass
-    today_pnl = 0.0
-    today_tag = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
-    for pos in account.get("closed") or []:
-        if not isinstance(pos, dict):
-            continue
-        if today_tag in str(pos.get("closed") or ""):
-            try:
-                today_pnl += float(pos.get("pnl") or 0)
-            except (TypeError, ValueError):
-                pass
+    # 2.0R ($40) settle-only uses the Chicago day. A UTC date rolls at 6:00 PM CT.
+    today_pnl = sum_chicago_today_pnl(account.get("closed"))
     try:
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
