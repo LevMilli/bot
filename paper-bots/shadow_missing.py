@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Shared engine for the nine paper shadows that buy nothing.
 
-Each tower looks in the repo for its own series ticker. A game-winner ticker,
-a 15-minute series, or a spot symbol is not that ticker. When the series is
-not named, the tower records that and skips. It does not invent a ticker, a
-fill, or a fair price. Stake stays 0. Live orders stay off.
+Each tower reads its series from the public API. A game-winner ticker, a
+15-minute series, or a spot symbol is not that series. A listed series logs
+the open book and still buys nothing. A series the public API does not list
+is named on the card, and that check skips. No ticker, fill, or fair price
+is invented. Stake stays 0. Live orders stay off.
 """
 from __future__ import annotations
 
@@ -14,6 +15,8 @@ import math
 import os
 import re
 import sys
+import urllib.parse
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -30,6 +33,36 @@ BINARY_FLOOR = 0.05
 MENTIONS_CLEAR = 0.05
 INX_FLOOR = 0.02
 
+KALSHI = "https://api.elections.kalshi.com/trade-api/v2"
+KALSHI_SEARCH = "https://api.elections.kalshi.com/v1/search/series"
+POLY_EVENTS = "https://gamma-api.polymarket.com/events"
+UA = {"User-Agent": "paper-bots-shadow/1.0 (paper-only read)", "Accept": "application/json"}
+CARD_LIMIT = 200
+
+# Series titles read from the public API on 2026-11-11. Game-winner, 15-minute,
+# and one-touch tickers are intentionally not in these lists.
+SPREAD_SERIES = (
+    "KXNFLSPREAD", "KXNCAAFSPREAD", "KXNBASPREAD",
+    "KXWNBASPREAD", "KXMLBSPREAD", "KXNHLSPREAD",
+)
+TOTAL_SERIES = (
+    "KXNFLTOTAL", "KXNCAAFTOTAL", "KXNBATOTAL",
+    "KXWNBATOTAL", "KXMLBTOTAL", "KXNHLTOTAL",
+)
+PROP_SERIES = (
+    "KXNFLPASSYDS", "KXNFLRSHYDS", "KXNFLRECYDS", "KXNFLREC", "KXNFLTD",
+    "KXNBAPTS", "KXNBAREB", "KXNBAAST", "KXNBA3PT",
+    "KXNHLGOAL", "KXNHLPTS",
+    "KXMLBHIT", "KXMLBHR", "KXMLBKS",
+    "KXWNBAPTS", "KXWNBAREB", "KXWNBA3PT", "KXWNBAAST",
+)
+PERIOD_SERIES = (
+    "KXNFL1H", "KXNCAAF1H", "KXNBA1H", "KXWNBA1H", "KXMLBF5", "KXNHL1P",
+)
+UCL_SERIES = ("KXUCLGAME",)
+ESPORTS_SERIES = ("KXLOLGAME", "KXCS2GAME", "KXVALORANTGAME", "KXDOTA2GAME")
+MENTION_SERIES = ("mention-markets",)
+
 _TICKER = re.compile(r"\bKX[A-Z0-9]{3,}\b")
 _QUOTED = re.compile(r"""['"]([^'"]+)['"]""")
 _FLOAT = re.compile(r"[-+]?(?:\d+\.\d+|\d+)(?:[eE][-+]?\d+)?")
@@ -43,6 +76,8 @@ TOWERS = (
         "venue": "kalshi_sports",
         "floor": SPORTS_FLOOR,
         "series_attrs": ("SPREAD_SERIES", "POINT_SPREAD_SERIES"),
+        "public_series": SPREAD_SERIES,
+        "book": "kalshi",
         "reject_attrs": ("SPORTS",),
         "spread_cap_attr": "MAX_SPREAD",
         "rule": (
@@ -58,6 +93,8 @@ TOWERS = (
         "venue": "kalshi_sports",
         "floor": SPORTS_FLOOR,
         "series_attrs": ("TOTAL_SERIES", "GAME_TOTAL_SERIES"),
+        "public_series": TOTAL_SERIES,
+        "book": "kalshi",
         "reject_attrs": ("SPORTS",),
         "spread_cap_attr": "MAX_SPREAD",
         "rule": (
@@ -73,6 +110,10 @@ TOWERS = (
         "venue": "kalshi_commodity15m",
         "floor": BINARY_FLOOR,
         "series_attrs": ("CALENDAR_SERIES", "COMMODITY_CALENDAR_SERIES"),
+        "public_series": (),
+        "book": "kalshi",
+        "discover": {"queries": ("WTI calendar", "gold calendar"), "mode": "calendar"},
+        "absent": "Kalshi does not list a WTI or gold calendar-spread series. This check skips.",
         "reject_attrs": ("SERIES",),
         "commission_attrs": ("CALENDAR_COMMISSION", "COMMODITY_CALENDAR_COMMISSION"),
         "deferred_attrs": ("DEFERRED_MONTH", "CALENDAR_MONTHS"),
@@ -92,6 +133,9 @@ TOWERS = (
         "venue": "kalshi_sports",
         "floor": SPORTS_FLOOR,
         "series_attrs": ("PROP_SERIES", "PLAYER_PROP_SERIES"),
+        "public_series": PROP_SERIES,
+        "book": "kalshi",
+        "public_gap": "No college-football player-prop series turned up on the public API.",
         "reject_attrs": ("SPORTS",),
         "spread_cap_attr": "MAX_SPREAD",
         "rule": (
@@ -107,6 +151,8 @@ TOWERS = (
         "venue": "kalshi_sports",
         "floor": SPORTS_FLOOR,
         "series_attrs": ("PERIOD_SERIES", "FIRST_HALF_SERIES"),
+        "public_series": PERIOD_SERIES,
+        "book": "kalshi",
         "reject_attrs": ("SPORTS",),
         "rule": (
             "First-half or period winner, not the full game. "
@@ -121,6 +167,10 @@ TOWERS = (
         "venue": "kalshi_btc15m",
         "floor": BINARY_FLOOR,
         "series_attrs": ("BTC_OPTIONS_SERIES", "OPTIONS_SERIES"),
+        "public_series": (),
+        "book": "kalshi",
+        "discover": {"queries": ("bitcoin option", "BTC options"), "mode": "btc-option"},
+        "absent": "Kalshi does not list a BTC options series. This check skips.",
         "reject_attrs": ("CRYPTO_SERIES",),
         "commission_attrs": ("OPTIONS_COMMISSION", "BTC_OPTIONS_COMMISSION"),
         "binary_floor_not_a_fee": True,
@@ -139,6 +189,8 @@ TOWERS = (
         "venue": "kalshi_sports",
         "floor": SPORTS_FLOOR,
         "series_attrs": ("UCL_SERIES", "CHAMPIONS_LEAGUE_SERIES"),
+        "public_series": UCL_SERIES,
+        "book": "kalshi",
         "reject_attrs": ("SPORTS",),
         "rule": (
             "UEFA Champions League game winner. It is not a league in the six-sport book. "
@@ -153,6 +205,8 @@ TOWERS = (
         "venue": "kalshi_econ",
         "floor": MENTIONS_CLEAR,
         "series_attrs": ("MENTION_MARKETS", "MENTION_SERIES"),
+        "public_series": MENTION_SERIES,
+        "book": "polymarket",
         "quoted_series": True,
         "taker_attr": "POLYMARKET_TAKER_RATE",
         "taker_key": "mentions",
@@ -170,6 +224,8 @@ TOWERS = (
         "venue": "kalshi_sports",
         "floor": SPORTS_FLOOR,
         "series_attrs": ("ESPORTS_SERIES", "ESPORTS_MATCH_SERIES"),
+        "public_series": ESPORTS_SERIES,
+        "book": "kalshi",
         "reject_attrs": ("SPORTS",),
         "rule": (
             "Match winner in a titled esports league. It is not in the six-sport book. "
@@ -224,7 +280,27 @@ def locked_cfg(spec: dict, raw: dict | None = None) -> dict:
     return cfg
 
 
-def evaluate(tower_id: str, desk_root: str | None = None, registry: dict | None = None) -> dict:
+def series_plan(spec: dict, found: dict[str, str]) -> dict:
+    """Which names this check may read. An assigned name replaces the public list."""
+    rejected = _rejected(spec, found)
+    assigned = any(name in found for name in (spec.get("series_attrs") or ()))
+    if assigned:
+        names = [name for name in _series_tokens(spec, found) if name not in rejected]
+        return {"mode": "assigned", "names": names, "rejected": rejected}
+    names = [name for name in (spec.get("public_series") or ()) if name not in rejected]
+    if names:
+        return {"mode": "public", "names": names, "rejected": rejected}
+    if spec.get("discover"):
+        return {"mode": "discover", "names": [], "rejected": rejected}
+    return {"mode": "absent", "names": [], "rejected": rejected}
+
+
+def evaluate(
+    tower_id: str,
+    desk_root: str | None = None,
+    registry: dict | None = None,
+    book: dict | None = None,
+) -> dict:
     """One log row. Buys nothing. A missing series is a skip, not a sample."""
     spec = spec_for(tower_id)
     desk_root = desk_root or HERE
@@ -232,24 +308,35 @@ def evaluate(tower_id: str, desk_root: str | None = None, registry: dict | None 
     found = _scan(desk_root)
     if registry:
         _apply_registry(found, registry)
-    rejected = _rejected(spec, found)
-    series = [name for name in _series_tokens(spec, found) if name not in rejected]
+    plan = series_plan(spec, found)
+    rejected = plan["rejected"]
     commission = _commission(spec, found)
     deferred = _deferred(spec, found)
     front = _front_symbols(spec, found)
     taker = _taker_rate(spec, found)
     cap = _spread_cap(spec, found)
-    missing = not series
-    if spec.get("deferred_attrs") and not deferred:
-        missing = True
-    reason = _reason(spec, missing=missing, commission=commission, series=series)
+    view = _apply_book(spec, plan, book)
+    series = view["series"]
+    reason = view["reason"]
+    if series and spec.get("commission_attrs") and commission is None:
+        note = "No public commission is on file for this series."
+        if spec["id"] == "btc-options":
+            note = "No public options commission is on file."
+        if spec["id"] == "commodity-calendar":
+            note = "No public futures commission is on file."
+        reason = _fit([reason, note])
     row = {
         "tower": spec["id"],
         "action": "skip",
         "reason": reason,
-        "ticker_missing": missing,
+        "ticker_missing": view["ticker_missing"],
         "series": series,
         "rejected_series": sorted(rejected),
+        "book": view["quotes"],
+        "book_n": len(view["quotes"]),
+        "book_empty": view["book_empty"],
+        "empty_series": view["empty"],
+        "sample": view["sample"],
         "commission": commission,
         "deferred_month": deferred,
         "front_symbols": front,
@@ -280,6 +367,396 @@ def evaluate(tower_id: str, desk_root: str | None = None, registry: dict | None 
     return row
 
 
+def _apply_book(spec: dict, plan: dict, book: dict | None) -> dict:
+    """Turn a public read into the card line. Never invents a quote."""
+    names = list(plan["names"])
+    rejected = set(plan["rejected"])
+    quotes: list[dict] = []
+    empty: list[str] = []
+    missing: list[str] = []
+    unread: list[str] = []
+    discovered = False
+    if isinstance(book, dict):
+        discovered = bool(book.get("discovered"))
+        missing = [name for name in (book.get("missing") or []) if name not in rejected]
+        unread = [str(name) for name in (book.get("unread") or []) if str(name)]
+        if book.get("error"):
+            unread = unread or ["*"]
+        if plan["mode"] == "discover":
+            names = [name for name in (book.get("series") or []) if name not in rejected]
+        elif plan["mode"] != "assigned":
+            names = [name for name in names if name not in set(missing)]
+        wanted = set(names)
+        for quote in book.get("quotes") or []:
+            if not isinstance(quote, dict):
+                continue
+            series = str(quote.get("series") or "")
+            if wanted and series not in wanted:
+                continue
+            if series in rejected:
+                continue
+            quotes.append(quote)
+        empty = [name for name in (book.get("empty") or []) if name in wanted]
+    sample = _sample_quote(quotes)
+    sample_text = str(sample.get("ticker") or "") if sample else ""
+    saw_book = isinstance(book, dict) and not unread
+    if unread and not quotes:
+        reason = "The public book could not be read. This check skips."
+        return _view(names, quotes, empty, not names, False, reason, sample_text)
+    if not names:
+        if plan["mode"] == "assigned":
+            reason = "The assigned series is not this contract. This check skips."
+        else:
+            reason = str(spec.get("absent") or "The public API does not list a series for this. This check skips.")
+        return _view([], [], empty, True, False, reason, "")
+    if quotes:
+        reason = _live_card(spec, quotes, empty)
+        return _view(names, quotes, empty, False, False, reason, sample_text)
+    if saw_book:
+        reason = _empty_card(spec, names)
+        return _view(names, [], empty, False, True, reason, "")
+    reason = _listed_card(names)
+    return _view(names, [], empty, False, False, reason, "")
+
+
+def _view(series, quotes, empty, missing, book_empty, reason, sample) -> dict:
+    return {
+        "series": list(series),
+        "quotes": list(quotes),
+        "empty": list(empty),
+        "ticker_missing": bool(missing),
+        "book_empty": bool(book_empty),
+        "reason": reason,
+        "sample": sample,
+    }
+
+
+def _live_card(spec: dict, quotes: list[dict], empty: list[str]) -> str:
+    sample = _sample_quote(quotes)
+    if not sample:
+        return _empty_card(spec, [])
+    bits = ["Logged", str(sample.get("series") or ""), str(sample.get("ticker") or "")]
+    if sample.get("bid") is not None:
+        bits.append(f"bid {_money(sample['bid'])}")
+    if sample.get("ask") is not None:
+        bits.append(f"ask {_money(sample['ask'])}")
+    open_names = []
+    seen = set()
+    for quote in quotes:
+        name = str(quote.get("series") or "")
+        if name and name not in seen:
+            seen.add(name)
+            open_names.append(name)
+    sentences = [
+        " ".join(bit for bit in bits if bit).strip() + ".",
+        f"{len(open_names)} open series, {len(empty)} empty.",
+        "No fill.",
+    ]
+    gap = str(spec.get("public_gap") or "").strip()
+    if gap:
+        sentences.append(gap)
+    return _fit(sentences)
+
+
+def _empty_card(spec: dict, names: list[str]) -> str:
+    if spec.get("book") == "polymarket":
+        return "Polymarket mention-markets has no open market. This check skips."
+    shown = _join_names(names, 4)
+    sentences = [f"Listed {shown}.", "The open book is empty.", "No fill."]
+    gap = str(spec.get("public_gap") or "").strip()
+    if gap:
+        sentences.append(gap)
+    return _fit(sentences)
+
+
+def _listed_card(names: list[str]) -> str:
+    return _fit([
+        f"Listed {_join_names(names, 6)}.",
+        "No public book on this check.",
+        "No fill.",
+    ])
+
+
+def _join_names(names: list[str], cap: int) -> str:
+    clean = [str(name) for name in names if name]
+    if len(clean) <= cap:
+        return ", ".join(clean)
+    extra = len(clean) - cap
+    return ", ".join(clean[:cap]) + f" and {extra} more"
+
+
+def _sample_quote(quotes: list[dict]) -> dict | None:
+    two = [row for row in quotes if row.get("bid") is not None and row.get("ask") is not None]
+    if two:
+        return two[0]
+    return quotes[0] if quotes else None
+
+
+def _money(value) -> str:
+    text = f"{float(value):.4f}".rstrip("0").rstrip(".")
+    if "." not in text:
+        return text + ".00"
+    if len(text.split(".", 1)[1]) < 2:
+        return text + "0"
+    return text
+
+
+def _fit(sentences: list[str], limit: int = CARD_LIMIT) -> str:
+    kept = []
+    for sentence in sentences:
+        sentence = " ".join(str(sentence).split())
+        if not sentence:
+            continue
+        trial = " ".join(kept + [sentence])
+        if len(trial) <= limit:
+            kept.append(sentence)
+    if kept:
+        return " ".join(kept)
+    return " ".join(str(sentences[0]).split())[:limit]
+
+
+def load_public_book(spec: dict, found: dict[str, str], opener=None) -> dict:
+    """Read the public book for this tower. A failed read is not a ticker."""
+    plan = series_plan(spec, found)
+    rejected = set(plan["rejected"])
+    names = list(plan["names"])
+    discovered = False
+    if plan["mode"] == "discover":
+        discovered = True
+        try:
+            names = _discover_series(spec, rejected, opener)
+        except Exception:
+            return {
+                "series": [], "quotes": [], "empty": [], "missing": [],
+                "unread": ["*"], "discovered": True, "error": True,
+            }
+    if spec.get("book") == "polymarket" and plan["mode"] != "assigned":
+        try:
+            book = _polymarket_book(names or list(MENTION_SERIES), opener)
+        except Exception:
+            return {
+                "series": list(names), "quotes": [], "empty": [], "missing": [],
+                "unread": ["*"], "discovered": False, "error": True,
+            }
+        book["discovered"] = False
+        return book
+    quotes: list[dict] = []
+    empty: list[str] = []
+    missing: list[str] = []
+    unread: list[str] = []
+    confirmed: list[str] = []
+    for name in names:
+        if name in rejected:
+            continue
+        try:
+            rows = _kalshi_markets(name, opener)
+        except Exception as exc:
+            if _is_missing(exc):
+                missing.append(name)
+            else:
+                unread.append(name)
+            continue
+        got = _quotes_from_markets(name, rows)
+        if got:
+            quotes.extend(got)
+            confirmed.append(name)
+            continue
+        try:
+            exists = _series_exists(name, opener)
+        except Exception as exc:
+            if _is_missing(exc):
+                missing.append(name)
+            else:
+                unread.append(name)
+            continue
+        if exists:
+            empty.append(name)
+            confirmed.append(name)
+        else:
+            missing.append(name)
+    if plan["mode"] == "discover":
+        series = confirmed
+    else:
+        series = [name for name in names if name not in set(missing)]
+    return {
+        "series": series,
+        "quotes": quotes,
+        "empty": empty,
+        "missing": missing,
+        "unread": unread,
+        "discovered": discovered,
+        "error": False,
+    }
+
+
+def _discover_series(spec: dict, rejected: set[str], opener) -> list[str]:
+    found: list[str] = []
+    seen = set()
+    for query in (spec.get("discover") or {}).get("queries") or ():
+        url = KALSHI_SEARCH + "?" + urllib.parse.urlencode({"query": query, "page_size": 20})
+        data = _decode_body(_fetch(url, opener))
+        rows = data.get("current_page") if isinstance(data, dict) else None
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            ticker = str(row.get("series_ticker") or "").strip().upper()
+            title = str(row.get("series_title") or "")
+            if not ticker or ticker in seen or ticker in rejected:
+                continue
+            if not _discover_ok(spec, ticker, title):
+                continue
+            seen.add(ticker)
+            found.append(ticker)
+    return found
+
+
+def _discover_ok(spec: dict, ticker: str, title: str) -> bool:
+    mode = str((spec.get("discover") or {}).get("mode") or "")
+    text = f"{ticker} {title}".lower()
+    if ticker in ("KXBTC15M", "KXETH15M", "KXBTCD"):
+        return False
+    if "15m" in ticker.lower() or "15-minute" in text or "15 minute" in text:
+        return False
+    if mode == "calendar":
+        return ("calendar" in text) and any(word in text for word in ("wti", "gold", "crude"))
+    if mode == "btc-option":
+        if "one touch" in text or "one-touch" in text:
+            return False
+        return ("option" in text) and any(word in text for word in ("bitcoin", "btc"))
+    return False
+
+
+def _polymarket_book(names: list[str], opener) -> dict:
+    tag = names[0] if names else "mention-markets"
+    url = POLY_EVENTS + "?" + urllib.parse.urlencode({
+        "closed": "false",
+        "limit": 20,
+        "tag_slug": tag,
+    })
+    data = _decode_body(_fetch(url, opener))
+    events = data if isinstance(data, list) else []
+    quotes = []
+    for event in events:
+        if not isinstance(event, dict) or event.get("closed") is True:
+            continue
+        for market in event.get("markets") or []:
+            if not isinstance(market, dict) or market.get("closed") is True:
+                continue
+            slug = str(market.get("slug") or "").strip()
+            bid = _px(market.get("bestBid"))
+            ask = _px(market.get("bestAsk"))
+            if not slug or (bid is None and ask is None):
+                continue
+            quotes.append({"series": tag, "ticker": slug, "bid": bid, "ask": ask})
+            if len(quotes) >= 12:
+                break
+        if len(quotes) >= 12:
+            break
+    if quotes:
+        return {"series": [tag], "quotes": quotes, "empty": [], "missing": [], "unread": [], "error": False}
+    return {"series": [tag], "quotes": [], "empty": [tag], "missing": [], "unread": [], "error": False}
+
+
+def _kalshi_markets(series: str, opener) -> list:
+    url = f"{KALSHI}/markets?series_ticker={urllib.parse.quote(series)}&status=open&limit=20"
+    data = _decode_body(_fetch(url, opener))
+    if isinstance(data, dict) and _error_missing(data):
+        return []
+    rows = data.get("markets") if isinstance(data, dict) else None
+    return list(rows or [])
+
+
+def _quotes_from_markets(series: str, rows: list) -> list[dict]:
+    out = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        ticker = str(row.get("ticker") or "").strip()
+        if not ticker:
+            continue
+        bid = _px(row.get("yes_bid_dollars"))
+        if bid is None:
+            bid = _px(row.get("yes_bid"))
+        ask = _px(row.get("yes_ask_dollars"))
+        if ask is None:
+            ask = _px(row.get("yes_ask"))
+        if bid is None and ask is None:
+            continue
+        out.append({"series": series, "ticker": ticker, "bid": bid, "ask": ask})
+        if len(out) >= 8:
+            break
+    return out
+
+
+def _series_exists(series: str, opener) -> bool:
+    url = f"{KALSHI}/series/{urllib.parse.quote(series)}"
+    try:
+        data = _decode_body(_fetch(url, opener))
+    except Exception as exc:
+        if _is_missing(exc):
+            return False
+        raise
+    if not isinstance(data, dict) or _error_missing(data):
+        return False
+    body = data.get("series") if isinstance(data.get("series"), dict) else data
+    ticker = str((body or {}).get("ticker") or "").upper()
+    return ticker == series.upper() or bool((body or {}).get("title"))
+
+
+def _px(value):
+    number = _num(value)
+    if number is None:
+        return None
+    if number > 1.0 and number <= 100.0:
+        number = number / 100.0
+    if number <= 0.0 or number >= 1.0:
+        return None
+    return round(number, 4)
+
+
+def _fetch(url: str, opener):
+    opener = opener or _default_opener
+    return opener(url)
+
+
+def _default_opener(url: str):
+    req = urllib.request.Request(url, headers=UA)
+    with urllib.request.urlopen(req, timeout=8) as response:
+        return response.read()
+
+
+def _decode_body(blob):
+    if isinstance(blob, (dict, list)):
+        return blob
+    if blob is None:
+        return {}
+    try:
+        if isinstance(blob, bytes):
+            blob = blob.decode("utf-8", errors="replace")
+        data = json.loads(blob)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    if isinstance(data, (dict, list)):
+        return data
+    return {}
+
+
+def _error_missing(data: dict) -> bool:
+    err = data.get("error")
+    if isinstance(err, dict):
+        code = str(err.get("code") or err.get("message") or "").lower()
+        return "not_found" in code or "not found" in code or code == "404"
+    return False
+
+
+def _is_missing(exc: BaseException) -> bool:
+    code = getattr(exc, "code", None)
+    if code == 404:
+        return True
+    text = str(exc).lower()
+    return "404" in text or "not_found" in text or "not found" in text
+
+
 def empty_state() -> dict:
     return {
         "cash": 0.0,
@@ -301,6 +778,10 @@ def run_once(
     now: dt.datetime | None = None,
     registry: dict | None = None,
     cfg: dict | None = None,
+    *,
+    fetch: bool = True,
+    opener=None,
+    book: dict | None = None,
 ) -> int:
     spec = spec_for(tower_id)
     desk_root = desk_root or HERE
@@ -308,7 +789,12 @@ def run_once(
     os.makedirs(tower, exist_ok=True)
     locked_cfg(spec, cfg if cfg is not None else _read_json(os.path.join(tower, "config.json")))
     now = now or dt.datetime.now(dt.timezone.utc)
-    decision = evaluate(tower_id, desk_root=desk_root, registry=registry)
+    if book is None and fetch:
+        found = _scan(desk_root)
+        if registry:
+            _apply_registry(found, registry)
+        book = load_public_book(spec, found, opener)
+    decision = evaluate(tower_id, desk_root=desk_root, registry=registry, book=book)
     added = _append_evidence(tower, decision, now)
     state = _read_json(os.path.join(tower, "paper_account.json")) or empty_state()
     if not isinstance(state, dict):
@@ -329,6 +815,8 @@ def run_once(
         "ticker_missing": bool(decision.get("ticker_missing")),
         "series": list(decision.get("series") or []),
         "reason": decision.get("reason") or "",
+        "sample": decision.get("sample") or "",
+        "book_n": int(decision.get("book_n") or 0),
         "fair": None,
         "fill": None,
     })
@@ -338,21 +826,8 @@ def run_once(
     return 0
 
 
-def _reason(spec: dict, *, missing: bool, commission, series: list) -> str:
-    parts = []
-    if not series:
-        parts.append("series ticker is not in the repo")
-    elif spec.get("deferred_attrs") and missing:
-        parts.append("deferred month is not in the repo")
-    if spec.get("commission_attrs") and commission is None:
-        parts.append("commission is not in the repo")
-    if parts:
-        return "; ".join(parts)
-    return "series is named; no public book, so no fill and no fair are logged"
-
-
 def _emit(decision: dict) -> None:
-    reason = str(decision.get("reason") or "series ticker is not in the repo")
+    reason = str(decision.get("reason") or "The public book could not be read. This check skips.")
     print("SIGNAL: SKIP " + reason)
     print("CARD: " + reason)
     print("no trade")
@@ -361,7 +836,7 @@ def _emit(decision: dict) -> None:
 def _append_evidence(tower: str, decision: dict, now: dt.datetime) -> list[dict]:
     """One standing skip line. A missing ticker is not evidence and is not repeated."""
     path = os.path.join(tower, "evidence.jsonl")
-    key = (str(decision.get("reason") or ""), tuple(decision.get("series") or []))
+    key = _standing_key(decision)
     if key in _evidence_keys(path):
         return []
     payload = dict(decision)
@@ -372,6 +847,18 @@ def _append_evidence(tower: str, decision: dict, now: dt.datetime) -> list[dict]
     with open(path, "a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, sort_keys=True) + "\n")
     return [payload]
+
+
+def _standing_key(row: dict) -> tuple:
+    if row.get("ticker_missing"):
+        status = "missing"
+    elif row.get("book"):
+        status = "live"
+    elif row.get("book_empty"):
+        status = "empty"
+    else:
+        status = "listed"
+    return (status, tuple(row.get("series") or []))
 
 
 def _evidence_keys(path: str) -> set[tuple]:
@@ -390,7 +877,7 @@ def _evidence_keys(path: str) -> set[tuple]:
                     continue
                 if not isinstance(row, dict):
                     continue
-                seen.add((str(row.get("reason") or ""), tuple(row.get("series") or [])))
+                seen.add(_standing_key(row))
     except OSError:
         return seen
     return seen

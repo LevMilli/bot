@@ -433,8 +433,26 @@ def run_once(
     return 0
 
 
+def _real_baskets(decisions: list[dict]) -> list[dict]:
+    """Public events with every leg priced. The three source examples stay out."""
+    rows = []
+    for row in decisions or []:
+        if row.get("example") or row.get("refused"):
+            continue
+        if str(row.get("source") or "") in EXAMPLE_SOURCES:
+            continue
+        if str(row.get("label") or "") in EXAMPLE_LABELS:
+            continue
+        event = str(row.get("event") or "").strip()
+        if not event or len(row.get("legs") or []) < 2:
+            continue
+        rows.append(row)
+    return rows
+
+
 def _emit(decisions: list[dict]) -> None:
-    logged = [row for row in decisions if row.get("counts_as_evidence")]
+    real = _real_baskets(decisions)
+    logged = [row for row in real if row.get("counts_as_evidence")]
     if logged:
         row = logged[0]
         print(
@@ -442,6 +460,14 @@ def _emit(decisions: list[dict]) -> None:
             f"floor {float(row.get('floor') or 0):.2f}"
         )
         print(f"CARD: logged {row.get('event')} — buys nothing")
+    elif real:
+        row = real[0]
+        reason = str(row.get("reason") or "no basket clears the floor")
+        print("SIGNAL: SKIP " + reason)
+        print(
+            f"CARD: Logged {len(real)} mutually exclusive baskets. "
+            f"{row.get('event')}: {reason}. Buys nothing."
+        )
     elif not decisions:
         print("SIGNAL: SKIP waiting on a public exclusive set")
         print("CARD: waiting on a public exclusive set")

@@ -229,6 +229,40 @@ class ExclusiveSetTests(unittest.TestCase):
             self.assertFalse(any(event.startswith("KXINXU") for event in events))
             self.assertIn("no trade", buf.getvalue())
 
+    def test_a_real_overround_is_named_and_the_examples_are_not(self):
+        bot = _bot()
+        markets = [
+            _market("KXNFLGAME-26NOV16LACBAL", "KXNFLGAME-26NOV16LACBAL-LAC", 0.55, "KXNFLGAME"),
+            _market("KXNFLGAME-26NOV16LACBAL", "KXNFLGAME-26NOV16LACBAL-BAL", 0.52, "KXNFLGAME"),
+            {"yes_ask_dollars": 0.52, "ticker": "HOME", "source": "dutch_book_observe", "label": "overround_sports"},
+            {"yes_ask_dollars": 0.52, "ticker": "AWAY", "source": "dutch_book_observe", "label": "overround_sports"},
+            {"yes_ask_dollars": 0.44, "ticker": "HOME2", "source": "example", "label": "underround_sports"},
+            {"yes_ask_dollars": 0.44, "ticker": "AWAY2", "source": "example", "label": "underround_sports"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                bot.run_once(desk_root=tmp, markets=markets, fetch=False)
+            out = buf.getvalue()
+            self.assertIn("KXNFLGAME-26NOV16LACBAL", out)
+            self.assertIn("mutually exclusive", out)
+            self.assertIn("overround", out.lower())
+            self.assertIn("Buys nothing", out)
+            self.assertNotIn("BUY", out)
+            self.assertNotIn("underround_sports", out)
+            self.assertNotIn("overround_sports", out)
+            self.assertNotIn("thin_underround", out)
+            with open(os.path.join(tmp, "exclusive-set-paper", "paper_account.json"), encoding="utf-8") as handle:
+                state = json.load(handle)
+            self.assertEqual(state["cash"], 0.0)
+            self.assertEqual(state["open"], [])
+            self.assertEqual(state["buys"], 0)
+            self.assertEqual(state["stake_usd"], 0.0)
+            self.assertFalse(state["live_orders"])
+            with open(os.path.join(tmp, "exclusive-set-paper", "evidence.jsonl"), encoding="utf-8") as handle:
+                evidence = [line for line in handle if line.strip()]
+            self.assertEqual(evidence, [])
+
     def test_desk_row_is_shadow_without_a_stake(self):
         spec = next(row for row in pimp_desk.BOTS if row["id"] == "exclusive-set")
         self.assertTrue(spec["shadow_only"])

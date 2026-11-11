@@ -13,7 +13,7 @@ Same-venue shadow logger. It reads mutually exclusive Kalshi legs of one event a
 5. The INX floor of 0.02 is not this tower's floor. `KXINXU` is refused.
 6. A logged basket is not a position. Stake stays 0. There is no desk risk share.
 
-The three baskets in `dutch_book_observe` stay examples. They are not read and they do not count as evidence. A future paper buy is not in this tower. It would wait for 30 settled public sets with taxed EV at least 0, then incubation n ≥ 50 before any desk share. Live orders stay off.
+The three baskets in `dutch_book_observe` stay examples. They are not read and they do not count as evidence. A check logs the public mutually exclusive baskets it actually reads, including a basket that is only the house edge, and names that event on the card. A future paper buy is not in this tower. It would wait for 30 settled public sets with taxed EV at least 0, then incubation n ≥ 50 before any desk share. Live orders stay off.
 
 ## Run
 
