@@ -30,6 +30,38 @@ BUY_INTENT = os.path.join(HERE, "buy_intent.json")
 BUY_EXIT_RULE = "model-flip bid under 50c"
 
 
+def real_side_bid(bid):
+    """A bid inside (0, 1). Missing, zero, and a wipe are not a mark."""
+    try:
+        number = float(bid)
+    except (TypeError, ValueError):
+        return None
+    if number != number or not (0.0 < number < 1.0):
+        return None
+    return number
+
+
+def mark_open(pos, bid):
+    """Store the real bid on the open contract. A missing bid stays missing."""
+    mark = real_side_bid(bid)
+    if mark is None or not isinstance(pos, dict):
+        return None
+    pos["last_mark"] = mark
+    return mark
+
+
+def bid_under_exit(bid, floor=0.50) -> bool:
+    """Under 50¢ is the exit signal. A missing bid is not under 50¢."""
+    mark = real_side_bid(bid)
+    if mark is None:
+        return False
+    try:
+        bar = float(floor)
+    except (TypeError, ValueError):
+        bar = 0.50
+    return mark < bar
+
+
 def second_fill_block(trades_today, max_trades=1) -> str:
     """One paper buy per Chicago day. A later candidate is a skip."""
     try:
