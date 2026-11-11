@@ -453,6 +453,68 @@ def kalshi_fee(price: float) -> float:
     return math.ceil(round(0.07 * float(price) * (1.0 - float(price)) * 100, 6)) / 100
 
 
+def exit_that_fired(reason):
+    """Name the close. A model-flip stays model-flip. A settle stays settled."""
+    text = str(reason or "")
+    if "model-flip" in text:
+        return "model-flip"
+    if text.strip() == "settled":
+        return "settled"
+    return text[:120]
+
+
+def record_close(pos, *, cash, reason, bid=None, fee=None, root=None):
+    """Stamp the close, the bid, the fee, and the reason. Do not edit P/L.
+
+    The cash figure is the book after this close. It is not a typed year-to-date.
+    A bid is stored only when it is a real held-side quote. A settle does not
+    invent one. The same fill and exit are not written twice.
+    """
+    if not isinstance(pos, dict):
+        return None
+    pnl_before = pos.get("pnl")
+    try:
+        pos["cash_after"] = round(float(cash), 4)
+    except (TypeError, ValueError):
+        pass
+    label = exit_that_fired(reason or pos.get("exit") or "")
+    if label:
+        pos["exit_name"] = label
+    if fee is not None:
+        try:
+            pos["exit_fee"] = round(float(fee), 4)
+        except (TypeError, ValueError):
+            pass
+    if pnl_before is not None:
+        pos["pnl"] = pnl_before
+    fee_for_journal = pos.get("exit_fee")
+    if fee_for_journal is None:
+        fee_for_journal = pos.get("fee")
+    stored_bid = real_held_bid(bid)
+    journal_root = DESK_ROOT if root is None else root
+    try:
+        if journal_root not in sys.path:
+            sys.path.insert(0, journal_root)
+        import desk_brain
+        return desk_brain.record_decision(
+            journal_root,
+            bot="commodity-15m",
+            action="settle" if label == "settled" else "sell",
+            ticker=str(pos.get("ticker") or ""),
+            side=str(pos.get("side") or ""),
+            reasons=[label] if label else [],
+            note=str(reason or label)[:240],
+            fill_id=str(pos.get("fill_id") or ""),
+            bid=stored_bid,
+            stake=pos.get("risk") if pos.get("risk") is not None else pos.get("cost"),
+            exit_name=label,
+            fee=fee_for_journal,
+            cash=pos.get("cash_after"),
+        )
+    except Exception:
+        return None
+
+
 def paper_sell(state: dict, pos: dict, bid: float, fee: float, reason: str) -> float:
     """Flatten one commodity paper position at bid − fee. No live order."""
     contracts = float(pos.get("contracts") or 0)
@@ -469,6 +531,7 @@ def paper_sell(state: dict, pos: dict, bid: float, fee: float, reason: str) -> f
         "pnl": pnl,
     })
     state.setdefault("closed", []).append(closed)
+    record_close(closed, cash=state.get("cash"), reason=reason, bid=bid, fee=fee)
     try:
         import desk_roi_plan
         desk_roi_plan.record_incubation_settle(
@@ -709,6 +772,9 @@ def settle_account(state: dict) -> None:
             "exit_price": 1.0 if won else 0.0,
         })
         state.setdefault("closed", []).append(pos)
+        record_close(
+            pos, cash=state.get("cash"), reason="settled", bid=None, fee=pos.get("fee"),
+        )
         try:
             if DESK_ROOT not in sys.path:
                 sys.path.insert(0, DESK_ROOT)
