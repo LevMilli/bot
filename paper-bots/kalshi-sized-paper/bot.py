@@ -679,6 +679,13 @@ def step_settle(args, state, day):
                 )
                 if sale and not sale.get("opens_new_ticket") and not sale.get("unlocks_fill"):
                     paper_sim.save_state(state)
+                    paper_sim.record_close(
+                        pos,
+                        bankroll=state["bankroll"],
+                        reason=sale["exit"],
+                        bid=sale["exit_price"],
+                        root=DESK_ROOT,
+                    )
                     try:
                         desk = _desk()
                         desk.record_learning(DESK_ROOT, {
@@ -745,6 +752,12 @@ def step_settle(args, state, day):
             continue
         paper_sim.settle_position(state, pos, m["result"])
         paper_sim.save_state(state)
+        paper_sim.record_close(
+            pos,
+            bankroll=state["bankroll"],
+            reason="settled",
+            root=DESK_ROOT,
+        )
         try:
             desk = _desk()
             desk.record_learning(DESK_ROOT, {
