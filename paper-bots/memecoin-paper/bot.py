@@ -140,6 +140,161 @@ def paper_sell(price, liq, tokens):
     return after_imp - fee, fee, imp
 
 
+BUY_EXIT_NAME = "model-flip −6% then stop −12%"
+BUY_INTENT = os.path.join(BASE, "buy_intent.json")
+
+
+def _atomic_json(dest, payload):
+    tmp = dest + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+        handle.write("\n")
+        handle.flush()
+    os.replace(tmp, dest)
+
+
+def load_buy_intent():
+    if not os.path.exists(BUY_INTENT):
+        return None
+    try:
+        with open(BUY_INTENT, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_buy_intent(*, fill_id, mint, symbol, stake, price):
+    """Write the crash intent before cash moves. The price has to be a real quote."""
+    try:
+        price_n = float(price)
+        stake_n = float(stake)
+    except (TypeError, ValueError):
+        raise ValueError("buy intent needs the real price and the stake") from None
+    if price_n != price_n or price_n <= 0 or stake_n != stake_n or stake_n <= 0:
+        raise ValueError("buy intent needs the real price and the stake")
+    payload = {
+        "tower": "memecoin",
+        "fill_id": str(fill_id or "").strip(),
+        "mint": str(mint or "").strip(),
+        "symbol": str(symbol or ""),
+        "stake": round(stake_n, 2),
+        "price": price_n,
+        "exit_rule": BUY_EXIT_NAME,
+        "paper_only": True,
+        "status": "intent",
+    }
+    if not payload["fill_id"] or not payload["mint"]:
+        raise ValueError("buy intent needs a fill id and the mint")
+    _atomic_json(BUY_INTENT, payload)
+    return payload
+
+
+def reconcile_buy_intent(state):
+    """Match an intent to the saved book. Never create a position or a price."""
+    intent = load_buy_intent()
+    if not isinstance(intent, dict):
+        return "none"
+    fid = str(intent.get("fill_id") or "")
+    book = state if isinstance(state, dict) else {}
+    opens = [p for p in book.get("open") or [] if isinstance(p, dict)]
+    closed = [p for p in book.get("closed") or [] if isinstance(p, dict)]
+    if fid and any(str(p.get("fill_id") or "") == fid for p in opens):
+        status = "open"
+    elif fid and any(str(p.get("fill_id") or "") == fid for p in closed):
+        status = "closed"
+    else:
+        status = "abandoned"
+    if intent.get("status") != status or intent.get("paper_only") is not True:
+        intent["status"] = status
+        intent["paper_only"] = True
+        intent["exit_rule"] = BUY_EXIT_NAME
+        _atomic_json(BUY_INTENT, intent)
+    return status
+
+
+def average_block(state, mint, price) -> str:
+    """Do not add tokens to a name that is already open and falling."""
+    want = str(mint or "").strip()
+    if not want:
+        return ""
+    try:
+        mark = float(price)
+    except (TypeError, ValueError):
+        return ""
+    if mark != mark or mark <= 0:
+        return ""
+    for pos in (state or {}).get("open") or []:
+        if not isinstance(pos, dict) or str(pos.get("mint") or "").strip() != want:
+            continue
+        try:
+            entry = float(pos.get("entry_market_price"))
+        except (TypeError, ValueError):
+            continue
+        if entry == entry and entry > 0 and mark < entry:
+            return "do not average down a name that is open and falling"
+    return ""
+
+
+def commit_paper_buy(st, *, mint, symbol, pair, price, liq, ticket, conf, lane, url=""):
+    """One paper buy. The intent is on disk before cash moves.
+
+    An open falling name is not averaged. A second ticket on the same mint is refused.
+    """
+    averaged = average_block(st, mint, price)
+    if averaged:
+        return averaged
+    if any(
+        isinstance(pos, dict) and str(pos.get("mint") or "") == str(mint)
+        for pos in (st or {}).get("open") or []
+    ):
+        return "already open"
+    try:
+        price_n = float(price)
+        liq_n = float(liq)
+        ticket_n = float(ticket)
+    except (TypeError, ValueError):
+        return "buy intent needs a real price"
+    if price_n != price_n or price_n <= 0 or liq_n != liq_n or liq_n <= 0 or ticket_n <= 0:
+        return "buy intent needs a real price"
+    fill_id = f"{mint}|{now_iso()}"
+    try:
+        write_buy_intent(
+            fill_id=fill_id, mint=mint, symbol=symbol, stake=ticket_n, price=price_n,
+        )
+    except (TypeError, ValueError):
+        return "buy intent needs a real price"
+    tokens, fee, imp, fill = paper_buy(price_n, liq_n, ticket_n)
+    st["cash_usd"] = round(float(st["cash_usd"]) - ticket_n, 4)
+    pos = dict(
+        mint=mint, symbol=symbol, pair=pair, entry_ts=NOW, entry_iso=now_iso(),
+        entry_market_price=price_n, entry_fill_price=fill, entry_liq=liq_n, tokens=tokens,
+        tokens_left=tokens, cost_usd=ticket_n, risk=ticket_n,
+        why=f"Paper buy ({lane} lane). Confidence {conf}. Ticket ${ticket_n:.2f}.",
+        peak_price=price_n, ladder_done=[],
+        confidence=conf, lane=lane, url=url,
+        fill_id=fill_id, exit_rule=BUY_EXIT_NAME, paper_only=True,
+        fee_usd=fee, impact=imp,
+    )
+    try:
+        desk_root = os.path.dirname(BASE)
+        if desk_root not in sys.path:
+            sys.path.insert(0, desk_root)
+        import desk_roi_plan as _xp
+        pos["exit_plan"] = _xp.default_exit_plan("memecoin")
+    except Exception:
+        pos["exit_plan"] = {
+            "kind": "stop+model_flip+ladder+settle",
+            "stop_pct": -0.12,
+            "model_flip_mom": -0.06,
+            "ladder_take_profits": True,
+            "settle_backstop": True,
+            "fee_floors_locked": True,
+        }
+    st.setdefault("open", []).append(pos)
+    return pos
+
+
 # ------------------------------------------------------------------ manage open positions
 def pair_now(pair_addr):
     d = ds(f"/latest/dex/pairs/solana/{pair_addr}")
@@ -586,7 +741,11 @@ def scan(st, stats):
         cd = st["cooldown"].get(mint)
         gate_reason = None
         if mint in open_mints:
-            gate_reason = "already open"
+            try:
+                mark = float(p.get("priceUsd"))
+            except (TypeError, ValueError, AttributeError):
+                mark = None
+            gate_reason = average_block(st, mint, mark) or "already open"
         elif cd and NOW - cd < C.COOLDOWN_HOURS * 3600:
             gate_reason = f"cooldown ({(NOW - cd) / 3600:.1f}h < {C.COOLDOWN_HOURS}h)"
         elif len(st["open"]) >= max_open_eff:
@@ -694,30 +853,14 @@ def scan(st, stats):
                 record("SKIP", f"ticket ${ticket:.2f} below min")
             continue
         price = float(p["priceUsd"])
-        tokens, fee, imp, fill = paper_buy(price, liq, ticket)
-        st["cash_usd"] = round(float(st["cash_usd"]) - ticket, 4)
-        pos = dict(mint=mint, symbol=row["symbol"], pair=p["pairAddress"], entry_ts=NOW, entry_iso=now_iso(),
-                   entry_market_price=price, entry_fill_price=fill, entry_liq=liq, tokens=tokens,
-                   tokens_left=tokens, cost_usd=ticket, risk=ticket,
-                   why=f"Paper buy ({lane} lane). Confidence {conf}. Ticket ${ticket:.2f}.",
-                   peak_price=price, ladder_done=[],
-                   confidence=conf, lane=lane, url=p.get("url"))
-        try:
-            desk_root = os.path.dirname(BASE)
-            if desk_root not in sys.path:
-                sys.path.insert(0, desk_root)
-            import desk_roi_plan as _xp
-            pos["exit_plan"] = _xp.default_exit_plan("memecoin")
-        except Exception:
-            pos["exit_plan"] = {
-                "kind": "stop+model_flip+ladder+settle",
-                "stop_pct": -0.12,
-                "model_flip_mom": -0.06,
-                "ladder_take_profits": True,
-                "settle_backstop": True,
-                "fee_floors_locked": True,
-            }
-        st["open"].append(pos)
+        pos = commit_paper_buy(
+            st, mint=mint, symbol=row.get("symbol"), pair=p.get("pairAddress"),
+            price=price, liq=liq, ticket=ticket, conf=conf, lane=lane, url=p.get("url"),
+        )
+        if not isinstance(pos, dict):
+            record("SKIP", str(pos))
+            continue
+        tokens, fee, imp, fill = pos["tokens"], pos["fee_usd"], pos["impact"], pos["entry_fill_price"]
         open_mints.add(mint)
         entries_today += 1
         stats["entries"] += 1
@@ -970,6 +1113,7 @@ def main():
     from collections import Counter
     stats = Counter()
     st = load_state()
+    reconcile_buy_intent(st)
     if not os.path.exists(P_POS):
         save_state(st)
     if maybe_reload_broke_cash(st):
