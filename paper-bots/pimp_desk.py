@@ -5257,14 +5257,19 @@ def load_learning(root: str | None = None) -> list:
 
 
 def record_learning(root: str | None, row: dict) -> None:
-    """Append one real settle. A missing result, market, or bucket is not invented.
+    """Append one learning row for a fill. Hit or miss only when that result is real.
 
-    Optional side + hour_ct enable learning-skip v2 (market × side × hour).
+    A failsafe reason may be stored with no hit or miss. That row is not a win.
+    A missing market, bucket, or stake is not invented. The same fill id is not
+    written twice. Optional side + hour_ct enable learning-skip v2.
     """
     if not isinstance(row, dict):
         return
     result = str(row.get("result") or "")
     if result not in ("hit", "miss"):
+        result = ""
+    reason = _clean(row.get("reason"), 120)
+    if not result and not reason:
         return
     market = _clean(row.get("market"), 40)
     bucket = _clean(row.get("bucket") or prob_bucket(row.get("prob")), 16)
@@ -5290,12 +5295,15 @@ def record_learning(root: str | None, row: dict) -> None:
             return
         item = {
             "at": _clean(row.get("at") or central_text(), 40),
-            "result": result,
             "market": market,
             "bucket": bucket,
             "stake": round(stake, 2),
             "fill_id": fill_id,
         }
+        if result:
+            item["result"] = result
+        if reason:
+            item["reason"] = reason
         if side:
             item["side"] = side
         if hour_ct is not None:
