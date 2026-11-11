@@ -10,6 +10,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pimp_desk
+import shadow_missing
 
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -55,6 +56,10 @@ def _tree(tmp, script):
     _write(os.path.join(tmp, "exclusive-set-paper", "bot.py"), script)
     _write(os.path.join(tmp, "exclusive-set-paper", "config.json"),
            json.dumps({"paper_only": True, "live_orders": False}))
+    for spec in shadow_missing.TOWERS:
+        _write(os.path.join(tmp, spec["folder"], "bot.py"), script)
+        _write(os.path.join(tmp, spec["folder"], "config.json"),
+               json.dumps({"paper_only": True, "live_orders": False}))
 
 
 def _ran(tmp, folder):
@@ -149,7 +154,9 @@ class PimpDeskTests(unittest.TestCase):
         self.assertTrue(snap["paper_only"])
         self.assertIn("PAPER ONLY", snap["banner"])
         self.assertEqual([b["id"] for b in snap["bots"]],
-                         ["sports-gap", "kalshi-sp", "btc15m", "commodity-15m", "memecoin", "kalshi-sized", "coinbase-spot", "btc-carry", "sports-sharp-lag", "fed-watch", "exclusive-set", "wall-street"])
+                         ["sports-gap", "kalshi-sp", "btc15m", "commodity-15m", "memecoin", "kalshi-sized", "coinbase-spot", "btc-carry", "sports-sharp-lag", "fed-watch", "exclusive-set"]
+                         + [spec["id"] for spec in shadow_missing.TOWERS]
+                         + ["wall-street"])
         sized = next(b for b in snap["bots"] if b["id"] == "kalshi-sized")
         coinbase = next(b for b in snap["bots"] if b["id"] == "coinbase-spot")
         self.assertTrue(coinbase["shadow_only"])
@@ -169,6 +176,7 @@ class PimpDeskTests(unittest.TestCase):
             "fed-watch": None,
             "exclusive-set": 0.0,
             "wall-street": 0.0,
+            **{spec["id"]: 0.0 for spec in shadow_missing.TOWERS},
         }
         for bot in snap["bots"]:
             self.assertTrue(bot["present"], bot["id"])
@@ -391,7 +399,8 @@ class PimpDeskTests(unittest.TestCase):
             self.assertIn(("memecoin", "run", None), names(noon))
             self.assertNotIn(("kalshi-sp", "run", "12:05"), names(late))
             self.assertEqual([row[0] for row in names(night)],
-                             ["sports-gap", "btc15m", "commodity-15m", "memecoin", "coinbase-spot", "btc-carry", "sports-sharp-lag", "fed-watch", "exclusive-set"])
+                             ["sports-gap", "btc15m", "commodity-15m", "memecoin", "coinbase-spot", "btc-carry", "sports-sharp-lag", "fed-watch", "exclusive-set"]
+                             + [spec["id"] for spec in shadow_missing.TOWERS])
             self.assertNotIn(("kalshi-sized", "settle", "13:00"), names(night))
             self.assertIn(("kalshi-sp", "run", "12:05"), names(saturday))
             saturday_scan = dt.datetime(2026, 10, 31, 12, 35, tzinfo=pimp_desk.CT)
@@ -408,13 +417,14 @@ class PimpDeskTests(unittest.TestCase):
             noon = dt.datetime(2026, 10, 30, 12, 10, tzinfo=pimp_desk.CT)
             rows = pimp_desk.run_scheduled(noon, tmp)
             by = {(row["bot"], row["action"]): row for row in rows}
+            shadow_runs = {(spec["id"], "run") for spec in shadow_missing.TOWERS}
             self.assertEqual(set(by), {
                 ("sports-gap", "run"), ("btc15m", "run"), ("btc15m", "shadow"),
                 ("commodity-15m", "run"), ("kalshi-sp", "run"), ("kalshi-sized", "run"),
                 ("memecoin", "run"), ("coinbase-spot", "run"), ("btc-carry", "run"),
                 ("sports-sharp-lag", "run"), ("fed-watch", "run"), ("exclusive-set", "run"),
                 ("shadow-tick", "auto"),
-            })
+            } | shadow_runs)
             for row in rows:
                 if row["bot"] == "shadow-tick":
                     self.assertTrue(row["ok"], row)
@@ -446,12 +456,13 @@ class PimpDeskTests(unittest.TestCase):
             # Interval bots fire again. A no-trade sized scan is still inside
             # its window, so that slot retries. It still does not buy.
             got = {(row["bot"], row["action"]) for row in more}
+            shadow_runs = {(spec["id"], "run") for spec in shadow_missing.TOWERS}
             self.assertTrue({
                 ("sports-gap", "run"), ("btc15m", "run"), ("btc15m", "shadow"),
                 ("commodity-15m", "run"), ("memecoin", "run"), ("coinbase-spot", "run"),
                 ("btc-carry", "run"),
                 ("sports-sharp-lag", "run"), ("fed-watch", "run"), ("exclusive-set", "run"),
-            }.issubset(got))
+            }.union(shadow_runs).issubset(got))
             self.assertTrue(got <= {
                 ("sports-gap", "run"), ("btc15m", "run"), ("btc15m", "shadow"),
                 ("commodity-15m", "run"), ("memecoin", "run"), ("coinbase-spot", "run"),
@@ -459,7 +470,7 @@ class PimpDeskTests(unittest.TestCase):
                 ("sports-sharp-lag", "run"), ("fed-watch", "run"), ("exclusive-set", "run"),
                 ("kalshi-sized", "run"),
                 ("shadow-tick", "auto"),
-            })
+            } | shadow_runs)
             self.assertTrue(all(row["ok"] for row in more))
             self.assertTrue((_ran(tmp, "kalshi-sp500-paper") or "").startswith("scan\n"))
             self.assertGreaterEqual((_ran(tmp, "kalshi-sized-paper") or "").count("scan"), 1)
@@ -515,18 +526,22 @@ class PimpDeskTests(unittest.TestCase):
             _tree(tmp, "import sys\nsys.exit(1)\n")
             night = dt.datetime(2026, 10, 30, 3, 0, tzinfo=pimp_desk.CT)
             rows = pimp_desk.run_scheduled(night, tmp)
+            crashed = {
+                ("btc-carry", "run", False),
+                ("btc15m", "run", False), ("btc15m", "shadow", False),
+                ("coinbase-spot", "run", False),
+                ("commodity-15m", "run", False),
+                ("desk", "midnight-reload", True),
+                ("exclusive-set", "run", False),
+                ("fed-watch", "run", False),
+                ("memecoin", "run", False),
+                ("shadow-tick", "auto", True),
+                ("sports-gap", "run", False),
+                ("sports-sharp-lag", "run", False),
+            }
+            crashed.update((spec["id"], "run", False) for spec in shadow_missing.TOWERS)
             self.assertEqual(sorted((row["bot"], row["action"], row["ok"]) for row in rows),
-                             [("btc-carry", "run", False),
-                              ("btc15m", "run", False), ("btc15m", "shadow", False),
-                              ("coinbase-spot", "run", False),
-                              ("commodity-15m", "run", False),
-                              ("desk", "midnight-reload", True),
-                              ("exclusive-set", "run", False),
-                              ("fed-watch", "run", False),
-                              ("memecoin", "run", False),
-                              ("shadow-tick", "auto", True),
-                              ("sports-gap", "run", False),
-                              ("sports-sharp-lag", "run", False)])
+                             sorted(crashed))
             self.assertTrue(all(not row["blocked"] for row in rows))
 
 
@@ -1633,7 +1648,8 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(set(made), {
                 "sports-gap", "kalshi-sp", "btc15m", "commodity-15m", "memecoin",
                 "kalshi-sized", "coinbase-spot", "btc-carry",
-            })
+                "sports-sharp-lag", "fed-watch", "exclusive-set",
+            } | {spec["id"] for spec in shadow_missing.TOWERS})
             snap = pimp_desk.snapshot(tmp)
             by_id = {bot["id"]: bot for bot in snap["bots"]}
             self.assertEqual(by_id["sports-gap"]["cash"], 100.0)
@@ -1646,6 +1662,10 @@ class PimpDeskTests(unittest.TestCase):
             self.assertTrue(by_id["coinbase-spot"]["shadow_only"])
             self.assertEqual(by_id["btc-carry"]["cash"], 500.0)
             self.assertTrue(by_id["btc-carry"]["shadow_only"])
+            for spec in shadow_missing.TOWERS:
+                self.assertEqual(by_id[spec["id"]]["cash"], 0.0, spec["id"])
+                self.assertEqual(by_id[spec["id"]]["positions"], [], spec["id"])
+                self.assertTrue(by_id[spec["id"]]["shadow_only"], spec["id"])
             self.assertTrue(by_id["kalshi-sized"]["present"])
             self.assertIn("gate_a", snap["desk"])
             self.assertIn("prove_it", snap["desk"])

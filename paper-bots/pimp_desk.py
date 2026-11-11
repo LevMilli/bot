@@ -2848,6 +2848,11 @@ def _enrich_bot_profit_fields(bot: dict, cfg: dict, capital: dict) -> dict:
         bot["capital_weight"] = 0
         bot["risk_factors_open"] = []
         return bot
+    if str(bot.get("id") or "") in _ZERO_STAKE_IDS:
+        bot["sizing_mode"] = "none"
+        bot["capital_weight"] = 0
+        bot["risk_factors_open"] = []
+        return bot
     mode = str(cfg.get("sizing") or "kelly_lite")
     stake = (bot.get("plans") or {}).get("stake") or ""
     if stake.startswith("fixed"):
@@ -3683,7 +3688,15 @@ def _paper_ok(root: str, bot_id: str) -> str:
         return "Wall Street config is not paper-only. This desk will not start it."
     if bot_id == "exclusive-set" and not _exclusive_set_paper(root):
         return "Exclusive set config is not paper-only. This desk will not start it."
+    if bot_id in _ZERO_STAKE_IDS and not _zero_stake_paper(root, bot_id):
+        return "Shadow logger config is not paper-only. This desk will not start it."
     return ""
+
+
+def _zero_stake_paper(root: str, bot_id: str) -> bool:
+    folder = next((row["folder"] for row in BOTS if row["id"] == bot_id), "")
+    cfg = _read_json(_under(root, folder, "config.json")) or {}
+    return cfg.get("paper_only") is True and cfg.get("live_orders") is not True
 
 
 def _exclusive_set_paper(root: str) -> bool:
@@ -4733,6 +4746,85 @@ TOWER_MIN_AMMO = {
     "wall-street": 0.0,
 }
 
+# Paper shadows that log a missing series and buy nothing. Filled at import.
+_ZERO_STAKE_IDS = frozenset()
+
+
+def _install_shadow_loggers() -> None:
+    """Register the nine log-only towers. Does not change an existing buy plan."""
+    global BOTS, AUTO, SETTLEMENT_FILES, _ZERO_STAKE_IDS
+    import shadow_missing
+
+    _ZERO_STAKE_IDS = frozenset(spec["id"] for spec in shadow_missing.TOWERS)
+    bots = list(BOTS)
+    insert_at = next(i for i, row in enumerate(bots) if row["id"] == "wall-street")
+    for offset, spec in enumerate(shadow_missing.TOWERS):
+        bots.insert(insert_at + offset, {
+            "id": spec["id"],
+            "name": spec["name"],
+            "folder": spec["folder"],
+            "script": "bot.py",
+            "blurb": (
+                "Shadow logger. Records the series when the repo names it, "
+                "and records that the ticker is missing otherwise. "
+                "Buys nothing and takes no stake."
+            ),
+            "state": "paper_account.json",
+            "kind": "log",
+            "log": "",
+            "empty": "No paper account yet. A check writes paper_account.json.",
+            "shadow_only": True,
+        })
+        ACCOUNT_FILES[spec["id"]] = "paper_account.json"
+        ACTIONS[spec["id"]] = {
+            "run": {"argv": ("bot.py",), "entry": False, "timeout": 45, "label": "Run one check"},
+        }
+        BOT_PLANS[spec["id"]] = {
+            "buy": [
+                "The tower does not buy. It logs and leaves the book flat",
+                "Shadow only — spends no desk cash and takes no tower risk share",
+                spec["rule"],
+                "A missing series ticker is recorded and skipped. No ticker, fill, or fair is invented",
+                "Stake stays 0",
+            ],
+            "sell": [
+                "Nothing is open, so there is nothing to sell",
+                "A log line is not a position. Staff review is the backstop",
+            ],
+            "failsafes": [
+                "Paper only. No key and no desk cash",
+                "Stake stays 0. No tower_risk_budgets share while shadow_only",
+                spec["floor_line"],
+                "Incubation n≥50 before any desk share. This build does not buy",
+                "Pause file",
+            ],
+            "exit_quality": "partial",
+            "entry_gated": True,
+            "stake": "none",
+        }
+        ROI_POLICY["waivers"][spec["id"]] = ["shadow_only"]
+        ROI_POLICY["target_exit_quality"][spec["id"]] = "partial"
+        TOWER_STARTER_CASH[spec["id"]] = 0.0
+        TOWER_MIN_AMMO[spec["id"]] = 0.0
+    BOTS = tuple(bots)
+    slots = list(AUTO)
+    after = next(i for i, slot in enumerate(slots) if slot.get("id") == "exclusive-set")
+    for offset, spec in enumerate(shadow_missing.TOWERS):
+        slots.insert(after + 1 + offset, {
+            "id": spec["id"],
+            "action": "run",
+            "every_sec": 300,
+        })
+    AUTO = tuple(slots)
+    extra = []
+    for spec in shadow_missing.TOWERS:
+        extra.append(f"{spec['folder']}/paper_account.json")
+        extra.append(f"{spec['folder']}/evidence.jsonl")
+    SETTLEMENT_FILES = tuple(list(SETTLEMENT_FILES) + extra)
+
+
+_install_shadow_loggers()
+
 
 def midnight_path(root: str | None = None) -> str:
     return _under(root, "pimp-midnight.json")
@@ -4754,6 +4846,8 @@ def tower_doing_good(bot: dict) -> bool:
         return True
     # Zero-stake logger. A midnight reload would mint cash this tower does not have.
     if bot_id == "exclusive-set":
+        return True
+    if bot_id in _ZERO_STAKE_IDS:
         return True
     starter = float(TOWER_STARTER_CASH.get(bot_id) or 100.0)
     min_ammo = float(TOWER_MIN_AMMO.get(bot_id) or 10.0)
@@ -4783,6 +4877,8 @@ def tower_needs_midnight_reload(bot: dict) -> bool:
     if bot_id == "btc-carry":
         return False
     if bot_id == "exclusive-set":
+        return False
+    if bot_id in _ZERO_STAKE_IDS:
         return False
     if int(bot.get("open_count") or 0) > 0:
         return False
@@ -5048,7 +5144,7 @@ def _account_body(bot_id: str) -> dict:
             "live_orders": False,
             "traders": 120,
         }
-    if bot_id == "exclusive-set":
+    if bot_id == "exclusive-set" or bot_id in _ZERO_STAKE_IDS:
         return {
             "cash": 0.0,
             "open": [],

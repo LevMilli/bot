@@ -1,0 +1,10 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "buys": false,
+  "stake_usd": 0,
+  "starter_cash": 0,
+  "venue_min_edge": 0.06,
+  "note": "Point spread on the six leagues. The game-winner series are a different settle. Clears the sports floor 0.06 after the taker once a series exists. Spread cap is the game-winner cap when that cap is already in the repo."
+}

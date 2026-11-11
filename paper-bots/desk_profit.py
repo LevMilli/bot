@@ -68,6 +68,18 @@ BOT_VENUE = {
     # Exclusive-set logger. Registry shows the sports lock. Non-sports sets
     # use 0.05 inside the tower and never the INX 0.02 floor.
     "exclusive-set": "kalshi_sports",
+    # Log-only shadows. They reuse a locked floor. No new key, no lower number.
+    # Commodity and BTC options show the binary lock and do not treat it as a fee.
+    # Mentions has no venue key; the registry shows the existing 0.05 econ lock.
+    "point-spread": "kalshi_sports",
+    "game-total": "kalshi_sports",
+    "commodity-calendar": "kalshi_commodity15m",
+    "player-props": "kalshi_sports",
+    "period-winner": "kalshi_sports",
+    "btc-options": "kalshi_btc15m",
+    "champions-league": "kalshi_sports",
+    "polymarket-mentions": "kalshi_econ",
+    "esports-match": "kalshi_sports",
 }
 
 

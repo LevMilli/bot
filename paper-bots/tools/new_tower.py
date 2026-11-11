@@ -30,6 +30,9 @@ def scaffold(root: str, bot_id: str, name: str, floor: float) -> dict:
         "sports-gap", "kalshi-sp", "btc15m", "commodity-15m", "memecoin",
         "kalshi-sized", "coinbase-spot", "btc-carry", "sports-sharp-lag",
         "fed-watch", "wall-street", "exclusive-set",
+        "point-spread", "game-total", "commodity-calendar", "player-props",
+        "period-winner", "btc-options", "champions-league",
+        "polymarket-mentions", "esports-match",
     ):
         return {"ok": False, "reason": "that tower already exists"}
     if floor + 1e-12 < MIN_FLOOR or floor > 0.20:
