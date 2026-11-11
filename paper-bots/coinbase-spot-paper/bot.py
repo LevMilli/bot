@@ -426,6 +426,136 @@ def fetch_closes(product: str, granularity: int = 900) -> list[float]:
     return closes
 
 
+BUY_EXIT = "stop −1.5% / fee take-profit / z≤−2 / 24h"
+TICKET_USD = 25.0
+
+
+def write_buy_intent(path, *, fill_id, product, price, stake=TICKET_USD):
+    """The crash intent. A real price and the $25 ticket are required."""
+    price_n = _num(price)
+    stake_n = _num(stake)
+    name = str(product or "").strip()
+    if (
+        price_n is None
+        or price_n <= 0
+        or stake_n is None
+        or abs(stake_n - TICKET_USD) > 1e-9
+        or not name
+        or name == "BTC-USD"
+        or not str(fill_id or "").strip()
+    ):
+        raise ValueError("buy intent needs a real price and the $25 ticket")
+    payload = {
+        "tower": "coinbase-spot",
+        "fill_id": str(fill_id).strip(),
+        "product": name,
+        "stake": TICKET_USD,
+        "price": price_n,
+        "exit_rule": BUY_EXIT,
+        "paper_only": True,
+        "status": "intent",
+    }
+    _write_json(path, payload)
+    return payload
+
+
+def reconcile_buy_intent(state, path) -> str:
+    """Match an intent to the book. Never create a position or a price."""
+    if not path or not os.path.exists(path):
+        return "none"
+    try:
+        with open(path, encoding="utf-8") as handle:
+            intent = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return "none"
+    if not isinstance(intent, dict):
+        return "none"
+    fid = str(intent.get("fill_id") or "")
+    book = state if isinstance(state, dict) else {}
+    opens = [row for row in book.get("open") or [] if isinstance(row, dict)]
+    closed = [row for row in book.get("closed") or [] if isinstance(row, dict)]
+    if fid and any(str(row.get("fill_id") or "") == fid for row in opens):
+        status = "open"
+    elif fid and any(str(row.get("fill_id") or "") == fid for row in closed):
+        status = "closed"
+    else:
+        status = "abandoned"
+    intent["status"] = status
+    intent["paper_only"] = True
+    intent["exit_rule"] = BUY_EXIT
+    _write_json(path, intent)
+    return status
+
+
+def place_shadow_buy(state, decision, price, *, btc_yes, intent_path, now) -> dict:
+    """Write the exit intent before cash. A refuse buys nothing.
+
+    One $25 ticket. No new long while BTC 15-minute holds YES.
+    """
+    book = state if isinstance(state, dict) else {}
+    cash_before = _num(book.get("cash")) or 0.0
+
+    def refuse(reason):
+        return {
+            "bought": False,
+            "reason": reason,
+            "fill": False,
+            "paper_only": True,
+            "cash": cash_before,
+        }
+
+    if btc_yes:
+        return refuse("btc15m YES open")
+    if any(isinstance(row, dict) for row in (book.get("open") or [])):
+        return refuse("one $25 ticket")
+    if not isinstance(decision, dict) or decision.get("flat") or decision.get("action") != "buy":
+        return refuse(str((decision or {}).get("reason") or "replay bar not met"))
+    edge = _num(decision.get("edge"))
+    floor = _num(decision.get("floor"))
+    if floor is None or floor + 1e-12 < 0.05:
+        floor = 0.05
+    if edge is None or edge + 1e-12 < floor:
+        return refuse("floor on top of the round trip")
+    product = str(decision.get("product") or "")
+    if product == "BTC-USD" or not product:
+        return refuse("logged, not a buy")
+    px = _num(price)
+    if px is None or px <= 0:
+        return refuse("missing price")
+    if cash_before + 1e-9 < TICKET_USD:
+        return refuse("shadow cash below ticket")
+    fill_id = f"{product}|{now}"
+    try:
+        write_buy_intent(
+            intent_path, fill_id=fill_id, product=product, price=px, stake=TICKET_USD,
+        )
+    except (TypeError, ValueError):
+        return refuse("buy intent needs a real price and the $25 ticket")
+    book["cash"] = round(cash_before - TICKET_USD, 4)
+    book.setdefault("open", []).append({
+        "ticker": product,
+        "side": "buy",
+        "contracts": 1,
+        "cost": TICKET_USD,
+        "entry_price": px,
+        "opened": str(now),
+        "fill_id": fill_id,
+        "edge": edge,
+        "z": decision.get("z"),
+        "exit_rule": BUY_EXIT,
+        "risk_factor": "risk_on_coinbase_spot",
+        "paper_only": True,
+        "shadow_only": True,
+    })
+    return {
+        "bought": True,
+        "fill_id": fill_id,
+        "exit_rule": BUY_EXIT,
+        "stake": TICKET_USD,
+        "cash": book["cash"],
+    }
+
+
 def run_once(
     desk_root: str | None = None,
     cfg: dict | None = None,
@@ -443,6 +573,7 @@ def run_once(
     tower = os.path.join(desk_root, "coinbase-spot-paper")
     os.makedirs(tower, exist_ok=True)
     state = _read_state(os.path.join(tower, "paper_account.json")) or empty_state(cfg)
+    reconcile_buy_intent(state, os.path.join(tower, "buy_intent.json"))
     state.setdefault("open", [])
     state.setdefault("closed", [])
     state["paper_only"] = True
@@ -524,31 +655,23 @@ def run_once(
                 decision["action"] = "flat"
                 decision["reason"] = decision.get("reason") or "replay bar not met"
                 continue
-            if cash + 1e-9 < stake:
+            if cash + 1e-9 < TICKET_USD:
                 decision["action"] = "skip"
                 decision["reason"] = "shadow cash below ticket"
                 continue
-            mark = books[product][-1]
-            state["cash"] = round(cash - stake, 4)
-            state["open"].append({
-                "ticker": product,
-                "side": "buy",
-                "contracts": 1,
-                "cost": stake,
-                "entry_price": mark,
-                "opened": now.isoformat(timespec="seconds"),
-                "edge": decision.get("edge"),
-                "z": decision.get("z"),
-                "risk_factor": "risk_on_coinbase_spot",
-                "paper_only": True,
-                "shadow_only": True,
-                "exit_plan": {
-                    "kind": "stop+take_profit+model_flip+time",
-                    "stop_pct": -float(cfg["stop_pct"]),
-                    "time_stop_hours": cfg["time_stop_hours"],
-                    "fee_floors_locked": True,
-                },
-            })
+            mark = (books.get(product) or [None])[-1]
+            bought_row = place_shadow_buy(
+                state,
+                decision,
+                mark,
+                btc_yes=False,
+                intent_path=os.path.join(tower, "buy_intent.json"),
+                now=now.isoformat(timespec="seconds"),
+            )
+            if not bought_row.get("bought"):
+                decision["action"] = "flat"
+                decision["reason"] = bought_row.get("reason") or "refused"
+                continue
             bought = product
             break
     for product in cfg["products_research_only"]:

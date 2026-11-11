@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 paper_account.json
 research.jsonl
+buy_intent.json
