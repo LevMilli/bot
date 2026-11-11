@@ -671,6 +671,55 @@ def place_open(state, decision, marks, *, intent_path, now) -> dict:
     }
 
 
+def watch_pair(state, marks, now) -> dict:
+    """Mark the open pair at the real premium. A red month is a month-mark.
+
+    The pair stays open. A missing premium is not replaced, and a Coinbase
+    spot price is not the mark. This does not sell.
+    """
+    book = state if isinstance(state, dict) else {}
+    opens = [row for row in book.get("open") or [] if isinstance(row, dict)]
+    if not opens:
+        book["watch"] = "flat"
+        return {"flat": True, "sold": False, "month_mark": False, "open": 0}
+    pos = opens[0]
+    scanned = scan_marks(marks if isinstance(marks, dict) else {})
+    prior = _public_print(pos.get("last_mark"))
+    if prior is None:
+        prior = _public_print(pos.get("premium"))
+    marked = None
+    stamp = None
+    for row in scanned["premium"]:
+        close = _public_print(row.get("close"))
+        when_row = str(row.get("time") or "")
+        if close is None or not when_row:
+            continue
+        if stamp is None or when_row >= stamp:
+            marked = close
+            stamp = when_row
+    stored_time = str(pos.get("premium_time") or "")
+    if marked is not None and (not stored_time or (stamp and stamp >= stored_time)):
+        pos["last_mark"] = marked
+        pos["premium"] = marked
+        pos["premium_time"] = stamp
+    elif prior is not None:
+        pos["last_mark"] = prior
+    when = now if isinstance(now, dt.datetime) else _parse_time(now)
+    if when is None:
+        when = dt.datetime.now(dt.timezone.utc)
+    before = len(book.get("closed") or [])
+    _seal_finished_months(book, pos, _as_utc(when))
+    book["open"] = [pos]
+    book["watch"] = "marked"
+    return {
+        "flat": False,
+        "sold": False,
+        "month_mark": len(book.get("closed") or []) > before,
+        "open": 1,
+        "last_mark": pos.get("last_mark"),
+    }
+
+
 def hold_step(state: dict, marks: dict, cfg: dict, now: dt.datetime, *, block_entries: bool = False, intent_path=None) -> dict:
     """Apply the hold. Never flips. Never adds a second leg after a red month."""
     cfg = locked_cfg(cfg)
@@ -733,7 +782,7 @@ def hold_step(state: dict, marks: dict, cfg: dict, now: dt.datetime, *, block_en
     # Heartbeat the open on each hold check. Archive premium_time can lag wall
     # clock by weeks; doctor must not read that lag as a dead book.
     pos["price_at"] = now.isoformat(timespec="seconds")
-    _seal_finished_months(state, pos, now)
+    watch_pair(state, {"funding": funding, "premium": premium, "symbol": "BTCUSDT"}, now)
     state["pass_bar"] = _pass_bar(state)
     state["last_action"] = "hold"
     if len(state["open"]) != 1:
