@@ -653,8 +653,17 @@ def step_settle(args, state, day):
             print(f"Could not read {pos['ticker']} yet.")
             continue
         if m.get("result") not in ("yes", "no"):
-            bid = feed.dollars(m.get("yes_bid_dollars")) if pos["side"] == "yes" else feed.dollars(m.get("no_bid_dollars"))
-            print(f"{pos['ticker']} not settled yet (status {m.get('status')}); our side bid now {bid}")
+            yes_bid = feed.dollars(m.get("yes_bid_dollars"))
+            no_bid = feed.dollars(m.get("no_bid_dollars"))
+            ticker = str(pos.get("ticker") or "")
+            watched = paper_sim.watch_open(pos, {
+                ticker: {"ticker": ticker, "yes_bid": yes_bid, "no_bid": no_bid},
+            })
+            if watched.get("marked") and not args.dry_run:
+                paper_sim.save_state(state)
+            bid = yes_bid if pos["side"] == "yes" else no_bid
+            shown = f"{watched['last_mark']:.2f}" if watched.get("marked") else "missing"
+            print(f"{pos['ticker']} not settled yet (status {m.get('status')}); our side bid now {shown}")
             flip_on = True
             try:
                 desk = _desk()
