@@ -26,6 +26,86 @@ import datetime as dt
 HERE = os.path.dirname(os.path.abspath(__file__))
 CFG = json.load(open(os.path.join(HERE, "config.json")))
 STATE_PATH = os.path.join(HERE, CFG["state_file"])
+BUY_EXIT_RULE = "model-flip bid under 50c"
+BUY_INTENT = os.path.join(HERE, "buy_intent.json")
+
+
+def _atomic_json(dest, payload):
+    tmp = dest + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+        handle.write("\n")
+        handle.flush()
+    os.replace(tmp, dest)
+
+
+def load_buy_intent():
+    if not os.path.exists(BUY_INTENT):
+        return None
+    try:
+        with open(BUY_INTENT, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_buy_intent(*, fill_id, ticker, side, contracts, stake, ask):
+    """Write the crash intent before cash moves. The ask has to be a real quote."""
+    try:
+        ask_n = float(ask)
+        stake_n = float(stake)
+    except (TypeError, ValueError):
+        raise ValueError("buy intent needs the real ask and the stake") from None
+    if ask_n != ask_n or ask_n <= 0 or stake_n != stake_n or stake_n <= 0:
+        raise ValueError("buy intent needs the real ask and the stake")
+    payload = {
+        "tower": "kalshi-sized",
+        "fill_id": str(fill_id or "").strip(),
+        "ticker": str(ticker or "").strip(),
+        "side": str(side or ""),
+        "contracts": int(contracts),
+        "stake": round(stake_n, 2),
+        "ask": ask_n,
+        "exit_rule": BUY_EXIT_RULE,
+        "paper_only": True,
+        "status": "intent",
+    }
+    if not payload["fill_id"] or not payload["ticker"]:
+        raise ValueError("buy intent needs a fill id and a ticker")
+    _atomic_json(BUY_INTENT, payload)
+    return payload
+
+
+def reconcile_buy_intent(state):
+    """Match an intent to the saved book. Never create a position or a price."""
+    intent = load_buy_intent()
+    if not isinstance(intent, dict):
+        return "none"
+    fid = str(intent.get("fill_id") or "")
+    book = state if isinstance(state, dict) else {}
+    opens = [p for p in book.get("open") or [] if isinstance(p, dict)]
+    closed = [p for p in book.get("closed") or [] if isinstance(p, dict)]
+    if fid and any(str(p.get("fill_id") or "") == fid for p in opens):
+        status = "open"
+    elif fid and any(str(p.get("fill_id") or "") == fid for p in closed):
+        status = "closed"
+    else:
+        status = "abandoned"
+    if intent.get("status") != status or intent.get("paper_only") is not True:
+        intent["status"] = status
+        intent["paper_only"] = True
+        intent["exit_rule"] = BUY_EXIT_RULE
+        _atomic_json(BUY_INTENT, intent)
+    return status
+
+
+def already_open(state, fill_id="") -> str:
+    """A restart that finds the open row does not buy again."""
+    opens = [p for p in (state or {}).get("open") or [] if isinstance(p, dict)]
+    if not opens:
+        return ""
+    return "open row already on the book"
 
 
 def taker_fee(contracts, price, rate=None):
@@ -79,7 +159,8 @@ def open_position(state, day, event_ticker, pick, contracts, entry_time_iso):
            "entry_time": entry_time_iso, "status": "open",
            "price_source": "https://api.elections.kalshi.com/trade-api/v2",
            "price_at": entry_time_iso,
-           "fill_id": f"{pick.get('ticker')}|{entry_time_iso}"}
+           "fill_id": f"{pick.get('ticker')}|{entry_time_iso}",
+           "exit_rule": BUY_EXIT_RULE, "paper_only": True}
     try:
         desk_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         if desk_root not in sys.path:
@@ -96,6 +177,38 @@ def open_position(state, day, event_ticker, pick, contracts, entry_time_iso):
     state["bankroll"] = round(state["bankroll"] - cost - fee, 4)
     state["open"].append(pos)
     return pos
+
+
+def place_paper_buy(state, day, event_ticker, pick, contracts, entry_time):
+    """One paper buy. The intent is on disk before cash moves.
+
+    An open row already on the book is not bought again.
+    """
+    held = already_open(state)
+    if held:
+        return held
+    try:
+        ask = float(pick["ask"])
+        count = int(contracts)
+    except (TypeError, ValueError, KeyError):
+        return "buy intent needs a real ask"
+    if ask <= 0 or count < 1:
+        return "buy intent needs a real ask"
+    fee = taker_fee(count, ask)
+    stake = round(count * ask + fee, 2)
+    fill_id = f"{pick.get('ticker')}|{entry_time}"
+    try:
+        write_buy_intent(
+            fill_id=fill_id,
+            ticker=pick.get("ticker"),
+            side=pick.get("side"),
+            contracts=count,
+            stake=stake,
+            ask=ask,
+        )
+    except (TypeError, ValueError):
+        return "buy intent needs a real ask"
+    return open_position(state, day, event_ticker, pick, count, entry_time)
 
 
 def settle_position(state, pos, market_result):
