@@ -56,6 +56,26 @@ def noon_window_reason(now, day, entry_time_ct="12:00"):
     return "clock"
 
 
+INX_FLOOR = 0.02
+
+
+def noon_edge(edge, *, sample_n=0):
+    """The noon window keeps 0.02. A thin learning bucket does not lower it.
+
+    A stricter edge is allowed. sample_n is the bucket count and does not
+    change the floor.
+    """
+    try:
+        proposed = float(edge)
+    except (TypeError, ValueError):
+        proposed = INX_FLOOR
+    if proposed != proposed or proposed < INX_FLOOR:
+        proposed = INX_FLOOR
+    if sample_n is None:
+        return proposed
+    return proposed
+
+
 def _taker_fee(contracts, price, rate=None):
     """Kalshi taker fee rounded up to the cent (matches paper_sim.taker_fee)."""
     rate = CFG.get("taker_fee_rate", 0.07) if rate is None else rate
