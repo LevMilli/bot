@@ -223,9 +223,17 @@ def refresh_minutes(remaining, leagues, now):
 
 # ------------------------------------------------------------------ network
 def _kalshi_open(series):
-    url = f"{KALSHI}/markets?series_ticker={series}&status=open&limit=400"
-    data = json.loads(public_http.read(url, timeout=10).decode("utf-8"))
-    return list(data.get("markets") or [])
+    out, cursor = [], ""
+    for _page in range(10):
+        url = f"{KALSHI}/markets?series_ticker={series}&status=open&limit=1000"
+        if cursor:
+            url += "&cursor=" + urllib.parse.quote(cursor)
+        data = json.loads(public_http.read(url, timeout=10).decode("utf-8"))
+        out.extend(data.get("markets") or [])
+        cursor = str(data.get("cursor") or "")
+        if not cursor or not data.get("markets"):
+            break
+    return out
 
 
 def _odds_fetch(sport, key, bookmaker):
