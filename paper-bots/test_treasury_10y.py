@@ -79,7 +79,7 @@ def test_model_skips_outside_window_and_stale(monkeypatch):
     bot = _bot()
     quotes, note = bot.model({}, dt.datetime(2026, 11, 14, 16, tzinfo=UTC))   # Saturday
     assert quotes == [] and "window" in note
-    monkeypatch.setattr(bot, "_live_tnx", lambda now: (5.0, 3600))
+    monkeypatch.setattr(bot, "_live_yield", lambda now: ("cnbc", 5.0, 3600))
     quotes, note = bot.model({}, AT_11ET)
     assert quotes == [] and "min old" in note
 
@@ -99,3 +99,69 @@ def test_registry_and_desk_wiring():
     sys.path.insert(0, os.path.join(HERE, "tools"))
     import new_tower
     assert new_tower.check_tower("treasury-10y")["ok"]
+
+
+def _fake_sources(treasury_ok: bool, fred_ok: bool):
+    import json
+    import urllib.error
+    days = [dt.date(2026, 9, 1) + dt.timedelta(days=i) for i in range(60)]
+    fred = "observation_date,DGS10\n" + "\n".join(
+        f"{d.isoformat()},{4.80 + (0.04 if i % 2 else 0.0):.2f}" for i, d in enumerate(days)) + "\n2026-10-31,.\n"
+    stamps = [int(dt.datetime(d.year, d.month, d.day, 20, tzinfo=UTC).timestamp()) for d in days]
+    yahoo = json.dumps({"chart": {"result": [{"timestamp": stamps, "indicators": {"quote": [
+        {"close": [4.79 + (0.04 if i % 2 else 0.0) for i in range(len(days))]}]}}]}})
+
+    cnbc = json.dumps({"barData": {"priceBars": [
+        {"tradeTime": d.strftime("%Y%m%d000000"), "close": f"{4.80 + (0.04 if i % 2 else 0.0):.4f}"}
+        for i, d in enumerate(days)]}})
+
+    def read(url):
+        if "cnbc.com" in url:
+            return cnbc
+        if "home.treasury.gov" in url:
+            if not treasury_ok:
+                raise urllib.error.HTTPError(url, 403, "Forbidden", {}, None)
+            return "Date,\"10 Yr\"\n"
+        if "fred.stlouisfed.org" in url:
+            if not fred_ok:
+                raise urllib.error.HTTPError(url, 503, "busy", {}, None)
+            return fred
+        return yahoo
+    return read
+
+
+def test_fred_backup_when_treasury_refuses(tmp_path, monkeypatch):
+    bot = _bot()
+    monkeypatch.setattr(bot, "HERE", str(tmp_path))
+    now = dt.datetime(2026, 11, 2, 15, tzinfo=UTC)
+    hist = bot._history(now, read=_fake_sources(False, True))
+    assert hist["source"] == "fred" and math.isclose(hist["sd_day"], 0.04, abs_tol=1e-3)
+    assert math.isclose(hist["basis"]["tnx"][0], 0.01, abs_tol=1e-6)
+    assert math.isclose(hist["basis"]["cnbc"][0], 0.0, abs_tol=1e-6)
+    assert um.parse_fred_csv("observation_date,DGS10\n2026-01-02,.\n2026-01-05,4.1\n") == {"2026-01-05": 4.1}
+
+
+def test_stale_history_reused_then_named_failure(tmp_path, monkeypatch):
+    import pytest
+    bot = _bot()
+    monkeypatch.setattr(bot, "HERE", str(tmp_path))
+    now = dt.datetime(2026, 11, 2, 15, tzinfo=UTC)
+    good = bot._history(now, read=_fake_sources(False, True))
+    later = now + dt.timedelta(hours=30)
+    assert bot._history(later, read=_fake_sources(False, False)) == good
+    with pytest.raises(RuntimeError) as err:
+        bot._history(now + dt.timedelta(hours=80), read=_fake_sources(False, False))
+    assert "Treasury.gov HTTP 403" in str(err.value) and "FRED HTTP 503" in str(err.value)
+
+
+def test_cnbc_quote_is_fresh_and_model_uses_its_basis(monkeypatch):
+    bot = _bot()
+    body = {"FormattedQuoteResult": {"FormattedQuote": [
+        {"last": "5.026%", "last_time": "2026-11-13T10:58:00.000-0500"}]}}
+    level, age = bot._cnbc_quote(body, AT_11ET)
+    assert level == 5.026 and math.isclose(age, 120.0)
+    assert bot._cnbc_quote({}, AT_11ET) is None
+    monkeypatch.setattr(bot, "_live_yield", lambda now: ("cnbc", 5.0, 60))
+    monkeypatch.setattr(bot, "_history", lambda now: {"sd_day": 0.05, "basis": {"tnx": [0.0, 0.008]}})
+    quotes, note = bot.model({}, AT_11ET)
+    assert quotes == [] and "unavailable" in note   # never mixes a TNX gap with a CNBC quote

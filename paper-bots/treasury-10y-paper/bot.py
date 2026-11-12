@@ -35,7 +35,12 @@ CACHE_HOURS = 6
 TREASURY = ("https://home.treasury.gov/resource-center/data-chart-center/interest-rates/"
             "daily-treasury-rates.csv/{year}/all?type=daily_treasury_yield_curve"
             "&field_tdr_date_value={year}&page&_format=csv")
+FRED = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10&cosd={start}"
+STALE_OK_HOURS = 72  # keep using the last good history this long if every source refuses
 YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart/%5ETNX?interval={iv}&range={rng}"
+CNBC_QUOTE = ("https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol"
+              "?symbols=US10Y&requestMethod=itv&noform=1&partnerId=2&fund=1&exthrs=1&output=json")
+CNBC_CHART = "https://ts-api.cnbc.com/harmony/app/charts/1Y.json?symbol=US10Y"
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
 
@@ -55,8 +60,74 @@ def _tnx_closes(body: dict) -> dict:
     return out
 
 
+def _cnbc_closes(body: dict) -> dict:
+    """{YYYY-MM-DD: close} from CNBC's daily US10Y bars (Tradeweb on-the-run yield)."""
+    out = {}
+    try:
+        bars = body["barData"]["priceBars"]
+    except (KeyError, TypeError):
+        return {}
+    for bar in bars or []:
+        try:
+            stamp = str(bar["tradeTime"])
+            out[f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}"] = float(bar["close"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def _cnbc_quote(body: dict, now: dt.datetime):
+    """(yield %, age seconds) from CNBC's real-time US10Y quote, or None."""
+    try:
+        row = body["FormattedQuoteResult"]["FormattedQuote"][0]
+        level = float(str(row["last"]).rstrip("%"))
+        at = dt.datetime.strptime(str(row["last_time"]), "%Y-%m-%dT%H:%M:%S.%f%z")
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+    return level, (now - at).total_seconds()
+
+
+FRED_UA = {"User-Agent": "curl/8.5.0"}  # FRED stalls browser-style and custom agents
+
+
+def _read(url: str) -> str:
+    headers = FRED_UA if "fred.stlouisfed.org" in url else UA
+    return public_http.read(url, headers=headers, timeout=30, tries=2).decode("utf-8")
+
+
+def _why(exc: Exception) -> str:
+    code = getattr(exc, "code", None)
+    return f"HTTP {code}" if code else type(exc).__name__
+
+
+def _official(now: dt.datetime, read) -> tuple[dict, str]:
+    """Official 10y par yield by day: Treasury.gov first, FRED DGS10 as backup."""
+    try:
+        cmt = {}
+        for year in (now.year - 1, now.year):
+            cmt.update(um.parse_treasury_csv(read(TREASURY.format(year=year))))
+        if len(cmt) >= 21:
+            return cmt, "treasury.gov"
+        first = "Treasury.gov empty"
+    except Exception as exc:  # noqa: BLE001 - any refusal falls through to FRED
+        first = f"Treasury.gov {_why(exc)}"
+    try:
+        start = (now - dt.timedelta(days=400)).strftime("%Y-%m-%d")
+        cmt = um.parse_fred_csv(read(FRED.format(start=start)))
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"{first}, FRED {_why(exc)}") from exc
+    if len(cmt) < 21:
+        raise RuntimeError(f"{first}, FRED empty")
+    return cmt, "fred"
+
+
 def _history(now: dt.datetime, read=None) -> dict:
-    """Daily sd and basis, refreshed at most every 6 hours."""
+    """Daily sd and basis, refreshed at most every 6 hours.
+
+    If every source refuses, the last good history is reused for up to 72 hours
+    (the daily move size and basis barely change day to day). Past that it
+    raises with a note naming which source failed.
+    """
     path = os.path.join(HERE, CACHE)
     cache = engine.read_json(path) or {}
     try:
@@ -65,18 +136,31 @@ def _history(now: dt.datetime, read=None) -> dict:
         age = None
     if age is not None and age < CACHE_HOURS and cache.get("sd_day"):
         return cache
-    read = read or (lambda url: public_http.read(url, headers=UA, timeout=30, tries=2).decode("utf-8"))
-    cmt = {}
-    for year in (now.year - 1, now.year):
-        cmt.update(um.parse_treasury_csv(read(TREASURY.format(year=year))))
-    closes = _tnx_closes(json.loads(read(YAHOO.format(iv="1d", rng="6mo"))))
+    read = read or _read
+    try:
+        cmt, source = _official(now, read)
+        closes, misses = {}, []
+        for name, url, parse in (("cnbc", CNBC_CHART, _cnbc_closes),
+                                 ("tnx", YAHOO.format(iv="1d", rng="6mo"), _tnx_closes)):
+            try:
+                closes[name] = parse(json.loads(read(url)))
+            except Exception as exc:  # noqa: BLE001
+                misses.append(f"{'CNBC' if name == 'cnbc' else 'Yahoo ^TNX'} history {_why(exc)}")
+        if not any(closes.values()):
+            raise RuntimeError(", ".join(misses) or "no yield history")
+    except RuntimeError:
+        if age is not None and age < STALE_OK_HOURS and cache.get("sd_day"):
+            return cache
+        raise
     sd_day = um.daily_sd(cmt)
-    gap = um.basis(cmt, closes)
-    if sd_day is None or gap is None:
+    gaps = {name: um.basis(cmt, rows) for name, rows in closes.items() if rows}
+    gaps = {name: gap for name, gap in gaps.items() if gap is not None}
+    if sd_day is None or not gaps:
         return {}
     cache = {"at": now.isoformat(timespec="seconds"), "sd_day": round(sd_day, 5),
-             "basis_mean": round(gap[0], 5), "basis_sd": round(gap[1], 5),
-             "last_official": cmt[max(cmt)], "last_official_day": max(cmt), "paper_only": True}
+             "basis": {name: [round(g[0], 5), round(g[1], 5)] for name, g in gaps.items()},
+             "last_official": cmt[max(cmt)], "last_official_day": max(cmt), "source": source,
+             "paper_only": True}
     try:
         engine.write_json(path, cache)
     except OSError:
@@ -97,7 +181,7 @@ def quotes_for(markets: list[dict], level: float, hist: dict, now: dt.datetime) 
         kind = str(market.get("strike_type"))
         strike = market.get("floor_strike") if kind.startswith("greater") else market.get("cap_strike")
         what = ("above " if kind.startswith("greater") else "below ") + f"{float(strike):.2f}%"
-        why = (f"TNX {level:.3f}%, basis {hist['basis_mean']:+.3f}, daily move sd "
+        why = (f"{hist.get('feed', 'TNX')} {level:.3f}%, basis {hist['basis_mean']:+.3f}, daily move sd "
                f"{hist['sd_day'] * 100:.1f}bp, {minutes:.0f} min to 3:30pm ET: P {p_yes:.3f}")
         for side in engine.sides(market):
             side["fair"] = p_yes if side["side"] == "yes" else 1.0 - p_yes
@@ -105,6 +189,26 @@ def quotes_for(markets: list[dict], level: float, hist: dict, now: dt.datetime) 
             side["why"] = why
             out.append(side)
     return out
+
+
+def _live_yield(now: dt.datetime):
+    """(feed, yield %, age seconds). CNBC real-time first; Yahoo ^TNX is 15 min delayed."""
+    misses = []
+    try:
+        got = _cnbc_quote(engine.public_json(CNBC_QUOTE, headers=UA), now)
+        if got:
+            return ("cnbc", *got)
+        misses.append("CNBC quote empty")
+    except Exception as exc:  # noqa: BLE001
+        misses.append(f"CNBC quote {_why(exc)}")
+    try:
+        got = _live_tnx(now)
+        if got:
+            return ("tnx", *got)
+        misses.append("Yahoo ^TNX quote empty")
+    except Exception as exc:  # noqa: BLE001
+        misses.append(f"Yahoo ^TNX quote {_why(exc)}")
+    raise RuntimeError(", ".join(misses))
 
 
 def _live_tnx(now: dt.datetime):
@@ -120,15 +224,25 @@ def model(cfg: dict, now: dt.datetime):
     today = now.astimezone(um.ET).date()
     if um.minutes_left(now, today) is None:
         return [], "outside the settlement-day window (9:00-15:30 ET weekdays)"
-    tnx = _live_tnx(now)
-    if not tnx:
-        return [], "10Y yield quote missing"
-    if tnx[1] > um.MAX_QUOTE_AGE_SEC:
-        return [], f"10Y yield quote {tnx[1] / 60:.0f} min old (bond market closed?)"
-    hist = _history(now)
-    if not hist:
+    try:
+        feed, level, age = _live_yield(now)
+    except RuntimeError as exc:
+        return [], f"10Y yield quote missing ({exc}); waiting"
+    if age > um.MAX_QUOTE_AGE_SEC:
+        return [], f"10Y yield quote {age / 60:.0f} min old (bond market closed?)"
+    try:
+        hist = _history(now)
+    except RuntimeError as exc:
+        return [], f"Treasury yield history refused ({exc}); waiting"
+    gap = (hist.get("basis") or {}).get(feed) if hist else None
+    if not gap:
         return [], "Treasury yield history unavailable; waiting"
-    quotes = quotes_for(engine.kalshi_open_markets(SERIES), tnx[0], hist, now)
+    hist = dict(hist, feed="CNBC 10Y" if feed == "cnbc" else "TNX", basis_mean=gap[0], basis_sd=gap[1])
+    try:
+        markets = engine.kalshi_open_markets(SERIES)
+    except Exception as exc:  # noqa: BLE001
+        return [], f"Kalshi {SERIES} list {_why(exc)}; waiting"
+    quotes = quotes_for(markets, level, hist, now)
     return quotes, "" if quotes else "no 10Y market for today in window"
 
 

@@ -46,6 +46,21 @@ def parse_treasury_csv(text: str) -> dict:
     return out
 
 
+def parse_fred_csv(text: str) -> dict:
+    """{YYYY-MM-DD: 10y par yield} from FRED's DGS10 CSV (same Treasury series; "." = no print)."""
+    out = {}
+    for row in csv.reader(io.StringIO(text)):
+        if len(row) < 2:
+            continue
+        try:
+            dt_ = row[0].strip()
+            if len(dt_) == 10 and dt_[4] == "-":
+                out[dt_] = float(row[1])
+        except ValueError:
+            continue
+    return out
+
+
 def daily_sd(cmt: dict) -> float | None:
     days = sorted(cmt)[-(HISTORY_DAYS + 1):]
     moves = [cmt[b] - cmt[a] for a, b in zip(days, days[1:])]
