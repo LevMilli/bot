@@ -100,10 +100,11 @@ def test_reads_every_page_and_names_failures(monkeypatch):
     bot = _bot()
     open_at = dt.datetime(2026, 11, 12, 15, tzinfo=UTC)   # 10:00 ET Thursday
 
-    def boom(sym, now):
+    def boom(*a, **k):
         raise urllib.error.HTTPError("u", 429, "slow down", {}, None)
     monkeypatch.setattr(bot, "_yahoo", boom)
-    assert bot.model({}, open_at) == ([], "Yahoo NDX quote HTTP 429; waiting")
+    monkeypatch.setattr(engine, "public_json", boom)
+    assert bot.model({}, open_at) == ([], "NDX quote: CNBC HTTP 429, Yahoo HTTP 429; waiting")
 
 
 def test_only_the_4pm_events_are_priced(monkeypatch):
@@ -113,7 +114,23 @@ def test_only_the_4pm_events_are_priced(monkeypatch):
             {"ticker": "B", "event_ticker": "KXNASDAQ100U-26NOV12H1600"}]
     monkeypatch.setattr(engine, "kalshi_open_markets", lambda series, **k: rows)
     monkeypatch.setattr(bot, "_yahoo", lambda sym, now: (28000.0, 5) if "NDX" in sym else (25.0, 5))
+    monkeypatch.setattr(engine, "public_json", lambda *a, **k: {})
     seen = {}
     monkeypatch.setattr(bot, "quotes_for", lambda markets, *a: seen.setdefault("m", markets) and [])
     bot.model({}, dt.datetime(2026, 11, 12, 15, tzinfo=UTC))
     assert {m["ticker"] for m in seen["m"]} == {"B"}
+
+
+def test_cnbc_quotes_parse_and_drive_the_model(monkeypatch):
+    bot = _bot()
+    import kalshi_shadow_tower as engine
+    now = dt.datetime(2026, 11, 12, 15, tzinfo=UTC)   # 10:00 ET
+    body = {"FormattedQuoteResult": {"FormattedQuote": [
+        {"symbol": ".NDX", "last": "28,201.077", "last_time": "2026-11-12T09:59:30.000-0500"},
+        {"symbol": ".VXN", "last": "26.74", "last_time": "2026-11-11"}]}}
+    got = bot._cnbc(body, now)
+    assert got["NDX"] == (28201.077, 30.0) and got["VXN"][0] == 26.74
+    monkeypatch.setattr(engine, "public_json", lambda *a, **k: body)
+    monkeypatch.setattr(engine, "kalshi_open_markets", lambda *a, **k: [])
+    monkeypatch.setattr(bot, "_yahoo", lambda *a: (_ for _ in ()).throw(AssertionError("Yahoo not needed")))
+    assert bot.model({}, now) == ([], "no Nasdaq market in window")
