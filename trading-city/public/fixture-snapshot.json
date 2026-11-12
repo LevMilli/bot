@@ -205,7 +205,16 @@
       "method": "expectancy",
       "weights": {}
     },
-    "shadow_leaderboard": []
+    "shadow_leaderboard": [],
+    "lifetime": {
+      "realized": -94.91,
+      "trades": 14,
+      "max_drawdown": 101.4,
+      "resets": 1,
+      "wiped_losses": 94.91,
+      "complete": true,
+      "note": "Lifetime counts every closed paper trade, including books cleared by the midnight refill or a staff reset."
+    }
   },
   "bots": [
     {
@@ -265,7 +274,19 @@
       "sizing_mode": "kelly_lite",
       "venue_min_edge": 0.06,
       "shadow": null,
-      "risk_factors_open": []
+      "risk_factors_open": [],
+      "lifetime": {
+        "realized": 0.0,
+        "banked": 0.0,
+        "current": 0.0,
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "max_drawdown": null,
+        "resets": 0,
+        "wiped_losses": 0.0,
+        "complete": true
+      }
     },
     {
       "id": "kalshi-sp",
@@ -324,7 +345,19 @@
       "sizing_mode": "fixed",
       "venue_min_edge": 0.0,
       "shadow": null,
-      "risk_factors_open": []
+      "risk_factors_open": [],
+      "lifetime": {
+        "realized": 0.0,
+        "banked": 0.0,
+        "current": 0.0,
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "max_drawdown": null,
+        "resets": 0,
+        "wiped_losses": 0.0,
+        "complete": true
+      }
     },
     {
       "id": "btc15m",
@@ -385,7 +418,19 @@
       "sizing_mode": "kelly_lite",
       "venue_min_edge": 0.05,
       "shadow": null,
-      "risk_factors_open": []
+      "risk_factors_open": [],
+      "lifetime": {
+        "realized": 0.0,
+        "banked": 0.0,
+        "current": 0.0,
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "max_drawdown": null,
+        "resets": 0,
+        "wiped_losses": 0.0,
+        "complete": true
+      }
     },
     {
       "id": "memecoin",
@@ -443,7 +488,19 @@
       "sizing_mode": "fixed",
       "venue_min_edge": 0.0,
       "shadow": null,
-      "risk_factors_open": []
+      "risk_factors_open": [],
+      "lifetime": {
+        "realized": -94.91,
+        "banked": -94.91,
+        "current": 0.0,
+        "trades": 14,
+        "wins": 5,
+        "losses": 9,
+        "max_drawdown": 101.4,
+        "resets": 1,
+        "wiped_losses": 94.91,
+        "complete": true
+      }
     },
     {
       "id": "kalshi-sized",
@@ -495,7 +552,19 @@
       "sizing_mode": "fixed",
       "venue_min_edge": 0.0,
       "shadow": null,
-      "risk_factors_open": []
+      "risk_factors_open": [],
+      "lifetime": {
+        "realized": null,
+        "banked": 0.0,
+        "current": null,
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "max_drawdown": null,
+        "resets": 0,
+        "wiped_losses": 0.0,
+        "complete": true
+      }
     },
     {
       "id": "coinbase-spot",
@@ -538,7 +607,19 @@
       "venue_min_edge": 0.05,
       "sizing_mode": "fixed",
       "shadow": null,
-      "risk_factors_open": []
+      "risk_factors_open": [],
+      "lifetime": {
+        "realized": 0.0,
+        "banked": 0.0,
+        "current": 0.0,
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "max_drawdown": null,
+        "resets": 0,
+        "wiped_losses": 0.0,
+        "complete": true
+      }
     },
     {
       "id": "btc-carry",
@@ -581,7 +662,19 @@
       "venue_min_edge": 0.02,
       "sizing_mode": "fixed",
       "shadow": null,
-      "risk_factors_open": []
+      "risk_factors_open": [],
+      "lifetime": {
+        "realized": 0.0,
+        "banked": 0.0,
+        "current": 0.0,
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "max_drawdown": null,
+        "resets": 0,
+        "wiped_losses": 0.0,
+        "complete": true
+      }
     },
     {
       "id": "wall-street",
@@ -666,7 +759,19 @@
       "sizing_mode": "none",
       "capital_weight": 0,
       "shadow": null,
-      "risk_factors_open": []
+      "risk_factors_open": [],
+      "lifetime": {
+        "realized": 0.0,
+        "banked": 0.0,
+        "current": 0.0,
+        "trades": 0,
+        "wins": 0,
+        "losses": 0,
+        "max_drawdown": null,
+        "resets": 0,
+        "wiped_losses": 0.0,
+        "complete": true
+      }
     }
   ],
   "limits": {

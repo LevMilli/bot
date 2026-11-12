@@ -211,6 +211,9 @@ SETTLEMENT_FILES = (
     "pimp-midnight.json",
     "pimp-audit.json",
     "pimp-runs.json",
+    # Lifetime record. Books cleared by the midnight refill or a staff reset
+    # keep their closed P/L here, so a lost bankroll still counts.
+    "pimp-lifetime.json",
 )
 
 # Fixed commands. Nothing from the request is concatenated onto these.
@@ -2926,6 +2929,15 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         row.pop("last_epoch", None)
         public.append(row)
     desk_row = _desk_row(public, cashes, realized_rows, last_check, gate, cfg, root)
+    try:
+        import desk_lifetime
+        desk_lifetime.backfill_once(root)
+        lifetime = desk_lifetime.lifetime_board(root, public)
+        for bot in public:
+            bot["lifetime"] = lifetime["bots"].get(bot.get("id") or "")
+        desk_row["lifetime"] = lifetime["desk"]
+    except Exception as exc:  # noqa: BLE001 - snapshot must never fail on the lifetime board
+        desk_row["lifetime"] = {"paper_only": True, "error": type(exc).__name__}
     book = _book(public, q=q, filt=filt, page=page)
     changes = _changes(root, public)
     roi = roi_system(cfg, public)
@@ -4512,6 +4524,13 @@ def reset_bot(bot_id: str, root: str | None = None, who: str = "") -> dict:
     if not lock.acquire(blocking=False):
         return {"ok": False, "error": _BUSY}
     try:
+        try:
+            import desk_lifetime
+            spec = next(b for b in BOTS if b["id"] == bot_id)
+            view = _bot_view(spec, root, _load_runs(root), _today())
+            desk_lifetime.bank_before_reset(root, view, _today().isoformat(), source="reset")
+        except Exception:  # noqa: BLE001 - a reset still runs; the audit row stays
+            pass
         removed = []
         if bot_id == "sports-gap":
             cwd = _under(root, folder)
@@ -4995,6 +5014,11 @@ def reload_broke_tower(root: str, bot: dict, day: str, who: str = "midnight") ->
     before_today = float(bot.get("today") or 0.0)
     before_realized = _num(bot.get("realized"))
     learned = _learn_tower_before_midnight(root, bot, day)
+    try:
+        import desk_lifetime
+        desk_lifetime.bank_before_reset(root, bot, day, source="midnight")
+    except Exception:  # noqa: BLE001 - the archive copy still keeps the evidence
+        pass
     archived = []
     state_name = ACCOUNT_FILES.get(bot_id) or spec.get("state") or ""
     extras = {

@@ -280,6 +280,17 @@ export function BossDashboard({ bots, desk, roi, snap, onClose, onFocusBot }: Pr
         <p className="boss-pulse">
           <span>Today {money(desk?.today, true)}</span>
           <span>Realized {money(desk?.realized, true)}</span>
+          {desk?.lifetime?.realized != null && (
+            <span title={desk.lifetime.note}>Lifetime {money(desk.lifetime.realized, true)}</span>
+          )}
+          {desk?.lifetime?.max_drawdown != null && (
+            <span>Worst drop {money(desk.lifetime.max_drawdown)}</span>
+          )}
+          {!!desk?.lifetime?.resets && (
+            <span>
+              Refills {desk.lifetime.resets} · losses cleared {money(desk.lifetime.wiped_losses)}
+            </span>
+          )}
           <span>Open risk {money(desk?.open_risk)}</span>
           <span>Open {desk?.open_count ?? 0}</span>
           {desk?.trades_today != null && <span>Settles today {desk.trades_today}</span>}
@@ -318,6 +329,7 @@ export function BossDashboard({ bots, desk, roi, snap, onClose, onFocusBot }: Pr
                     <th>Status</th>
                     <th>Today</th>
                     <th>Realized</th>
+                    <th>Lifetime</th>
                     <th>Cash</th>
                     <th>Open</th>
                     <th>Hit</th>
@@ -335,6 +347,7 @@ export function BossDashboard({ bots, desk, roi, snap, onClose, onFocusBot }: Pr
                       <td>{statusLabel(bot)}</td>
                       <td>{money(bot.today, true)}</td>
                       <td>{money(bot.realized, true)}</td>
+                      <td>{money(bot.lifetime?.realized, true)}</td>
                       <td>{money(bot.cash)}</td>
                       <td>{bot.open_count ?? 0}</td>
                       <td>
@@ -358,7 +371,7 @@ export function BossDashboard({ bots, desk, roi, snap, onClose, onFocusBot }: Pr
                   ))}
                   {!floorBots.length && (
                     <tr>
-                      <td colSpan={8}>No towers in this filter.</td>
+                      <td colSpan={9}>No towers in this filter.</td>
                     </tr>
                   )}
                 </tbody>
@@ -382,6 +395,17 @@ export function BossDashboard({ bots, desk, roi, snap, onClose, onFocusBot }: Pr
                   Realized {money(selected.realized, true)} · open risk {money(selected.open_risk)} ·
                   cash {money(selected.cash)}
                 </p>
+                {selected.lifetime?.realized != null && (
+                  <p>
+                    Lifetime {money(selected.lifetime.realized, true)}
+                    {selected.lifetime.max_drawdown != null
+                      ? ` · worst drop ${money(selected.lifetime.max_drawdown)}`
+                      : ''}
+                    {selected.lifetime.resets
+                      ? ` · ${selected.lifetime.resets} refill${selected.lifetime.resets === 1 ? '' : 's'}, ${money(selected.lifetime.wiped_losses)} in losses cleared`
+                      : ''}
+                  </p>
+                )}
                 {selected.next_run && <p>Next check {selected.next_run}</p>}
                 {(selected.positions || []).length > 0 && (
                   <div className="boss-block">
