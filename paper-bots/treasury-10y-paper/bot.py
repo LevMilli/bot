@@ -65,7 +65,7 @@ def _history(now: dt.datetime, read=None) -> dict:
         age = None
     if age is not None and age < CACHE_HOURS and cache.get("sd_day"):
         return cache
-    read = read or (lambda url: public_http.read(url, headers=UA, timeout=15, tries=2).decode("utf-8"))
+    read = read or (lambda url: public_http.read(url, headers=UA, timeout=30, tries=2).decode("utf-8"))
     cmt = {}
     for year in (now.year - 1, now.year):
         cmt.update(um.parse_treasury_csv(read(TREASURY.format(year=year))))

@@ -12,9 +12,14 @@ error is raised right away (a missing series is not retried).
 Kalshi URLs go through ``kalshi_gateway``: every tower shares one pace and one
 back-off, so a 429 here waits on the shared door (not a private sleep), and a
 door shut longer than the gateway's max wait is raised straight away.
+
+Every request asks for gzip and the body is unpacked here. Polymarket's
+gamma API answers 406 "gzip_required" to an event page over 50 rows unless the
+request accepts gzip, which had left the Polymarket sports tower blind.
 """
 from __future__ import annotations
 
+import gzip
 import os
 import threading
 import time
@@ -54,15 +59,38 @@ def _retry_after(exc):
     return min(max(value, 0.0), 30.0)
 
 
+def _with_gzip(headers):
+    out = dict(headers or UA)
+    if not any(k.lower() == "accept-encoding" for k in out):
+        out["Accept-Encoding"] = "gzip"
+    return out
+
+
+def _unpack(resp, body):
+    """Gunzip when the server says it sent gzip (or sends the gzip magic with no headers)."""
+    if not isinstance(body, (bytes, bytearray)):
+        return body
+    try:
+        encoding = str((getattr(resp, "headers", None) or {}).get("Content-Encoding") or "").lower()
+    except AttributeError:
+        encoding = ""
+    if "gzip" in encoding or (not encoding and body[:2] == b"\x1f\x8b"):
+        try:
+            return gzip.decompress(body)
+        except (OSError, EOFError):
+            return body
+    return body
+
+
 def read(url, headers=None, timeout=10, tries=4, sleep=time.sleep):
-    """GET ``url`` and return the raw body bytes."""
+    """GET ``url`` and return the body bytes (gunzipped if the server compressed them)."""
     last = None
     for attempt in range(max(1, int(tries))):
         _space()
         try:
-            req = urllib.request.Request(url, headers=headers or UA)
+            req = urllib.request.Request(url, headers=_with_gzip(headers))
             with kalshi_gateway.urlopen(req, timeout=timeout) as resp:
-                return resp.read()
+                return _unpack(resp, resp.read())
         except kalshi_gateway.GatewayBusy:
             raise  # the shared door is shut for a while; skip this read now
         except urllib.error.HTTPError as exc:
