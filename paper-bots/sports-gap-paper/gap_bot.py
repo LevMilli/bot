@@ -2403,6 +2403,28 @@ def run():
                         f"max open risk (${open_risk:.2f} + ${cost:.2f} > "
                         f"${max_open_risk:.2f})"
                     )
+        fill_check = None
+        if reason is None:
+            try:
+                if DESK_ROOT not in sys.path:
+                    sys.path.insert(0, DESK_ROOT)
+                import strict_fill
+                fill_check = strict_fill.recheck(
+                    m.get("ticker"), c.get("side") or "YES", ask, n, fee_per=fee,
+                    edge=gap, min_edge=float(c.get("need") or need_edge or 0.0),
+                )
+            except ImportError:
+                fill_check = None
+            if fill_check is not None:
+                if not fill_check["ok"]:
+                    reason = fill_check["reason"]
+                else:
+                    gap = round(float(gap) - (fill_check["ask"] - ask) - (fee(fill_check["ask"]) - fee(ask)), 4)
+                    ask = fill_check["ask"]
+                    n = int(fill_check["contracts"])
+                    cost = round(n * (ask + fee(ask)), 2)
+                    if cost > s["cash"] + 1e-9:
+                        reason = "not enough paper cash"
         if reason is None:
             fill_id = f"{m['ticker']}|{ts}"
             if any(str(p.get("fill_id") or "") == fill_id for p in s.get("open") or []):
@@ -2548,6 +2570,8 @@ def run():
                "price_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                "fill_id": fill_id,
                "exit_plan": exit_plan}
+        if fill_check is not None:
+            strict_fill.stamp(pos, fill_check)
         s["open"].append(pos)
         open_by_game[key] = pos
         buys_this_check += 1
