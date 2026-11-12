@@ -97,3 +97,39 @@ def test_desk_atomic_write_uses_unique_tmp(tmp_path, monkeypatch):
     pimp_desk._atomic_write(str(tmp_path / "pimp-good.json"), "{}\n")
     assert seen and seen[0] != str(tmp_path / "pimp-good.json") + ".tmp"
     assert str(os.getpid()) in seen[0]
+
+
+def test_save_over_the_link_is_kept_not_dropped(tmp_path):
+    """Any writer that replaces the link mid-run keeps its save (desk brain, tape, ...)."""
+    volume = tmp_path / "volume"
+    root = tmp_path / "app" / "paper-bots"
+    root.mkdir(parents=True)
+    (root / "desk_brain_journal.json").write_text(json.dumps({"n": 1}))
+    old = pimp_desk.SETTLEMENT_FILES
+    pimp_desk.SETTLEMENT_FILES = ("desk_brain_journal.json",)
+    try:
+        pimp_desk.keep_closed_settlements(str(root), durable=str(volume))
+        local = root / "desk_brain_journal.json"
+        assert os.path.islink(local)
+        tmp = str(local) + ".tmp"
+        with open(tmp, "w") as handle:
+            json.dump({"n": 2}, handle)
+        os.replace(tmp, local)  # an old-style writer replaces the link
+        assert not os.path.islink(local)
+        pimp_desk.keep_closed_settlements(str(root), durable=str(volume))
+        assert os.path.islink(local)
+        assert json.loads((volume / "desk_brain_journal.json").read_text())["n"] == 2
+        # A fresh image arrives in a new process: there the volume copy wins.
+        pimp_desk._LINKED.clear()
+        os.remove(local)
+        local.write_text(json.dumps({"n": 0}))
+        pimp_desk.keep_closed_settlements(str(root), durable=str(volume))
+        assert json.loads(local.read_text())["n"] == 2
+    finally:
+        pimp_desk.SETTLEMENT_FILES = old
+
+
+def test_learning_files_are_kept_on_the_volume():
+    assert "gas-weekly-paper/aaa_history.json" in pimp_desk.SETTLEMENT_FILES
+    assert "calibration-lab-paper/calibration.json" in pimp_desk.SETTLEMENT_FILES
+    assert "calibration-lab-paper/calibration_rows.jsonl" in pimp_desk.SETTLEMENT_FILES

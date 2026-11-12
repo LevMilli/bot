@@ -1227,11 +1227,14 @@ def _bind_settlement(local: str, remote: str) -> None:
     remote_ready = os.path.isfile(remote) and not os.path.islink(remote)
     local_file = os.path.isfile(local) and not os.path.islink(local)
     if local_file and remote_ready and local in _LINKED:
-        # This process linked it earlier; a writer replaced the link instead of
-        # saving through it. The volume copy still wins (same as a fresh image),
-        # but say so: that writer's save is being dropped.
-        log.warning("paper settlement %s: link was replaced by a plain file; the volume copy wins. "
-                    "Its writer must save through the link.", local)
+        # This process linked it earlier, so the plain file is not from the image:
+        # a writer saved over the link (atomic replace) instead of through it.
+        # That save is the newest state. Keep it on the volume, then re-link.
+        # (A fresh image always arrives in a new process, where the volume wins.)
+        log.info("paper settlement %s: saved over the link; keeping that save on the volume", local)
+        _copy_settlement(local, remote)
+        _point_settlement(local, remote)
+        return
     _LINKED.add(local)
     if remote_ready:
         _point_settlement(local, remote)
@@ -4952,7 +4955,9 @@ def _install_new_towers() -> None:
         })
     AUTO = tuple(slots)
     SETTLEMENT_FILES = tuple(
-        list(SETTLEMENT_FILES) + [f"{spec['folder']}/paper_account.json" for spec in new_towers.ACTIVE]
+        list(SETTLEMENT_FILES)
+        + [f"{spec['folder']}/paper_account.json" for spec in new_towers.ACTIVE]
+        + [f"{spec['folder']}/{name}" for spec in new_towers.ACTIVE for name in spec.get("keep") or ()]
     )
 
 
