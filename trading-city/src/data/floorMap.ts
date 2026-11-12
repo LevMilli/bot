@@ -85,6 +85,7 @@ export const FLOORS: FloorDef[] = [
       { officeId: 'point-spread', botId: 'point-spread', label: 'Point spread' },
       { officeId: 'game-total', botId: 'game-total', label: 'Game total' },
       { officeId: 'calibration-lab', botId: 'calibration-lab', label: 'Calibration lab' },
+      { officeId: 'whatif-lab', botId: 'whatif-lab', label: 'What-if lab' },
     ],
   },
   {
