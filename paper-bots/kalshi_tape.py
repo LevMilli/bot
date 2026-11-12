@@ -141,13 +141,32 @@ def save_tape(state: dict, root: str | None = None) -> None:
     os.replace(tmp, path)
 
 
+class RateLimited(RuntimeError):
+    """Kalshi said 429. The tape stops for this check instead of asking again."""
+
+
+def tape_budget_sec() -> float:
+    """Wall-clock seconds one tape sync may spend. The tower's own check comes first."""
+    try:
+        return max(1.0, float(os.environ.get("KALSHI_TAPE_BUDGET_SEC", 30)))
+    except ValueError:
+        return 30.0
+
+
 def _get_json(url: str, tries: int = 3) -> dict:
     err = None
     for attempt in range(tries):
         try:
             req = urllib.request.Request(url, headers=UA)
-            with urllib.request.urlopen(req, timeout=25) as resp:
+            with urllib.request.urlopen(req, timeout=15) as resp:
                 return json.load(resp)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429:
+                raise RateLimited("Kalshi tape GET rate limited (429)") from exc
+            err = exc
+            if exc.code < 500:
+                break
+            time.sleep(0.4 * (attempt + 1))
         except Exception as exc:  # noqa: BLE001 — network; caller records last_error
             err = exc
             time.sleep(0.4 * (attempt + 1))
@@ -255,6 +274,7 @@ def sync_tape_family(
             overrides.get("max_markets_per_series") or cfg["max_markets_per_series"]
         ),
         expand_open=expand_open,
+        budget_sec=overrides.get("budget_sec"),
     )
 
 
@@ -265,6 +285,8 @@ def sync_tape(
     per_ticker_limit: int = 100,
     max_markets_per_series: int = 40,
     expand_open: bool = True,
+    budget_sec: float | None = None,
+    clock=time.monotonic,
 ) -> dict:
     """
     Pull new public trades for watched open markets (and any extra tickers).
@@ -281,14 +303,23 @@ def sync_tape(
     errors: list[str] = []
 
     want_tickers: set[str] = set(str(t) for t in (tickers or []) if t)
+    budget = tape_budget_sec() if budget_sec is None else float(budget_sec)
+    deadline = clock() + budget
+    stopped = ""
     if expand_open:
         for s in watched:
+            if clock() >= deadline:
+                stopped = f"tape budget {budget:.0f}s hit while listing markets"
+                break
             try:
                 markets = _soonest_markets(list_open_markets(s), int(max_markets_per_series))
                 open_markets[s] = [m.get("ticker") for m in markets if m.get("ticker")]
                 for m in markets:
                     if m.get("ticker"):
                         want_tickers.add(str(m["ticker"]))
+            except RateLimited:
+                stopped = "Kalshi rate limited the tape (429); next check picks it up"
+                break
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{s} markets: {type(exc).__name__}")
     else:
@@ -302,10 +333,15 @@ def sync_tape(
                 open_markets[ser].append(ticker)
 
     watermarks = dict(state.get("min_ts_by_ticker") or {})
-    for ticker in sorted(want_tickers):
+    todo = [t for t in sorted(want_tickers)
+            if series_of_ticker(t) and series_of_ticker(t) in watched]
+    for done, ticker in enumerate(todo):
         ser = series_of_ticker(ticker)
-        if not ser or ser not in watched:
-            continue
+        if stopped:
+            break
+        if clock() >= deadline:
+            stopped = f"tape budget {budget:.0f}s hit; {len(todo) - done} market(s) left for next check"
+            break
         # Speed: only pull prints at/after last watermark (minus 5s overlap); seen_ids dedupe.
         min_ts = watermarks.get(ticker)
         try:
@@ -316,6 +352,9 @@ def sync_tape(
             min_ts_i = None
         try:
             rows = fetch_trades_for_ticker(ticker, min_ts=min_ts_i, limit=per_ticker_limit)
+        except RateLimited:
+            stopped = f"Kalshi rate limited the tape (429); {len(todo) - done} market(s) left for next check"
+            break
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{ticker} trades: {type(exc).__name__}")
             continue
@@ -349,7 +388,10 @@ def sync_tape(
     state["seen_ids"] = list(seen)
     state["open_markets"] = open_markets
     state["last_sync_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    if stopped:
+        errors.insert(0, stopped)
     state["last_error"] = "; ".join(errors) if errors else None
+    state["last_stopped"] = stopped or None
     state["last_added"] = added
     save_tape(state, root)
     return state

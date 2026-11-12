@@ -334,6 +334,12 @@ def list_open(series: str, limit: int = 4) -> list[dict]:
             when = dt.datetime.fromisoformat(str(close).replace("Z", "+00:00"))
         except Exception:
             continue
+        # Kalshi's status=open list can still carry a window that closed minutes ago
+        # (overnight it reports status "closed"). A closed window is not a candidate.
+        if str(m.get("status") or "").lower() in ("closed", "settled", "finalized", "determined"):
+            continue
+        if when <= dt.datetime.now(dt.timezone.utc):
+            continue
         yes_ask = m.get("yes_ask_dollars")
         no_ask = m.get("no_ask_dollars")
         yes_bid = m.get("yes_bid_dollars")
