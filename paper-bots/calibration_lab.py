@@ -187,7 +187,10 @@ def save_rows(rows: list[dict], now: dt.datetime, lab_dir: str = LAB_DIR) -> lis
         seen.add(row["ticker"])
         keep.append(row)
     path = os.path.join(lab_dir, ROWS)
-    tmp = path + ".tmp"
+    if os.path.islink(path):  # kept on the volume: save through the link
+        path = os.path.realpath(path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as handle:
         for row in keep:
             handle.write(json.dumps(row, separators=(",", ":")) + "\n")

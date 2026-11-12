@@ -51,6 +51,7 @@ TOWERS = (
         "id": "gas-weekly",
         "name": "Gas weekly",
         "folder": "gas-weekly-paper",
+        "keep": ("aaa_history.json",),  # 21-day momentum fit must survive a deploy
         "venue": "kalshi_econ",
         "floor": 0.05,
         "kind": "econ",
@@ -238,6 +239,7 @@ TOWERS = (
         "id": "calibration-lab",
         "name": "Calibration lab",
         "folder": "calibration-lab-paper",
+        "keep": ("calibration.json", "calibration_rows.jsonl"),
         "venue": "kalshi_econ",
         "floor": 0.05,
         "kind": "research",

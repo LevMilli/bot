@@ -1722,7 +1722,9 @@ class PimpDeskTests(unittest.TestCase):
             self.assertTrue(os.path.islink(log_path))
             snap = pimp_desk.snapshot(root)
             self.assertEqual([point["v"] for point in snap["desk"]["curve"]], [9.92])
-            # A push replaces the working tree with the empty file from the image.
+            # A push replaces the working tree with the empty file from the image,
+            # and the desk starts as a new process.
+            pimp_desk._LINKED.clear()
             os.remove(state_path)
             os.remove(log_path)
             _write(state_path, json.dumps({

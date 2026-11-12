@@ -27,6 +27,7 @@ class VolumePersistenceTests(unittest.TestCase):
 
     def tearDown(self):
         pimp_desk._BOUND_DURABLE.pop(os.path.realpath(self.root), None)
+        pimp_desk._LINKED.clear()  # a redeploy is a new process
         self._tmp.cleanup()
 
     def _bind(self):
@@ -39,6 +40,7 @@ class VolumePersistenceTests(unittest.TestCase):
             if os.path.lexists(local):
                 os.remove(local)
         pimp_desk._BOUND_DURABLE.pop(os.path.realpath(self.root), None)
+        pimp_desk._LINKED.clear()  # a redeploy is a new process
 
     def test_desk_control_files_are_on_the_saved_list(self):
         for name in (
