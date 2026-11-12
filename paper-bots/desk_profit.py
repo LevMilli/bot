@@ -79,6 +79,14 @@ BOT_VENUE = {
     "esports-match": "kalshi_sports",
 }
 
+# New Kalshi shadow towers (new_towers.py) reuse an existing locked floor.
+try:
+    import new_towers as _new_towers
+except ImportError:  # pragma: no cover - partial checkout
+    _new_towers = None
+if _new_towers is not None:
+    BOT_VENUE.update(_new_towers.VENUES)
+
 
 def _num(value) -> float | None:
     try:

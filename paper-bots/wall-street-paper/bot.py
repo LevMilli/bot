@@ -169,6 +169,22 @@ TOWERS = (
 )
 
 
+def _with_new_towers(rows):
+    """Add the new Kalshi shadow towers (new_towers.py) to the routing list."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        import new_towers
+    except ImportError:
+        return rows
+    extra = tuple((spec["id"], tuple(spec.get("aliases") or ())) for spec in new_towers.ACTIVE)
+    return extra + tuple(rows)
+
+
+TOWERS = _with_new_towers(TOWERS)
+
+
 def route_question(question) -> dict:
     """Send one tower's question to that tower. A wider question stays with the city guide.
 
