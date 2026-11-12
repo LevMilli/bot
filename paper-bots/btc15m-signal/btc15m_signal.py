@@ -884,6 +884,25 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
         contracts = int(stake // per) if per > 0 else 0
     if contracts < 1:
         return none_msg
+    check = None
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import strict_fill
+        check = strict_fill.recheck(
+            ticker, side, ask, contracts, fee_per=fee_per_contract,
+            edge=edge_val, min_edge=floor,
+        )
+    except ImportError:
+        check = None
+    if check is not None:
+        if not check["ok"]:
+            return check["reason"]
+        if check["ask"] != float(ask):
+            ask = check["ask"]
+            fee = fee_per_contract(float(ask))
+            per = float(ask) + float(fee or 0)
+        contracts = int(check["contracts"])
     cost = round(contracts * per, 2)
     cash = float(state.get("cash") or 0)
     if cost > cash + 1e-9 or len(state.get("open") or []) >= 12:
@@ -938,6 +957,10 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
         "adapt_notes": list((adapt_plan or {}).get("notes") or [])[:6],
         "play_safe": bool((adapt_plan or {}).get("play_safe")),
         "play_big": bool((adapt_plan or {}).get("play_big")),
+        "fill_check": None if check is None else {
+            k: check.get(k) for k in
+            ("decided_ask", "quoted_ask", "slip", "depth", "capped", "requoted", "note")
+        },
         "vol_regime": vol.get("regime"),
         "vol_score": vol.get("score"),
         "history_n": perf.get("n"),

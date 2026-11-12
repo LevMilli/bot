@@ -59,6 +59,14 @@ def _read(path: str) -> bytes | None:
 
 
 @pytest.fixture(autouse=True)
+def _no_live_requote(monkeypatch):
+    """Paper buys re-read the live order book before filling (strict_fill).
+    Tests stay offline; test_strict_fill.py turns it on with a fake book."""
+    monkeypatch.setenv("PAPER_STRICT_FILL", "0")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_paper_state():
     if _TRACKED is None:
         # Not a git checkout: cannot tell runtime files from source. Do nothing.

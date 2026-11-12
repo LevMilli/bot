@@ -661,6 +661,34 @@ def step_scan(args, state, day):
         print(alerts.format_skip_note(day, held))
         logger.learn(f"{day}: no trade - {held}", "skip")
         return
+    check = None
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import strict_fill
+        check = strict_fill.recheck(
+            pick["ticker"], pick["side"], float(pick["ask"]), n,
+            fee_per=lambda px: paper_sim.taker_fee(1, px),
+            edge=edge_proxy, min_edge=venue_edge,
+        )
+    except ImportError:
+        check = None
+    if check is not None:
+        if not check["ok"]:
+            print(alerts.format_skip_note(day, check["reason"]))
+            logger.learn(f"{day}: no trade - {check['reason']}", "skip")
+            _densify_scan_skip(check["reason"])
+            return
+        pick = dict(pick, ask=float(check["ask"]))
+        n = int(check["contracts"])
+        while n >= 1 and n * pick["ask"] + paper_sim.taker_fee(n, pick["ask"]) > float(state["bankroll"]) + 1e-9:
+            n -= 1
+        if n < 1:
+            reason = "not enough paper bankroll at the re-checked price"
+            print(alerts.format_skip_note(day, reason))
+            logger.learn(f"{day}: no trade - {reason}", "skip")
+            _densify_scan_skip(reason)
+            return
     pos = paper_sim.place_paper_buy(
         state, day, ev, pick, n, now.isoformat(timespec="seconds"),
     )
@@ -668,6 +696,8 @@ def step_scan(args, state, day):
         print(alerts.format_skip_note(day, str(pos)))
         logger.learn(f"{day}: no trade - {pos}", "skip")
         return
+    if check is not None:
+        strict_fill.stamp(pos, check)
     pos["why"] = (
         f"Sized paper buy (Φ fair). Ask in band; desk Kelly-lite sized {n} contracts."
     )

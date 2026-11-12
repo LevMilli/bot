@@ -1706,6 +1706,25 @@ def paper_buy(state: dict, ev: dict, buys_this_check: int = 0, sold_this_check=N
         return f"Desk sizing failed: {type(exc).__name__}"
     if contracts < 1:
         return none_msg
+    check = None
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import strict_fill
+        check = strict_fill.recheck(
+            ticker, ev["side"], ask, contracts, fee_per=kalshi_fee,
+            edge=ev.get("edge"), min_edge=0.0,
+        )
+    except ImportError:
+        check = None
+    if check is not None:
+        if not check["ok"]:
+            return f"{none_msg} {check['reason']}."
+        if check["ask"] != ask:
+            ask = float(check["ask"])
+            fee = float(kalshi_fee(ask))
+            per = ask + fee
+        contracts = int(check["contracts"])
     cost = round(contracts * per, 2)
     cash = float(state.get("cash") or 0)
     if cost > cash + 1e-9 or len(state.get("open") or []) >= 12:
@@ -1768,6 +1787,8 @@ def paper_buy(state: dict, ev: dict, buys_this_check: int = 0, sold_this_check=N
         "history_ci_low": perf.get("hit_ci_low"),
         "fill_tax": 0.01,
     })
+    if check is not None:
+        strict_fill.stamp(state["open"][-1], check)
     try:
         import desk_roi_plan as _xp
         state["open"][-1]["exit_plan"] = _xp.default_exit_plan("commodity-15m")

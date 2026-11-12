@@ -372,6 +372,34 @@ def step_scan(args, state, day):
             logger.learn(f"{day}: no trade - {reason}", "skip")
             _densify_scan_skip(reason)
         return
+    check = None
+    try:
+        import strict_fill
+        check = strict_fill.recheck(
+            pick["ticker"], pick["side"], float(pick["ask"]), n,
+            fee_per=lambda px: paper_sim.taker_fee(1, px),
+            edge=edge_proxy, min_edge=venue_edge,
+        )
+    except ImportError:
+        check = None
+    if check is not None:
+        if not check["ok"]:
+            reason = check["reason"]
+            print(alerts.format_skip_note(day, reason))
+            logger.learn(f"{day}: no trade - {reason}", "skip")
+            _densify_scan_skip(reason)
+            return
+        pick = dict(pick, ask=float(check["ask"]))
+        n = int(check["contracts"])
+        while n >= 1 and n * pick["ask"] + paper_sim.taker_fee(n, pick["ask"]) > float(state["bankroll"]) + 1e-9:
+            n -= 1
+        if n < 1:
+            reason = "not enough paper bankroll at the re-checked price"
+            print(alerts.format_skip_note(day, reason))
+            logger.learn(f"{day}: no trade - {reason}", "skip")
+            _densify_scan_skip(reason)
+            return
+        fee = paper_sim.taker_fee(n, pick["ask"])
     entry_time = now.isoformat(timespec="seconds")
     fill_id = f"{pick['ticker']}|{entry_time}"
     stake = round(n * float(pick["ask"]) + fee, 2)
@@ -391,6 +419,8 @@ def step_scan(args, state, day):
         _densify_scan_skip(reason)
         return
     pos = paper_sim.open_position(state, day, ev, pick, n, entry_time)
+    if check is not None:
+        strict_fill.stamp(pos, check)
     try:
         import desk_profit
         pos["risk_factor"] = desk_profit.risk_factor_for("kalshi-sp", pick["side"])
