@@ -9,7 +9,7 @@ a bad match) and is logged, not bought.
 
 Leagues: EPL, La Liga, Champions League, Bundesliga, Serie A, Ligue 1, MLS,
 ATP and WTA. Paper only. Shadow only. $25 fixed ticket from a $500 sleeve,
-max 3 open, one per event. Pre-game only: 10 minutes to 48 hours before start.
+max 6 open, one per event. Pre-game only: 10 minutes to 48 hours before start.
 Exits: model flip at the bid, settle backstop.
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ for path in (DESK_ROOT, HERE):
 import kalshi_shadow_tower as engine  # noqa: E402
 import match_model as mm  # noqa: E402
 
-SPEC = {"id": "soccer-tennis-lean", "name": "Soccer & tennis lean", "floor": 0.06, "max_open": 3, "max_edge": 0.15}
+SPEC = {"id": "soccer-tennis-lean", "name": "Soccer & tennis lean", "floor": 0.06, "max_open": 6, "max_edge": 0.15}
 GAMMA = ("https://gamma-api.polymarket.com/events?series_id={sid}&active=true&closed=false"
          "&limit=200&end_date_min={lo}&end_date_max={hi}")
 # Tennis events end days after the match starts (Polymarket closes them late).

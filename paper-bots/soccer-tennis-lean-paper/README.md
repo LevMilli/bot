@@ -14,7 +14,7 @@ Leagues: EPL, La Liga, Champions League, Bundesliga, Serie A, Ligue 1, MLS, ATP 
 - Pre-game only: 10 minutes to 48 hours before start.
 - Polymarket spread no wider than 3¢ and liquidity at least $5k on every side.
 - Edge = fair − Kalshi ask − Kalshi fee must be at least the locked sports floor **0.06**. An edge above **0.15** usually means a bad match or news one venue has not priced; it is logged, not bought.
-- $25 fixed ticket from a $500 sleeve, max 3 open, one per event, one new buy per check.
+- $25 fixed ticket from a $500 sleeve, max 6 open, one per event, one new buy per check.
 
 ## Exits
 - **Model flip:** sell at the bid when bid − fee beats the model fair by 2¢.

@@ -6,7 +6,7 @@ Uses Polymarket's moneyline mid as the fair price for the same game
 fee clears the locked sports floor of 0.06. In practice that means Kalshi has
 not caught up with a move Polymarket already made.
 
-Paper only. Shadow only. $25 fixed ticket from a $500 sleeve, max 2 open, one
+Paper only. Shadow only. $25 fixed ticket from a $500 sleeve, max 4 open, one
 per game. Pre-game only (5 minutes to 48 hours before start), Polymarket
 spread at most 3¢ and liquidity at least $10k.
 Exits: model flip at the bid, settle backstop.
@@ -26,7 +26,7 @@ for path in (DESK_ROOT, HERE):
 import kalshi_shadow_tower as engine  # noqa: E402
 import lean_model as lean  # noqa: E402
 
-SPEC = {"id": "poly-sports-lean", "name": "Poly sports lean", "floor": 0.06, "max_open": 2, "max_edge": 0.15}
+SPEC = {"id": "poly-sports-lean", "name": "Poly sports lean", "floor": 0.06, "max_open": 4, "max_edge": 0.15}
 GAMMA = "https://gamma-api.polymarket.com/events?series_id={sid}&active=true&closed=false&limit=500"
 
 

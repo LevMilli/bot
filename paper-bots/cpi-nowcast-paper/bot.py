@@ -7,7 +7,7 @@ nowcast and its measured historical miss (``cpi_model.py``). Buys a side only
 when the edge after the Kalshi fee clears the locked econ floor of 0.05; an
 edge over 0.15 is logged but not bought.
 
-Paper only. Shadow only. $25 fixed ticket from a $500 sleeve, max 3 open, one
+Paper only. Shadow only. $25 fixed ticket from a $500 sleeve, max 4 open, one
 per event. Only for the month the nowcast covers, only when the nowcast is
 under 5 days old, and never in the last 2 hours before the release.
 Exits: model flip at the bid, settle backstop.
@@ -29,7 +29,7 @@ import cpi_model as cm  # noqa: E402
 import kalshi_shadow_tower as engine  # noqa: E402
 import public_http  # noqa: E402
 
-SPEC = {"id": "cpi-nowcast", "name": "CPI nowcast", "floor": 0.05, "max_open": 3, "max_edge": 0.15}
+SPEC = {"id": "cpi-nowcast", "name": "CPI nowcast", "floor": 0.05, "max_open": 4, "max_edge": 0.15}
 CACHE = "nowcast_cache.json"
 CACHE_HOURS = 6
 CLEVELAND = ("https://www.clevelandfed.org/-/media/files/webcharts/inflationnowcasting/"

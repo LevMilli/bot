@@ -10,7 +10,7 @@ Shadow paper tower for Kalshi's monthly CPI markets: headline and core CPI, mont
 ## When it buys
 - Only the month the nowcast covers, only when the nowcast is under 5 days old, and never in the last 2 hours before the release.
 - Edge = fair − ask − Kalshi fee must be at least the locked econ floor **0.05**. An edge above **0.15** means the model and the market strongly disagree; that is logged, not bought.
-- $25 fixed ticket from a $500 sleeve, max 3 open, one per event, one new buy per check.
+- $25 fixed ticket from a $500 sleeve, max 4 open, one per event, one new buy per check.
 
 ## Exits
 - **Model flip:** sell at the bid when bid − fee beats the model fair by 2¢.

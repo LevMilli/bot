@@ -7,7 +7,7 @@ what the station has already recorded plus the ensemble forecast for the hours
 left (``weather_model.py``). It buys a side only when the edge after the Kalshi
 fee clears the locked economics floor of 0.05.
 
-Paper only. Shadow only. $25 fixed ticket from a $500 sleeve, max 3 open, one per
+Paper only. Shadow only. $25 fixed ticket from a $500 sleeve, max 7 open, one per
 city-day. Buys only after 15:00 local standard time on the day (the afternoon
 lock); earlier brackets are logged for calibration. Exits: model flip at the
 bid, settle backstop.
@@ -30,7 +30,7 @@ for path in (DESK_ROOT, HERE):
 import kalshi_shadow_tower as engine  # noqa: E402
 import weather_model as wm  # noqa: E402
 
-SPEC = {"id": "weather-high", "name": "Weather high", "floor": 0.05, "max_open": 3,
+SPEC = {"id": "weather-high", "name": "Weather high", "floor": 0.05, "max_open": 7,
         # An edge this large means the model and the market disagree on the
         # inputs, not that the market is that wrong. Log it; do not buy it.
         "max_edge": 0.25}

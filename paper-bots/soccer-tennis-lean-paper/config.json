@@ -5,6 +5,6 @@
   "venue_min_edge": 0.06,
   "stake_usd": 25,
   "starter_cash": 500,
-  "max_open": 3,
+  "max_open": 6,
   "note": "Kalshi soccer (EPL, La Liga, UCL, Bundesliga, Serie A, Ligue 1, MLS) and tennis (ATP, WTA) winners. Fair = Polymarket moneyline mid for the same game. Floor 0.06 locked."
 }

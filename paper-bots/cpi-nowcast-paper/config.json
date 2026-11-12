@@ -5,6 +5,6 @@
   "venue_min_edge": 0.05,
   "stake_usd": 25,
   "starter_cash": 500,
-  "max_open": 3,
+  "max_open": 4,
   "note": "Kalshi monthly CPI (KXCPI, KXCPICORE, KXCPIYOY, KXCPICOREYOY). Fair = Cleveland Fed nowcast + its measured historical miss (x1.25). Floor 0.05 locked."
 }

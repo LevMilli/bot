@@ -14,7 +14,7 @@ On the first live check, matched games sat within about 1¢ of each other, so th
 ## When it buys
 - Pre-game only, from **48 hours** to **5 minutes** before start.
 - Edge = fair − ask − Kalshi fee must be at least the locked sports floor **0.06**. An edge above **0.15** is logged but not bought.
-- $25 fixed ticket from a $500 sleeve, max 2 open, one per game, one new buy per check.
+- $25 fixed ticket from a $500 sleeve, max 4 open, one per game, one new buy per check.
 
 ## Exits
 - **Model flip:** sell at the bid when bid − fee beats the fair by 2¢.

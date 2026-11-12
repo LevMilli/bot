@@ -19,7 +19,7 @@ TOWERS = (
         "kind": "weather",
         "every_sec": 300,
         "timeout": 75,
-        "max_open": 3,
+        "max_open": 7,
         "blurb": (
             "Shadow Kalshi daily-high brackets for seven cities. Prices each bracket from the "
             "station's recorded high plus the ensemble forecast. Buys only after the afternoon "
@@ -31,7 +31,8 @@ TOWERS = (
             "Fair = recorded high so far (NWS station) + Open-Meteo ensemble for the hours left, anchored to the NWS forecast high",
             "Buy window: after 15:00 local standard time on the day; earlier brackets are logged for calibration",
             "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked econ 0.05 and ≤ 0.25 trust cap",
-            "Fixed $25 ticket in whole contracts; max 3 open, one per city-day, one new buy per check",
+            "Fixed $25 ticket in whole contracts; max 7 open, one per city-day, one new buy per check",
+            "Extra slots: up to 2 more past max open, only when edge ≥ 2× the floor (still under the trust cap); tagged extra",
         ],
         "sell": [
             "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
@@ -70,6 +71,7 @@ TOWERS = (
             "Until 21 days of AAA history: buys only within 1 day of settle; earlier strikes are logged for scoring",
             "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked econ 0.05 and ≤ 0.25 trust cap",
             "Fixed $25 ticket in whole contracts; max 2 open, one per week, one new buy per check",
+            "Extra slots: up to 2 more past max open, only when edge ≥ 2× the floor (still under the trust cap); tagged extra",
         ],
         "sell": [
             "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
@@ -108,6 +110,7 @@ TOWERS = (
             "Window: 15 minutes to 30 hours before the print",
             "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked BTC 0.05 and ≤ 0.20 trust cap",
             "Fixed $25 ticket in whole contracts; max 2 open, one per event, one new buy per check",
+            "Extra slots: up to 2 more past max open, only when edge ≥ 2× the floor (still under the trust cap); tagged extra",
         ],
         "sell": [
             "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
@@ -145,6 +148,7 @@ TOWERS = (
             "Window: regular hours, more than 10 minutes before the close; index quote under 5 minutes old",
             "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked index 0.02 and ≤ 0.15 trust cap",
             "Fixed $25 ticket in whole contracts; max 2 open, one per event, one new buy per check",
+            "Extra slots: up to 2 more past max open, only when edge ≥ 2× the floor (still under the trust cap); tagged extra",
         ],
         "sell": [
             "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
@@ -169,7 +173,7 @@ TOWERS = (
         "kind": "sports",
         "every_sec": 300,
         "timeout": 60,
-        "max_open": 2,
+        "max_open": 4,
         "blurb": (
             "Shadow Kalshi NBA, NFL and NHL game winners. Uses Polymarket's moneyline mid for "
             "the same game as the fair price and buys only when Kalshi lags it by more than the "
@@ -181,7 +185,8 @@ TOWERS = (
             "Fair = Polymarket moneyline mid; only when its spread ≤ 3¢ and liquidity ≥ $10k",
             "Window: 5 minutes to 48 hours before start (pre-game only)",
             "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked sports 0.06 and ≤ 0.15 trust cap",
-            "Fixed $25 ticket in whole contracts; max 2 open, one per game, one new buy per check",
+            "Fixed $25 ticket in whole contracts; max 4 open, one per game, one new buy per check",
+            "Extra slots: up to 2 more past max open, only when edge ≥ 2× the floor (still under the trust cap); tagged extra",
         ],
         "sell": [
             "Model flip: sell at the bid when bid − fee beats the Polymarket fair by 2¢",
@@ -258,6 +263,7 @@ TOWERS = (
             "Only on the settlement day, 9:00 ET to 15 minutes before 3:30pm ET, quote under 10 minutes old",
             "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked econ 0.05 and ≤ 0.15 trust cap",
             "Fixed $25 ticket in whole contracts; max 2 open, one per event, one new buy per check",
+            "Extra slots: up to 2 more past max open, only when edge ≥ 2× the floor (still under the trust cap); tagged extra",
         ],
         "sell": [
             "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
@@ -283,7 +289,7 @@ TOWERS = (
         "kind": "macro",
         "every_sec": 1800,
         "timeout": 120,
-        "max_open": 3,
+        "max_open": 4,
         "blurb": (
             "Shadow Kalshi monthly CPI markets (headline and core, monthly and yearly). Prices each "
             "strike from the Cleveland Fed's daily inflation nowcast and how far that nowcast has "
@@ -295,7 +301,8 @@ TOWERS = (
             "Fair = Cleveland Fed nowcast, with its measured historical miss (by days to release) widened 25%",
             "Only the month the nowcast covers, nowcast under 5 days old, not in the last 2 hours before release",
             "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked econ 0.05 and ≤ 0.15 trust cap",
-            "Fixed $25 ticket in whole contracts; max 3 open, one per event, one new buy per check",
+            "Fixed $25 ticket in whole contracts; max 4 open, one per event, one new buy per check",
+            "Extra slots: up to 2 more past max open, only when edge ≥ 2× the floor (still under the trust cap); tagged extra",
         ],
         "sell": [
             "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
@@ -334,6 +341,7 @@ TOWERS = (
             "Buys only in the last 45 days before the print; earlier rows are logged for calibration",
             "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked econ 0.05 and ≤ 0.15 trust cap",
             "Fixed $25 ticket in whole contracts; max 2 open, one per event, one new buy per check",
+            "Extra slots: up to 2 more past max open, only when edge ≥ 2× the floor (still under the trust cap); tagged extra",
         ],
         "sell": [
             "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
@@ -358,7 +366,7 @@ TOWERS = (
         "kind": "sports",
         "every_sec": 600,
         "timeout": 120,
-        "max_open": 3,
+        "max_open": 6,
         "blurb": (
             "Shadow Kalshi soccer and tennis winners. Uses Polymarket's moneyline mid for the same "
             "game as the fair price and buys only when Kalshi lags it by more than the 0.06 floor "
@@ -371,7 +379,8 @@ TOWERS = (
             "Matched by date and team or player names; a game is used only if every side matches",
             "Pre-game only: 10 minutes to 48 hours before start; Polymarket spread ≤ 3¢ and liquidity ≥ $5k",
             "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked sports 0.06 and ≤ 0.15 trust cap",
-            "Fixed $25 ticket in whole contracts; max 3 open, one per event, one new buy per check",
+            "Fixed $25 ticket in whole contracts; max 6 open, one per event, one new buy per check",
+            "Extra slots: up to 2 more past max open, only when edge ≥ 2× the floor (still under the trust cap); tagged extra",
         ],
         "sell": [
             "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
