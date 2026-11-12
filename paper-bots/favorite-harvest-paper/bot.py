@@ -41,15 +41,23 @@ def quotes_for(markets_by_family: dict, table: dict, now: dt.datetime, lookup=la
             horizon = hm.horizon_for(hours)
             if horizon is None:
                 continue
-            title = str(market.get("title") or market.get("ticker") or "")[:60]
+            title = _short(str(market.get("title") or market.get("ticker") or ""))
             for side in engine.sides(market):
                 priced = hm.price_side(side, family, horizon, table, lookup)
                 if priced is None:
                     continue
-                priced["label"] = f"{title} {side['side'].upper()}"
+                priced["label"] = title   # the card adds YES/NO itself
                 priced.setdefault("why", f"{family} {horizon}h, no calibration cell yet")
                 out.append(priced)
     return out
+
+
+def _short(title: str, limit: int = 60) -> str:
+    """Drop the trailing "?" and cut at a word boundary, never mid-word or mid-year."""
+    title = " ".join(title.split()).rstrip("?")
+    if len(title) <= limit:
+        return title
+    return title[:limit].rsplit(" ", 1)[0].rstrip(",") + "..."
 
 
 def model(cfg: dict, now: dt.datetime, read=None, fetch=None):
