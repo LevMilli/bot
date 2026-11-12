@@ -148,9 +148,15 @@ def _desk():
 
 
 def get_json(url: str, timeout: int = 20) -> dict:
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.load(resp)
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import public_http
+    except ImportError:
+        req = urllib.request.Request(url, headers=UA)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.load(resp)
+    return json.loads(public_http.read(url, headers=UA, timeout=timeout).decode("utf-8"))
 
 
 def load_account() -> dict:
