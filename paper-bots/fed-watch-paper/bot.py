@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Fed Watch — shadow paper tower.
 
-Compares CME FedWatch (or injected) implied probability to the Kalshi ask on
-matching Fed / rates outcomes. Buys only when lag edge after Kalshi fee clears
+Compares the Polymarket "Fed Decision in <month>?" mid (fed_feed.py) to the
+Kalshi KXFEDDECISION YES/NO ask on the same meeting and outcome. Buys only when lag edge after Kalshi fee clears
 the locked economics floor 0.05.
 
 Paper only. Shadow only. Spends no desk cash. Never LIVE.
@@ -55,8 +55,14 @@ def fed_decision(quote: dict, cfg: dict | None = None) -> dict:
     )
     ask = _num(quote.get("ask"))
     label = str(quote.get("outcome") or quote.get("ticker") or quote.get("game") or "fed")
+    src = str(quote.get("source") or "fedwatch")
     row = {
         "outcome": label,
+        "ticker": str(quote.get("ticker") or ""),
+        "side": str(quote.get("side") or "yes"),
+        "meeting": str(quote.get("meeting") or ""),
+        "source": src,
+        "fair": fair,
         "action": "skip",
         "reason": "",
         "fedwatch_fair": fair,
@@ -69,7 +75,7 @@ def fed_decision(quote: dict, cfg: dict | None = None) -> dict:
         "idea_bank_only": True,
     }
     if fair is None or ask is None:
-        row["reason"] = "need fedwatch_fair + ask"
+        row["reason"] = "need fair + ask"
         return row
     if not (0.0 < ask < 1.0) or not (0.0 < fair < 1.0):
         row["reason"] = "fair/ask out of range"
@@ -86,7 +92,7 @@ def fed_decision(quote: dict, cfg: dict | None = None) -> dict:
         return row
     row["action"] = "buy"
     row["reason"] = (
-        f"fedwatch clears floor: fair {fair:.3f} ask {ask:.3f} "
+        f"{src} clears floor: fair {fair:.3f} ask {ask:.3f} "
         f"fee {fee:.4f} edge {edge:.4f}"
     )
     return row
@@ -210,8 +216,18 @@ def run_once(
     state["shadow_only"] = True
     state["live_orders"] = False
     state["idea_bank_only"] = True
-    rows = list(quotes) if quotes is not None else load_quotes(tower)
+    feed = None
+    if quotes is not None:
+        rows = list(quotes)
+    else:
+        rows, feed = _live_or_file(tower)
+    settled = settle_open(state, now)
+    held = {(str(p.get("kalshi_ticker") or ""), str(p.get("side") or "")) for p in state.get("open") or []}
     decisions = [fed_decision(row, cfg) for row in rows]
+    for decision in decisions:
+        if decision.get("action") == "buy" and (decision.get("ticker"), decision.get("side")) in held:
+            decision["action"] = "skip"
+            decision["reason"] = "already holding this side"
     bought = None
     blocked = os.environ.get("DESK_BLOCK_ENTRIES") == "1"
     if blocked:
@@ -226,7 +242,8 @@ def run_once(
                 decision["action"] = "skip"
                 decision["reason"] = "max open"
     else:
-        for decision in decisions:
+        ranked = sorted(decisions, key=lambda d: -(d.get("edge") or -1))
+        for decision in ranked:
             if decision.get("action") != "buy":
                 continue
             cash = float(state.get("cash") or 0)
@@ -235,14 +252,25 @@ def run_once(
                 decision["action"] = "skip"
                 decision["reason"] = "shadow cash below ticket"
                 continue
-            state["cash"] = round(cash - stake, 4)
+            per = float(decision.get("ask") or 0) + float(decision.get("fee") or 0)
+            contracts = int(stake // per) if per > 0 else 0
+            if contracts < 1:
+                decision["action"] = "skip"
+                decision["reason"] = "ticket buys no contract"
+                continue
+            cost = round(contracts * per, 2)
+            state["cash"] = round(cash - cost, 4)
             state["open"].append({
                 "ticker": decision.get("outcome"),
-                "side": "buy",
-                "contracts": 1,
-                "cost": stake,
+                "kalshi_ticker": decision.get("ticker"),
+                "side": decision.get("side") or "yes",
+                "meeting": decision.get("meeting"),
+                "source": decision.get("source"),
+                "contracts": contracts,
+                "fee": decision.get("fee"),
+                "cost": cost,
                 "ask": decision.get("ask"),
-                "fedwatch_fair": decision.get("fedwatch_fair"),
+                "fair": decision.get("fair"),
                 "edge": decision.get("edge"),
                 "opened": now.isoformat(timespec="seconds"),
                 "paper_only": True,
@@ -260,19 +288,87 @@ def run_once(
     state["last_check"] = now.isoformat(timespec="seconds")
     _write_json(os.path.join(tower, "paper_account.json"), state)
     _append_research(tower, now, decisions)
+    for row in settled:
+        print(f"SETTLE: {row.get('ticker')} {row.get('result')} pnl {row.get('pnl'):+.2f}")
     if bought:
         print(f"SIGNAL: BUY {bought}")
-        print(f"CARD: paper buy {bought} fed watch")
+        print(f"CARD: paper buy {bought} fed watch (Polymarket vs Kalshi)")
     elif not decisions:
-        print("SIGNAL: SKIP waiting on FedWatch quotes")
-        print("CARD: waiting on fedwatch_quotes.json (no invent)")
+        note = (feed or {}).get("note") or "waiting on Fed quotes (Polymarket vs Kalshi)"
+        print(f"SIGNAL: SKIP {note}")
+        print(f"CARD: {note} (no invent)")
         print("no trade")
     else:
-        first = decisions[0]
+        first = max(decisions, key=lambda d: d.get("edge") if d.get("edge") is not None else -9)
         print(f"SIGNAL: SKIP {first.get('outcome')} {first.get('reason')}")
         print("CARD: " + str(first.get("reason") or "no fee-clear fedwatch"))
         print("no trade")
     return 0
+
+
+def _live_or_file(tower: str):
+    """Live Polymarket vs Kalshi Fed decision quotes; the file only if the read fails."""
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    try:
+        import fed_feed
+        quotes, status = fed_feed.live_quotes()
+    except Exception as exc:  # noqa: BLE001
+        rows = load_quotes(tower)
+        return rows, {"note": f"Polymarket/Kalshi read failed ({type(exc).__name__}); waiting"}
+    try:
+        write_fedwatch_quotes(tower, quotes, note="live Polymarket mid vs Kalshi KXFEDDECISION ask")
+    except OSError:
+        pass
+    if not quotes:
+        status["note"] = "no Fed meeting priced on both Polymarket and Kalshi"
+    return quotes, status
+
+
+def _kalshi_market(ticker: str) -> dict:
+    if DESK_ROOT not in sys.path:
+        sys.path.insert(0, DESK_ROOT)
+    import public_http
+    url = f"https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}"
+    data = json.loads(public_http.read(url, timeout=10).decode("utf-8"))
+    return data.get("market") or {}
+
+
+def settle_open(state: dict, now: dt.datetime, fetch=None) -> list:
+    """Close rows whose Kalshi market has a result. $1 per contract when it matches our side."""
+    fetch = fetch or _kalshi_market
+    closed, keep = [], []
+    for pos in state.get("open") or []:
+        ticker = str(pos.get("kalshi_ticker") or "")
+        if not ticker:
+            keep.append(pos)
+            continue
+        try:
+            market = fetch(ticker)
+        except Exception:  # noqa: BLE001
+            keep.append(pos)
+            continue
+        result = str(market.get("result") or "").lower()
+        if result not in ("yes", "no"):
+            keep.append(pos)
+            continue
+        side = str(pos.get("side") or "yes").lower()
+        contracts = int(pos.get("contracts") or 0)
+        payout = float(contracts) if result == side else 0.0
+        cost = float(pos.get("cost") or 0)
+        row = dict(pos)
+        row.update({
+            "result": result,
+            "payout": round(payout, 2),
+            "pnl": round(payout - cost, 2),
+            "closed": now.isoformat(timespec="seconds"),
+            "exit": "settled",
+        })
+        state["cash"] = round(float(state.get("cash") or 0) + payout, 4)
+        state.setdefault("closed", []).append(row)
+        closed.append(row)
+    state["open"] = keep
+    return closed
 
 
 def _num(value):
