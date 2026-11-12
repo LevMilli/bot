@@ -75,11 +75,22 @@ def _yahoo(sym: str, now: dt.datetime):
     return price, now.timestamp() - when
 
 
+def _why(exc: Exception) -> str:
+    code = getattr(exc, "code", None)
+    return f"HTTP {code}" if code else type(exc).__name__
+
+
 def model(cfg: dict, now: dt.datetime):
     close_et = now.astimezone(nm.ET).replace(hour=16, minute=0, second=0, microsecond=0)
     if nm.minutes_left(now, close_et) is None:
         return [], "market closed"
-    ndx, vxn = _yahoo("%5ENDX", now), _yahoo("%5EVXN", now)
+    got = {}
+    for name, sym in (("NDX", "%5ENDX"), ("VXN", "%5EVXN")):
+        try:
+            got[name] = _yahoo(sym, now)
+        except Exception as exc:  # noqa: BLE001 - name the source on the card
+            return [], f"Yahoo {name} quote {_why(exc)}; waiting"
+    ndx, vxn = got["NDX"], got["VXN"]
     if not ndx or not vxn:
         return [], "index quote missing"
     if ndx[1] > nm.MAX_QUOTE_AGE_SEC:
@@ -87,7 +98,13 @@ def model(cfg: dict, now: dt.datetime):
     vol = min(nm.VOL_CAP, max(nm.VOL_FLOOR, vxn[0] / 100.0))
     markets = []
     for series in SERIES:
-        markets.extend(engine.kalshi_open_markets(series))
+        try:
+            # ~2,800 open strikes across the hourly events: read them all, not just page one
+            rows = engine.kalshi_open_markets(series, limit=1000, pages=5)
+        except Exception as exc:  # noqa: BLE001
+            return [], f"Kalshi {series} list {_why(exc)}; waiting"
+        # built and checked for the 4pm close only; the hourly 10am-3pm events stay out
+        markets.extend(m for m in rows if str(m.get("event_ticker") or "").endswith("H1600"))
     quotes = quotes_for(markets, ndx[0], vol, now)
     return quotes, "" if quotes else "no Nasdaq market in window"
 

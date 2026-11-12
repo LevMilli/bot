@@ -173,10 +173,17 @@ def kalshi_market(ticker: str) -> dict:
     return (data or {}).get("market") or {}
 
 
-def kalshi_open_markets(series: str, limit: int = 200) -> list[dict]:
-    data = public_json(f"{KALSHI}/markets?series_ticker={series}&status=open&limit={int(limit)}")
-    rows = (data or {}).get("markets") or []
-    return [row for row in rows if isinstance(row, dict)]
+def kalshi_open_markets(series: str, limit: int = 200, pages: int = 1) -> list[dict]:
+    """Open markets for one series. ``pages`` > 1 follows Kalshi's cursor (big ladders)."""
+    out, cursor = [], ""
+    for _ in range(max(1, int(pages))):
+        url = f"{KALSHI}/markets?series_ticker={series}&status=open&limit={int(limit)}"
+        data = public_json(url + (f"&cursor={cursor}" if cursor else "")) or {}
+        out.extend(row for row in data.get("markets") or [] if isinstance(row, dict))
+        cursor = str(data.get("cursor") or "")
+        if not cursor:
+            break
+    return out
 
 
 def sides(market: dict) -> list[dict]:
