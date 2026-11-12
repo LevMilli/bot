@@ -49,6 +49,7 @@ export const FLOORS: FloorDef[] = [
       { officeId: 'favorite-harvest', botId: 'favorite-harvest', label: 'Favorite harvest' },
       { officeId: 'treasury-10y', botId: 'treasury-10y', label: '10-year Treasury' },
       { officeId: 'cpi-nowcast', botId: 'cpi-nowcast', label: 'CPI nowcast' },
+      { officeId: 'gdp-nowcast', botId: 'gdp-nowcast', label: 'GDP nowcast' },
       { officeId: 'wall-street', botId: 'wall-street', label: 'Wall Street' },
       { officeId: 'boss', botId: 'kalshi-sized', label: 'Boss · Sized Kalshi', boss: true },
     ],
