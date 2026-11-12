@@ -21,6 +21,14 @@ Two reports, both from the towers' own ``research.jsonl`` logs.
    consecutive checks where a contract's edge stayed at or above the floor.
    It reports how many episodes, how long they lasted, and the typical peak
    edge. Short-lived gaps are hard to catch in real life.
+
+3. Maker check. Instead of paying the ask, what if the tower had rested a bid
+   1 cent above the best bid for 30 minutes? Our bid would be the new best
+   bid, so any public trade in that window where a seller hit a bid at or
+   below our price would have filled us first. Fills are graded at
+   settlement with a maker fee of 0.0175 × p × (1 − p) a contract (Kalshi's
+   maker rate; many series charge none). It is compared with taking the ask
+   on the same contracts. Queue size is ignored, so fill rates run high.
 """
 from __future__ import annotations
 
@@ -37,6 +45,9 @@ RECHECK_HOURS = 12          # an unsettled contract is read again after this
 GAP_TOWERS = ("poly-sports-lean", "soccer-tennis-lean")
 GAP_DAYS = 7
 KEEP_RESULTS = 20000
+MAKER_WINDOW_MIN = 30
+MAKER_RATE = 0.0175
+MAKER_READS = 20
 
 
 def _when(text) -> dt.datetime | None:
@@ -100,7 +111,7 @@ def first_sightings(log: list[dict], floor: float) -> dict:
             key = (bucket, d["ticker"], d["side"])
             if key not in out:
                 out[key] = {"at": row["at"], "ask": _num(d["ask"]), "fee": _num(d.get("fee")) or 0.0,
-                            "edge": _num(d["edge"])}
+                            "edge": _num(d["edge"]), "bid": _num(d.get("bid"))}
     return out
 
 
@@ -160,6 +171,74 @@ def missed(towers: list[tuple[str, float, list[dict]]], results: dict, waiting: 
     return report, reads, pending
 
 
+def maker_price(entry: dict) -> float | None:
+    bid, ask = entry.get("bid"), entry.get("ask")
+    if bid is None or ask is None:
+        return None
+    price = round(bid + 0.01, 2)
+    return price if 0.02 <= price < ask - 1e-9 else None
+
+
+def maker_filled(trades: list[dict], side: str, price: float) -> bool:
+    """A seller hit a bid at or below our price on our side (we would have been first)."""
+    for t in trades or []:
+        taker = str(t.get("taker_side") or t.get("taker_outcome_side") or "").lower()
+        if side == "yes" and taker == "no":
+            px = _num(t.get("yes_price_dollars"))
+        elif side == "no" and taker == "yes":
+            px = _num(t.get("no_price_dollars"))
+        else:
+            continue
+        if px is not None and px <= price + 1e-9:
+            return True
+    return False
+
+
+def maker(towers: list[tuple[str, float, list[dict]]], results: dict, quotes: dict, trades_fetch,
+          now: dt.datetime, max_reads: int = MAKER_READS):
+    """quotes {key: {"price", "filled"}} is updated in place. Returns (report, reads)."""
+    reads = 0
+    report = {}
+    for tower_id, floor, log in towers:
+        rows = []
+        for (bucket, ticker, side), entry in sorted(first_sightings(log, floor).items(), key=lambda kv: kv[1]["at"]):
+            price = maker_price(entry)
+            if price is None:
+                continue
+            key = f"{ticker}|{side}"
+            got = quotes.get(key)
+            start = _when(entry["at"])
+            end = start + dt.timedelta(minutes=MAKER_WINDOW_MIN)
+            if got is None:
+                if end > now or reads >= max_reads:
+                    continue
+                reads += 1
+                try:
+                    trades = trades_fetch(ticker, int(start.timestamp()), int(end.timestamp()))
+                except Exception:  # noqa: BLE001 - a failed read waits for the next run
+                    continue
+                got = quotes[key] = {"price": price, "filled": maker_filled(trades, side, price)}
+            result = results.get(ticker)
+            if result not in ("yes", "no"):
+                continue
+            won = 1.0 if result == side else 0.0
+            taker = won - entry["ask"] - entry["fee"]
+            made = (won - got["price"] - MAKER_RATE * got["price"] * (1 - got["price"])) if got["filled"] else None
+            rows.append((taker, made))
+        if not rows:
+            report[tower_id] = {"n": 0}
+            continue
+        fills = [m for _, m in rows if m is not None]
+        report[tower_id] = {
+            "n": len(rows),
+            "fill_rate": round(len(fills) / len(rows), 3),
+            "maker_avg": round(sum(fills) / len(fills), 4) if fills else None,
+            "taker_avg_same": round(sum(t for t, m in rows if m is not None) / len(fills), 4) if fills else None,
+            "taker_avg_all": round(sum(t for t, _ in rows) / len(rows), 4),
+        }
+    return report, reads
+
+
 def gaps(log: list[dict], floor: float, every_sec: int, now: dt.datetime, days: int = GAP_DAYS) -> dict:
     """Episodes of edge ≥ floor over consecutive checks, per contract, in the last ``days``."""
     cutoff = now - dt.timedelta(days=days)
@@ -196,17 +275,22 @@ def gaps(log: list[dict], floor: float, every_sec: int, now: dt.datetime, days: 
     }
 
 
-def run(towers: list[dict], root: str, prior: dict, fetch, now: dt.datetime, max_reads: int = MAX_READS) -> dict:
+def run(towers: list[dict], root: str, prior: dict, fetch, now: dt.datetime, max_reads: int = MAX_READS,
+        trades_fetch=None) -> dict:
     """towers: tower specs (id, folder, floor, every_sec)."""
     results = dict(prior.get("results") or {})
     waiting = dict(prior.get("waiting") or {})
     logs = {s["id"]: read_log(os.path.join(root, s["folder"])) for s in towers}
     report, reads, pending = missed([(s["id"], float(s["floor"]), logs[s["id"]]) for s in towers],
                                     results, waiting, fetch, now, max_reads)
+    quotes = dict(prior.get("maker_quotes") or {})
+    tower_logs = [(s["id"], float(s["floor"]), logs[s["id"]]) for s in towers]
+    maker_report, maker_reads = maker(tower_logs, results, quotes, trades_fetch, now) if trades_fetch else ({}, 0)
     gap = {s["id"]: gaps(logs[s["id"]], float(s["floor"]), int(s.get("every_sec") or 300), now)
            for s in towers if s["id"] in GAP_TOWERS}
     return {"updated": now.isoformat(timespec="seconds"), "paper_only": True, "min_n": MIN_N,
-            "missed": report, "gaps": gap, "reads": reads, "pending": pending,
+            "missed": report, "gaps": gap, "maker": maker_report, "reads": reads + maker_reads,
+            "pending": pending, "maker_quotes": dict(list(quotes.items())[-KEEP_RESULTS:]),
             "results": dict(list(results.items())[-KEEP_RESULTS:]),
             "waiting": dict(list(waiting.items())[-KEEP_RESULTS:])}
 
@@ -226,4 +310,8 @@ def card(body: dict) -> str:
             for t, g in body["gaps"].items() if g.get("episodes")]
     if gaps:
         line += ". Gaps (7d): " + "; ".join(gaps)
+    makers = [f"{t} fills {m['fill_rate']:.0%}, maker {m['maker_avg']:+.3f} vs taker {m['taker_avg_same']:+.3f}"
+              for t, m in (body.get("maker") or {}).items() if m.get("n") and m.get("maker_avg") is not None]
+    if makers:
+        line += ". Maker check: " + "; ".join(makers)
     return line + "."

@@ -20,7 +20,14 @@ import whatif_model as wm  # noqa: E402
 import kalshi_shadow_tower as engine  # noqa: E402
 
 
-def main(argv: list[str] | None = None, *, root: str | None = None, fetch=None,
+def kalshi_trades(ticker: str, min_ts: int, max_ts: int) -> list[dict]:
+    """Public Kalshi trades for one market in a time window (shared gateway)."""
+    data = engine.public_json(f"{engine.KALSHI}/markets/trades?ticker={ticker}"
+                              f"&min_ts={int(min_ts)}&max_ts={int(max_ts)}&limit=1000")
+    return [t for t in (data or {}).get("trades") or [] if isinstance(t, dict)]
+
+
+def main(argv: list[str] | None = None, *, root: str | None = None, fetch=None, trades_fetch=None,
          now: dt.datetime | None = None) -> int:
     import new_towers
 
@@ -34,7 +41,8 @@ def main(argv: list[str] | None = None, *, root: str | None = None, fetch=None,
                   "live_orders": False, "stake_usd": 0.0, "research": True})
     towers = [s for s in new_towers.ACTIVE if not s.get("research")]
     prior = engine.read_json(os.path.join(here, "whatif.json")) or {}
-    body = wm.run(towers, root, prior, fetch or engine.kalshi_market, now)
+    body = wm.run(towers, root, prior, fetch or engine.kalshi_market, now,
+                  trades_fetch=trades_fetch or kalshi_trades)
     engine.write_json(os.path.join(here, "whatif.json"), body)
     state["checks"] = int(state.get("checks") or 0) + 1
     state["last_check"] = now.isoformat(timespec="seconds")
