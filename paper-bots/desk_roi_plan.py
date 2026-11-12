@@ -684,7 +684,7 @@ def m4_latency_board(root: str | None = None) -> dict:
         bot_rows = [r for r in rows if str(r.get("bot") or "") == bot]
         day_rows = [
             r for r in bot_rows
-            if str(r.get("at") or "")[:10] == day or str(r.get("at") or "").startswith(day)
+            if _stamp_chicago_day(r.get("at")) == day
         ]
         sample = day_rows if day_rows else bot_rows
         vals = sorted(
@@ -13647,6 +13647,27 @@ def _chicago_day() -> str:
         return datetime.now(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
     except Exception:
         return time.strftime("%Y-%m-%d", time.gmtime())
+
+
+def _stamp_chicago_day(at) -> str:
+    """Chicago YYYY-MM-DD for a UTC ``...Z`` stamp from ``_now()``.
+
+    Latency rows are stamped in UTC. Comparing the raw prefix to the Chicago
+    day drops every row written after 6 PM CT (UTC has already rolled over).
+    Stamps without a zone are taken as already local.
+    """
+    raw = str(at or "").strip()
+    if len(raw) < 10 or raw[4] != "-":
+        return ""
+    if not raw.endswith("Z"):
+        return raw[:10]
+    try:
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+        when = datetime.strptime(raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        return when.astimezone(ZoneInfo("America/Chicago")).strftime("%Y-%m-%d")
+    except Exception:
+        return raw[:10]
 
 
 def tower_codes_from_row(row: dict | None) -> dict:

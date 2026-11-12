@@ -11,7 +11,6 @@ import os
 import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Callable
-from unittest import mock
 
 LOCKED_FLOOR_EXPECT = {
     "kalshi_sports": 0.06,
@@ -380,11 +379,15 @@ def drill_hillclimb_kill_revert(root: str | None = None) -> dict:
 def drill_ruin_nuclear(root: str | None = None) -> dict:
     """#978 — ruin nuclear; pause all / block entries."""
     import desk_roi_plan
-    import pimp_desk
 
+    # No mock.patch here. This runs inside pimp_desk.snapshot() on the live
+    # server, often on several threads at once. Patching pimp_desk.set_pause
+    # swapped the real staff pause for a stub process-wide: a pause clicked
+    # during a snapshot did nothing, and two overlapping snapshots could leave
+    # the stub in place for good. set_ruin_drill pauses the root it is given,
+    # and that root is a temp folder, so the real function is already safe.
     with tempfile.TemporaryDirectory() as tmp:
-        with mock.patch.object(pimp_desk, "set_pause", return_value={"ok": True}):
-            out = desk_roi_plan.set_ruin_drill(tmp, "nuclear", who="chaos", note="chaos")
+        out = desk_roi_plan.set_ruin_drill(tmp, "nuclear", who="chaos", note="chaos")
         st = desk_roi_plan.ruin_drill_status(tmp)
         block = desk_roi_plan.ruin_drill_blocks_entries(tmp)
         ok = (
@@ -395,8 +398,7 @@ def drill_ruin_nuclear(root: str | None = None) -> dict:
             and bool(block)
             and st.get("live_orders_enabled") is not True
         )
-        with mock.patch.object(pimp_desk, "set_pause", return_value={"ok": True}):
-            desk_roi_plan.clear_ruin_drill(tmp, who="chaos", note="chaos clear")
+        desk_roi_plan.clear_ruin_drill(tmp, who="chaos", note="chaos clear")
     return _row(
         "978_ruin_nuclear",
         ok,

@@ -54,7 +54,9 @@ class MemecoinDecide(unittest.TestCase):
         self.assertEqual(bot.decide_size(25, 40, -1, 12, "speed"), 10.0)
         self.assertEqual(bot.decide_size(25, 40, 4, 8, "accurate"), 0.0)
         self.assertIn("decide_size", bot.scan.__code__.co_names)
-        self.assertIn("decide_floor", bot.scan.__code__.co_names)
+        # #614: scan reaches decide_floor through floor_for_next_mint.
+        self.assertIn("floor_for_next_mint", bot.scan.__code__.co_names)
+        self.assertIn("decide_floor", bot.floor_for_next_mint.__code__.co_names)
         self.assertFalse(hasattr(bot.C, "expand_volume") and bool(getattr(bot.C, "expand_volume")))
 
 

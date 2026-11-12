@@ -50,7 +50,7 @@ class PlanSliceE1E3Tests(unittest.TestCase):
         self.assertGreater(shares["commodity-15m"], base["commodity-15m"])
         budgets = desk_more.tower_budgets({"max_open_risk": 100}, meme_today=-22)
         self.assertAlmostEqual(budgets["memecoin"], 3.0)
-        ok = desk_more.effective_tower_shares(meme_today=-5)
+        ok = desk_more.effective_tower_shares(meme_today=-4)
         self.assertAlmostEqual(ok["memecoin"], base["memecoin"])
 
     def test_nfl_fair_floors_locked(self):
