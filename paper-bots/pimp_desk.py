@@ -4958,6 +4958,9 @@ def _install_new_towers() -> None:
         list(SETTLEMENT_FILES)
         + [f"{spec['folder']}/paper_account.json" for spec in new_towers.ACTIVE]
         + [f"{spec['folder']}/{name}" for spec in new_towers.ACTIVE for name in spec.get("keep") or ()]
+        # The fair-vs-ask research log feeds the calibration lab and the what-if lab.
+        + [f"{spec['folder']}/{name}" for spec in new_towers.ACTIVE if not spec.get("research")
+           for name in ("research.jsonl", "research.jsonl.1")]
     )
 
 

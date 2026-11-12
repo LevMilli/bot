@@ -249,7 +249,10 @@ def _append_research(tower: str, now: dt.datetime, decisions: list[dict], note: 
     path = os.path.join(tower, "research.jsonl")
     try:
         if os.path.getsize(path) > RESEARCH_MAX_BYTES:
-            os.replace(path, path + ".1")
+            # On the desk the log is a link to the /data volume: rotate the real file,
+            # so the link (and research.jsonl.1's link) keep pointing at the volume.
+            real = os.path.realpath(path)
+            os.replace(real, os.path.join(os.path.dirname(real), "research.jsonl.1"))
     except OSError:
         pass
     ranked = sorted(decisions, key=lambda d: -(d.get("edge") if d.get("edge") is not None else -9))

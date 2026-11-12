@@ -109,3 +109,27 @@ def test_registry_and_desk_wiring():
     sys.path.insert(0, os.path.join(HERE, "tools"))
     import new_tower
     assert new_tower.check_tower("whatif-lab")["ok"]
+
+
+def test_research_logs_survive_a_deploy():
+    import pimp_desk
+
+    assert "weather-high-paper/research.jsonl" in pimp_desk.SETTLEMENT_FILES
+    assert "weather-high-paper/research.jsonl.1" in pimp_desk.SETTLEMENT_FILES
+    assert "whatif-lab-paper/research.jsonl" not in pimp_desk.SETTLEMENT_FILES
+
+
+def test_rotation_keeps_the_volume_link(tmp_path, monkeypatch):
+    import kalshi_shadow_tower as engine
+
+    volume, tower = tmp_path / "data", tmp_path / "tower"
+    volume.mkdir()
+    tower.mkdir()
+    (volume / "research.jsonl").write_text("x" * 50 + "\n")
+    os.symlink(volume / "research.jsonl", tower / "research.jsonl")
+    os.symlink(volume / "research.jsonl.1", tower / "research.jsonl.1")
+    monkeypatch.setattr(engine, "RESEARCH_MAX_BYTES", 10)
+    engine._append_research(str(tower), NOW, [], "note")
+    assert os.path.islink(tower / "research.jsonl") and os.path.islink(tower / "research.jsonl.1")
+    assert (volume / "research.jsonl.1").read_text().startswith("xxx")
+    assert json.loads((volume / "research.jsonl").read_text())["note"] == "note"
