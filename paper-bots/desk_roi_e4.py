@@ -41,6 +41,7 @@ LOCKED_VENUE_FLOORS = {
     "coinbase_spot": 0.05,
     "binance_btc_carry": 0.02,
     "kalshi_econ": 0.05,
+    "equity_qqq": 0.02,
 }
 
 INCUBATION_IDEA_BANK_ONLY = frozenset({

@@ -1,0 +1,7 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "stake_usd": 25,
+  "note": "Shadow paper tower. QQQ intraday momentum (noise-area breakout). Paper shares only; no broker is connected."
+}
