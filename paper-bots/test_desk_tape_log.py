@@ -41,6 +41,8 @@ def test_tally_and_window(tmp_path):
 def test_old_settles_skipped(tmp_path):
     root = str(tmp_path)
     _w(os.path.join(root, "kalshi_crypto_history.json"), {
-        "settles": [{"at": "2020-01-01T00:00:00Z", "ticker": "KXGOLD15M-X", "result": "yes"}]})
+        "settles": [{"at": "2020-01-01T00:00:00Z", "ticker": "KXGOLD15M-X", "result": "yes"},
+                    {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                     "ticker": "KXBTCD-26NOV1215-T1", "series": "KXBTCD", "result": "no"}]})
     t.reset_seen()
     assert t.window_lines(root) == []

@@ -173,6 +173,8 @@ def window_lines(root: str, now: float | None = None) -> list[str]:
     for row in history.get("settles") or []:
         if not isinstance(row, dict) or not row.get("ticker"):
             continue
+        if not str(row.get("series") or row["ticker"].split("-")[0]).endswith("15M"):
+            continue  # hourly ladders have dozens of strikes; 15-minute windows only
         when = _epoch(row.get("at"))
         if when is None or now - when > RECENT_SECONDS:
             continue
