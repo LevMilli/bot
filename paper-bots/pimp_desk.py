@@ -106,6 +106,8 @@ DEFAULTS = {
         "binance_btc_carry": 0.02,
         # Fed / econ binaries (FedWatch shadow). Locked. Idea-bank for main AUTO.
         "kalshi_econ": 0.05,
+        # QQQ intraday shadow shares: close must clear the band by 2% of its width.
+        "equity_qqq": 0.02,
     },
     "fill_adverse_tax": 0.01,
     "gate_a_min_n": 20,

@@ -388,6 +388,43 @@ TOWERS = (
         "color": "#f2a65a",
     },
     {
+        "id": "qqq-momentum",
+        "name": "QQQ momentum",
+        "folder": "qqq-momentum-paper",
+        "venue": "equity_qqq",
+        "floor": 0.02,
+        "kind": "index",
+        "every_sec": 300,
+        "timeout": 60,
+        "max_open": 1,
+        "blurb": (
+            "Shadow paper QQQ shares. Intraday momentum: goes long or short when QQQ breaks out of "
+            "its normal daily range at a half-hour check, trails a stop, and is always flat by the "
+            "close. No broker is connected. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "Band = max/min(open, yesterday's close) × (1 ± 14-day average move from the open at that time)",
+            "Checks only at HH:00 and HH:30, 10:00 to 15:30 New York; acts only on a bar that closed in the last 10 minutes",
+            "Long above the upper band, short below the lower band, clearing it by 2% of the band width (locked equity_qqq 0.02)",
+            "Fixed $25 ticket (fractional paper shares), one position at a time",
+            "Costs: $0.0035 a share commission plus 1¢ a share slippage each way",
+        ],
+        "sell": [
+            "Trailing stop at the band or VWAP, whichever is tighter, checked at the half-hour checks",
+            "Always flat at the 16:00 close (earlier on half days)",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new entries; exits and the close still run",
+            "No late fills: a missed check is logged, not back-filled",
+            "Public Yahoo bars only, cached 4 minutes. No broker, no keys",
+            "Published replications find this edge thin on QQQ after costs. Incubation n≥50 before any desk share",
+        ],
+        "aliases": ("qqq", "nasdaq etf", "qqq momentum", "intraday momentum"),
+        "office": "QQQ momentum",
+        "color": "#5ccfe6",
+    },
+    {
         "id": "calibration-lab",
         "name": "Calibration lab",
         "folder": "calibration-lab-paper",

@@ -23,6 +23,8 @@ VENUE_KEYS = (
     "binance_btc_carry",
     # Kalshi Fed / econ binaries (FedWatch shadow). Same 0.05 as BTC binaries.
     "kalshi_econ",
+    # QQQ intraday shadow shares. Band-clear buffer (share of band width), not a probability.
+    "equity_qqq",
 )
 
 DEFAULT_VENUE_MIN_EDGE = {
@@ -34,6 +36,7 @@ DEFAULT_VENUE_MIN_EDGE = {
     "coinbase_spot": 0.05,
     "binance_btc_carry": 0.02,
     "kalshi_econ": 0.05,
+    "equity_qqq": 0.02,
 }
 
 # Display / board tax: assume +1¢ adverse vs stored ask when grading ROI honesty.

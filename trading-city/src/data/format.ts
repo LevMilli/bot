@@ -61,6 +61,7 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'cpi-nowcast': '#e8a0bf',
   'gdp-nowcast': '#b5d99c',
   'soccer-tennis-lean': '#f2a65a',
+  'qqq-momentum': '#5ccfe6',
   'settlement-auditor': '#8fb8de',
   'scorekeeper': '#e6c07b',
   'whatif-lab': '#7fd1b9',
