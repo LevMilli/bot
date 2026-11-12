@@ -1,0 +1,10 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "venue_min_edge": 0.05,
+  "stake_usd": 25,
+  "starter_cash": 500,
+  "max_open": 2,
+  "note": "Kalshi daily 10Y Treasury par yield (KXUST10A). Fair = live ^TNX + recent daily yield moves + TNX-to-Treasury basis. Floor 0.05 locked."
+}

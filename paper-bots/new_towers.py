@@ -236,6 +236,44 @@ TOWERS = (
         "color": "#e6c84f",
     },
     {
+        "id": "treasury-10y",
+        "name": "10-year Treasury",
+        "folder": "treasury-10y-paper",
+        "keep": ("ust_daily.json",),
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "macro",
+        "every_sec": 600,
+        "timeout": 60,
+        "max_open": 2,
+        "blurb": (
+            "Shadow Kalshi daily 10-year Treasury yield markets. Prices each strike from the live "
+            "10-year yield, its usual daily move and the gap to the official Treasury number it "
+            "settles on. Buys only when edge after fee clears 0.05. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXUST10A: \"above X%\" on the Treasury's official 10-year par yield for today",
+            "Fair = live ^TNX + measured TNX-to-Treasury gap, with the 60-day typical daily move scaled to minutes left",
+            "Only on the settlement day, 9:00 ET to 15 minutes before 3:30pm ET, quote under 10 minutes old",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked econ 0.05 and ≤ 0.15 trust cap",
+            "Fixed $25 ticket in whole contracts; max 2 open, one per event, one new buy per check",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Econ floor 0.05 cannot be lowered in config",
+            "No buys on holidays or when the yield quote is stale",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("10 year treasury", "treasury", "10y", "bonds"),
+        "office": "10-year Treasury",
+        "color": "#9ad1d4",
+    },
+    {
         "id": "calibration-lab",
         "name": "Calibration lab",
         "folder": "calibration-lab-paper",
