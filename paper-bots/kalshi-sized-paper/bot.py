@@ -335,11 +335,17 @@ def step_brief(args, state, day):
         day, state["bankroll"], paper_sim.trades_on(state, day),
         paper_sim.realised_pnl_on(state, day), ignore_calendar=True,
     )
-    ev = feed.find_event_for(CFG["series"], day, CFG["settle_time_ct"])
-    cands = []
-    if ev:
-        lo, hi = _ask_band()
-        cands = signal_engine.candidate_sides(live_quotes(ev), lo, hi)
+    try:
+        ev = feed.find_event_for(CFG["series"], day, CFG["settle_time_ct"])
+        cands = []
+        if ev:
+            lo, hi = _ask_band()
+            cands = signal_engine.candidate_sides(live_quotes(ev), lo, hi)
+    except RuntimeError as exc:
+        # A Kalshi read failure is a skipped brief, not a traceback on the card.
+        text = f"CARD: Brief skipped. {exc}. The next brief tries again. Read-only; nothing was ordered."
+        print(text)
+        return text
         cands.sort(key=lambda c: -c["ask"])
     text = alerts.format_brief(day, skip, ok, msg, state, ev, cands, upcoming_skips(day), logger.now_ct())
     print(text)
