@@ -26,6 +26,8 @@ import tempfile
 log = logging.getLogger("desk_web")
 
 MIN_KEY_LEN = 24
+IMPORT_MARKER = "pimp-imported.json"
+BACKUP_DIR = "pre-import-backup"
 MAX_IMPORT_BYTES = 200 * 1024 * 1024
 
 # name -> True when the first positional argument is the desk root.
@@ -115,13 +117,74 @@ def _safe_members(tar: tarfile.TarFile):
         yield member
 
 
-def import_books(desk, blob: bytes, force: bool = False) -> dict:
-    """Unpack a copy of the bot's paper folder. Refuses when books are already here."""
-    if _has_books(desk) and not force:
-        return {"ok": False, "error": "This trading service already has paper books. Nothing was replaced."}
+def _target(desk) -> str:
     durable = desk.settlement_dir()
-    target = durable or desk.ROOT
+    return durable or desk.ROOT
+
+
+def imported(desk) -> bool:
+    return os.path.isfile(os.path.join(_target(desk), IMPORT_MARKER))
+
+
+def _backup_target(target: str, stamp: str) -> int:
+    """Copy what the service has now aside before the bot's books replace it."""
+    dest_root = os.path.join(target, BACKUP_DIR, stamp)
+    n = 0
+    for folder, dirs, files in os.walk(target):
+        rel_folder = os.path.relpath(folder, target)
+        if rel_folder.split(os.sep)[0] == BACKUP_DIR:
+            dirs[:] = []
+            continue
+        dirs[:] = [d for d in dirs if not (rel_folder == "." and d == BACKUP_DIR)]
+        for name in files:
+            src = os.path.join(folder, name)
+            if os.path.islink(src) or not os.path.isfile(src):
+                continue
+            dest = os.path.join(dest_root, os.path.relpath(src, target))
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy2(src, dest)
+            n += 1
+    return n
+
+
+def import_books(desk, blob: bytes, force: bool = False) -> dict:
+    """Take the Discord bot's paper books once.
+
+    The first copy wins over whatever the service wrote on its own since it
+    started; those files are kept in pre-import-backup/<time>/ first. After
+    that, every copy is refused unless forced, so the service's books are never
+    replaced by an older copy.
+    """
+    if imported(desk) and not force:
+        return {"ok": False, "error": "The Discord bot's books were already copied here once. Nothing was replaced."}
+    target = _target(desk)
     os.makedirs(target, exist_ok=True)
+    import time as _time
+    stamp = _time.strftime("%Y%m%d-%H%M%S", _time.gmtime())
+    count = 0
+    lock = getattr(desk, "_FILE_LOCK", None)
+    if lock is not None:
+        lock.acquire()
+    try:
+        backed_up = _backup_target(target, stamp)
+        count = _unpack_into(blob, target)
+        with open(os.path.join(target, IMPORT_MARKER), "w", encoding="utf-8") as handle:
+            json.dump({"paper_only": True, "at": stamp, "files": count, "backed_up": backed_up}, handle)
+    finally:
+        if lock is not None:
+            lock.release()
+    if desk.settlement_dir():
+        desk.keep_closed_settlements()
+    try:
+        desk.audit(None, "desk-service", f"Imported {count} paper file(s) from the Discord bot.")
+    except Exception:  # noqa: BLE001
+        pass
+    log.warning("Imported %s paper file(s) from the Discord bot; %s earlier file(s) kept in %s/%s.",
+                count, backed_up, BACKUP_DIR, stamp)
+    return {"ok": True, "files": count, "backed_up": backed_up}
+
+
+def _unpack_into(blob: bytes, target: str) -> int:
     count = 0
     with tempfile.TemporaryDirectory() as tmp:
         with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
@@ -137,13 +200,7 @@ def import_books(desk, blob: bytes, force: bool = False) -> dict:
                     os.unlink(dest)
                 shutil.copy2(src, dest)
                 count += 1
-    if durable:
-        desk.keep_closed_settlements()
-    try:
-        desk.audit(None, "desk-service", f"Imported {count} paper file(s) from the Discord bot.")
-    except Exception:  # noqa: BLE001
-        pass
-    return {"ok": True, "files": count}
+    return count
 
 
 def pack_books(desk) -> bytes:
@@ -162,6 +219,8 @@ def pack_books(desk) -> bytes:
                 tar.add(arch, arcname="midnight-archive")
         else:
             for name in sorted(os.listdir(base)):
+                if name in (BACKUP_DIR, IMPORT_MARKER):
+                    continue
                 tar.add(os.path.join(base, name), arcname=name)
     return buf.getvalue()
 
@@ -189,6 +248,7 @@ def make_app(desk=None):
             "service": "trading-desk",
             "timer_alive": bool(timer.get("alive")),
             "has_books": _has_books(desk),
+            "imported": imported(desk),
         })
 
     async def do_call(request):
