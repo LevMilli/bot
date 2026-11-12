@@ -136,6 +136,21 @@ make living-test
 
 Staff map: `LIVING_UPGRADE.md`. Plan tickets: `POSITIVE_ROI_PLAN.md`. Day-one oaths: `STAFF_DAY_ONE.md`.
 
+## Desk timer without the Discord bot
+
+By default the Discord bot runs the paper timer every 60 seconds. The same pass
+can run on its own, with no Discord login:
+
+```
+python paper-bots/desk_service.py
+```
+
+- Set `PAPER_TIMER=external` on the Discord bot when this runs, so the checks
+  never run twice.
+- Recaps go to `PAPER_RECAP_WEBHOOK` and audit notes to `PAPER_AUDIT_WEBHOOK`
+  (Discord channel webhooks). Without them the notes go to the log.
+- Paper only. No exchange keys, no wallets, no live orders.
+
 ## Notes
 - All times are shown in US Central (CT) or UTC as labeled.
 - The meme-coin bot has an optional, **disabled** hook for a paid AI API (needs your own key in an

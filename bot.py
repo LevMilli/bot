@@ -52725,6 +52725,15 @@ class PicksBot(discord.Client):
     async def paper_timer(self) -> None:
         """Run the paper desk checks on a timer. Paper only. No live orders."""
         await self.wait_until_ready()
+        try:
+            pimp_mod()
+            import desk_service
+            if desk_service.timer_mode() == "external":
+                # The trading service runs the timer. Two timers would run the same checks twice.
+                log.info("Paper timer is off here. PAPER_TIMER=external: the trading service runs it.")
+                return
+        except Exception:
+            log.exception("Paper timer could not read PAPER_TIMER; running here")
         log.info("Paper timer on. Same checks as the PIMP-TRADING desk, paper only.")
         loop = asyncio.get_running_loop()
         # Mark alive immediately so SIGNAL-CITY does not flash "No timer loop yet"
@@ -52738,19 +52747,12 @@ class PicksBot(discord.Client):
         while not self.is_closed():
             try:
                 desk = pimp_mod()
-                health = await loop.run_in_executor(None, desk.timer_health)
-                if health.get("alert"):
-                    await self._paper_audit(health["alert"])
-                await loop.run_in_executor(None, desk.run_scheduled)
-                notes = await loop.run_in_executor(None, desk.drain_alerts)
-                for note in notes:
-                    if "outside a bot run" in str(note):
-                        await self._paper_audit(note)
-                    else:
-                        await self._paper_recap(note)
-                recap = await loop.run_in_executor(None, desk.take_recap)
-                if recap:
-                    await self._paper_recap(recap)
+                import desk_service
+                notes = await loop.run_in_executor(None, desk_service.one_pass, desk)
+                for note in notes["audit"]:
+                    await self._paper_audit(note)
+                for note in notes["recap"]:
+                    await self._paper_recap(note)
             except Exception:
                 log.exception("Paper timer failed")
                 try:
