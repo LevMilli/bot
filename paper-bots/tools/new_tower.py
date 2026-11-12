@@ -70,6 +70,16 @@ def _new_tower_ids() -> set:
     return set(new_towers.BY_ID)
 
 
+def _research_ids() -> set:
+    if DESK not in sys.path:
+        sys.path.insert(0, DESK)
+    try:
+        import new_towers
+    except ImportError:
+        return set()
+    return set(getattr(new_towers, "RESEARCH", ()))
+
+
 def checklist(bot_id: str, floor: float) -> list[str]:
     venue = bot_id.replace("-", "_")
     return [
@@ -103,10 +113,17 @@ def check_tower(bot_id: str) -> dict:
     if not any(slot.get("id") == bot_id for slot in pimp_desk.AUTO):
         missing.append("AUTO")
     plans = pimp_desk.BOT_PLANS.get(bot_id) or {}
-    if plans.get("exit_quality") not in ("partial", "strong"):
-        missing.append("exit quality partial or strong")
-    if not plans.get("entry_gated"):
-        missing.append("entry_gated")
+    if bot_id in _research_ids():
+        # Research buildings never buy: no exits to grade, nothing to gate.
+        if plans.get("stake") != "none":
+            missing.append("research stake none")
+        if (pimp_desk.TOWER_STARTER_CASH.get(bot_id) or 0.0) != 0.0:
+            missing.append("research holds no cash")
+    else:
+        if plans.get("exit_quality") not in ("partial", "strong"):
+            missing.append("exit quality partial or strong")
+        if not plans.get("entry_gated"):
+            missing.append("entry_gated")
     venue = desk_profit.BOT_VENUE.get(bot_id)
     if not venue or venue not in desk_profit.DEFAULT_VENUE_MIN_EDGE:
         missing.append("venue floor")

@@ -4872,9 +4872,11 @@ def _new_tower_ids() -> set:
 
 def _install_new_towers() -> None:
     """Register the new Kalshi shadow towers from new_towers.py. Shadow only, $25 ticket."""
-    global BOTS, AUTO, SETTLEMENT_FILES
+    global BOTS, AUTO, SETTLEMENT_FILES, _ZERO_STAKE_IDS
     import new_towers
 
+    # Research rows (calibration lab) hold no cash and never buy.
+    _ZERO_STAKE_IDS = frozenset(set(_ZERO_STAKE_IDS) | set(new_towers.RESEARCH))
     bots = list(BOTS)
     insert_at = next(i for i, row in enumerate(bots) if row["id"] == "wall-street")
     for offset, spec in enumerate(new_towers.ACTIVE):
@@ -4892,10 +4894,25 @@ def _install_new_towers() -> None:
             "shadow_only": True,
         })
         ACCOUNT_FILES[spec["id"]] = "paper_account.json"
+        research = bool(spec.get("research"))  # like exclusive-set: a zero-stake logger
         ACTIONS[spec["id"]] = {
             "run": {"argv": ("bot.py",), "entry": True, "timeout": int(spec.get("timeout") or 60),
                     "label": "Run one check"},
         }
+        if research:
+            BOT_PLANS[spec["id"]] = {
+                "buy": list(spec["buy"]),
+                "sell": list(spec["sell"]),
+                "failsafes": list(spec["failsafes"]) + ["Zero cash, never buys", "Pause file"],
+                "exit_quality": "partial",
+                "entry_gated": True,
+                "stake": "none",
+            }
+            ROI_POLICY["waivers"][spec["id"]] = ["research_only", "shadow_only"]
+            ROI_POLICY["target_exit_quality"][spec["id"]] = "partial"
+            TOWER_STARTER_CASH[spec["id"]] = 0.0
+            TOWER_MIN_AMMO[spec["id"]] = 0.0
+            continue
         BOT_PLANS[spec["id"]] = {
             "buy": list(spec["buy"]),
             "sell": list(spec["sell"]),

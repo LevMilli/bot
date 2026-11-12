@@ -196,9 +196,44 @@ TOWERS = (
         "office": "Poly sports lean",
         "color": "#2ec4b6",
     },
+    {
+        "id": "calibration-lab",
+        "name": "Calibration lab",
+        "folder": "calibration-lab-paper",
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "research",
+        "research": True,
+        "every_sec": 21600,
+        "timeout": 180,
+        "max_open": 0,
+        "blurb": (
+            "Research building. Every 6 hours it looks at Kalshi markets that settled in the last "
+            "14 days and counts how often each price band actually won 1, 3 and 6 hours before close. "
+            "It also scores each new tower's fair prices against the market. Buys nothing, holds no cash."
+        ),
+        "buy": [
+            "Never buys. Zero cash, zero stake, no tower risk share",
+            "Families: weather highs, gas weekly, BTC/ETH daily, Nasdaq, S&P (scheduled closes only)",
+            "Win rate per 5¢ band with a Wilson 95% range; cautious edge = low end − price − fee",
+        ],
+        "sell": [
+            "Nothing to sell",
+            "Writes calibration.json for other towers to read (favorite harvest, scorecards)",
+        ],
+        "failsafes": [
+            "Public Kalshi data only, through the shared gateway",
+            "At most 25 candle calls a run, 5 per family, so no family starves the rest",
+            "Markets with no price history are remembered so they are not fetched again",
+        ],
+        "aliases": ("calibration lab", "calibration"),
+        "office": "Calibration lab",
+        "color": "#c792ea",
+    },
 )
 
 BY_ID = {row["id"]: row for row in TOWERS}
 PAUSED: frozenset = frozenset()
 ACTIVE = tuple(row for row in TOWERS if row["id"] not in PAUSED)
 VENUES = {row["id"]: row["venue"] for row in TOWERS}
+RESEARCH = frozenset(row["id"] for row in TOWERS if row.get("research"))

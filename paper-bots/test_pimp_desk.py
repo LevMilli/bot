@@ -179,7 +179,7 @@ class PimpDeskTests(unittest.TestCase):
             "exclusive-set": 0.0,
             "wall-street": 0.0,
             **{spec["id"]: 0.0 for spec in shadow_missing.ACTIVE},
-            **{spec["id"]: 500.0 for spec in new_towers.ACTIVE},
+            **{spec["id"]: (0.0 if spec.get("research") else 500.0) for spec in new_towers.ACTIVE},
         }
         for bot in snap["bots"]:
             self.assertTrue(bot["present"], bot["id"])
@@ -460,7 +460,9 @@ class PimpDeskTests(unittest.TestCase):
             # Interval bots fire again. A no-trade sized scan is still inside
             # its window, so that slot retries. It still does not buy.
             got = {(row["bot"], row["action"]) for row in more}
-            shadow_runs = {(spec["id"], "run") for spec in shadow_missing.ACTIVE + new_towers.ACTIVE}
+            # Research rows (calibration lab) run every 6 hours, not every 35 minutes.
+            shadow_runs = {(spec["id"], "run") for spec in shadow_missing.ACTIVE + new_towers.ACTIVE
+                           if not spec.get("research")}
             self.assertTrue({
                 ("sports-gap", "run"), ("btc15m", "run"), ("btc15m", "shadow"),
                 ("commodity-15m", "run"), ("memecoin", "run"), ("coinbase-spot", "run"),

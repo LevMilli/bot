@@ -79,6 +79,7 @@ export const FLOORS: FloorDef[] = [
       { officeId: 'exclusive-set', botId: 'exclusive-set', label: 'Exclusive set' },
       { officeId: 'point-spread', botId: 'point-spread', label: 'Point spread' },
       { officeId: 'game-total', botId: 'game-total', label: 'Game total' },
+      { officeId: 'calibration-lab', botId: 'calibration-lab', label: 'Calibration lab' },
     ],
   },
   {
