@@ -57,6 +57,7 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'poly-sports-lean': '#2ec4b6',
   'calibration-lab': '#c792ea',
   'favorite-harvest': '#e6c84f',
+  'treasury-10y': '#9ad1d4',
   'wall-street': '#c6a15b',
 }
 
