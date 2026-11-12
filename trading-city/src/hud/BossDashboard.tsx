@@ -286,6 +286,12 @@ export function BossDashboard({ bots, desk, roi, snap, onClose, onFocusBot }: Pr
           {desk?.lifetime?.max_drawdown != null && (
             <span>Worst drop {money(desk.lifetime.max_drawdown)}</span>
           )}
+          {desk?.lifetime?.worse?.realized_1 != null && (
+            <span title={desk.lifetime.worse.note}>
+              Worse fills {money(desk.lifetime.worse.realized_1, true)} /{' '}
+              {money(desk.lifetime.worse.realized_2, true)}
+            </span>
+          )}
           {!!desk?.lifetime?.resets && (
             <span>
               Refills {desk.lifetime.resets} · losses cleared {money(desk.lifetime.wiped_losses)}
@@ -403,6 +409,16 @@ export function BossDashboard({ bots, desk, roi, snap, onClose, onFocusBot }: Pr
                       : ''}
                     {selected.lifetime.resets
                       ? ` · ${selected.lifetime.resets} refill${selected.lifetime.resets === 1 ? '' : 's'}, ${money(selected.lifetime.wiped_losses)} in losses cleared`
+                      : ''}
+                  </p>
+                )}
+                {selected.lifetime?.worse?.realized_1 != null && (
+                  <p>
+                    With worse fills: {selected.lifetime.worse.label_1}{' '}
+                    {money(selected.lifetime.worse.realized_1, true)} · {selected.lifetime.worse.label_2}{' '}
+                    {money(selected.lifetime.worse.realized_2, true)}
+                    {selected.lifetime.worse.measured !== selected.lifetime.worse.trades
+                      ? ` (${selected.lifetime.worse.measured} of ${selected.lifetime.worse.trades} trades measured)`
                       : ''}
                   </p>
                 )}

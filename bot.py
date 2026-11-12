@@ -41489,6 +41489,7 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
    h('b',{class:'num',text:(book.cash==null?'No account':usd(book.cash))+' · today '+pnl(book.today||0)}))),
   h('div',{class:'row'},h('span',{text:'Realized P/L'}),h('b',{class:'num '+(desk.realized>0?'win':desk.realized<0?'loss':''),text:desk.realized==null?'unknown':pnl(desk.realized)})),
   (desk.lifetime&&desk.lifetime.realized!=null)?h('div',{class:'row',title:desk.lifetime.note||''},h('span',{text:'Lifetime P/L'}),h('b',{class:'num '+(desk.lifetime.realized>0?'win':desk.lifetime.realized<0?'loss':''),text:pnl(desk.lifetime.realized)+(desk.lifetime.max_drawdown!=null?(' · worst drop '+usd(desk.lifetime.max_drawdown)):'')+(desk.lifetime.resets?(' · '+String(desk.lifetime.resets)+' refills cleared '+usd(desk.lifetime.wiped_losses||0)+' in losses'):'')})):null,
+  (desk.lifetime&&desk.lifetime.worse&&desk.lifetime.worse.realized_1!=null)?h('div',{class:'row',title:desk.lifetime.worse.note||''},h('span',{text:'With worse fills'}),h('b',{class:'num '+(desk.lifetime.worse.realized_2>0?'win':desk.lifetime.worse.realized_2<0?'loss':''),text:pnl(desk.lifetime.worse.realized_1)+' a bit worse · '+pnl(desk.lifetime.worse.realized_2)+' much worse'})):null,
   h('div',{class:'row'},h('span',{text:'Streak'}),h('span',{text:(desk.streak&&desk.streak.text)||'No settled paper trades yet.'})),
   h('div',{class:'row'},h('span',{text:'Health'}),h('span',null,h('i',{class:'dot'+(health.alive?' on':'')}),' ',health.detail||'')),
   goal,
