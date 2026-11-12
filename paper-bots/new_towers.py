@@ -274,6 +274,44 @@ TOWERS = (
         "color": "#9ad1d4",
     },
     {
+        "id": "cpi-nowcast",
+        "name": "CPI nowcast",
+        "folder": "cpi-nowcast-paper",
+        "keep": ("nowcast_cache.json",),
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "macro",
+        "every_sec": 1800,
+        "timeout": 120,
+        "max_open": 3,
+        "blurb": (
+            "Shadow Kalshi monthly CPI markets (headline and core, monthly and yearly). Prices each "
+            "strike from the Cleveland Fed's daily inflation nowcast and how far that nowcast has "
+            "usually missed. Buys only when edge after fee clears 0.05. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXCPI / KXCPICORE / KXCPIYOY / KXCPICOREYOY: \"above X%\" on the BLS CPI print",
+            "Fair = Cleveland Fed nowcast, with its measured historical miss (by days to release) widened 25%",
+            "Only the month the nowcast covers, nowcast under 5 days old, not in the last 2 hours before release",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked econ 0.05 and ≤ 0.15 trust cap",
+            "Fixed $25 ticket in whole contracts; max 3 open, one per event, one new buy per check",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Econ floor 0.05 cannot be lowered in config",
+            "Big model-vs-market gaps (edge over 0.15) are logged, never bought",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("cpi", "inflation", "cpi nowcast", "cleveland fed"),
+        "office": "CPI nowcast",
+        "color": "#e8a0bf",
+    },
+    {
         "id": "calibration-lab",
         "name": "Calibration lab",
         "folder": "calibration-lab-paper",

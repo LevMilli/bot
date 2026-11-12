@@ -58,6 +58,7 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'calibration-lab': '#c792ea',
   'favorite-harvest': '#e6c84f',
   'treasury-10y': '#9ad1d4',
+  'cpi-nowcast': '#e8a0bf',
   'wall-street': '#c6a15b',
 }
 
