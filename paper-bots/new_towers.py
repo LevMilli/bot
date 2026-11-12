@@ -554,6 +554,7 @@ TOWERS = (
         "sell": [
             "Nothing to sell",
             "Writes whatif.json: missed-trade grades per tower and gap stats for the Polymarket towers",
+            "Maker check: would a resting bid 1 cent above the best bid have filled, and beaten taking the ask?",
         ],
         "failsafes": [
             "Reads only the towers' own logs plus Kalshi results through the shared gateway",

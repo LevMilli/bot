@@ -13,9 +13,10 @@ import whatif_model as wm  # noqa: E402
 NOW = dt.datetime(2026, 11, 12, 18, tzinfo=dt.timezone.utc)
 
 
-def _d(ticker, edge, ask=0.40, side="yes", action="skip", reason="logged for calibration; not a buy window"):
+def _d(ticker, edge, ask=0.40, side="yes", action="skip", reason="logged for calibration; not a buy window",
+       bid=None):
     return dict(ticker=ticker, side=side, edge=edge, ask=ask, fee=0.02, fair=ask + edge + 0.02,
-                action=action, reason=reason)
+                action=action, reason=reason, bid=ask - 0.03 if bid is None else bid)
 
 
 def _check(minutes, *decisions):
@@ -92,12 +93,14 @@ def test_bot_main(tmp_path):
     spec.loader.exec_module(bot)
     _write(tmp_path / "weather-high-paper", [_check(60, _d("KXHIGHNY-A", 0.08))])
     _write(tmp_path / "poly-sports-lean-paper", [_check(10, _d("KXNBAGAME-A", 0.09))])
-    assert bot.main([], root=str(tmp_path), fetch=lambda t: {"result": "yes"}, now=NOW) == 0
+    assert bot.main([], root=str(tmp_path), fetch=lambda t: {"result": "yes"},
+                    trades_fetch=lambda t, a, b: [{"taker_side": "no", "yes_price_dollars": "0.37"}], now=NOW) == 0
     body = json.loads((tmp_path / "whatif-lab-paper" / "whatif.json").read_text())
     assert body["missed"]["weather-high"]["log_only"]["n"] == 1
     assert body["gaps"]["poly-sports-lean"]["episodes"] == 1
     assert "calibration-lab" not in body["missed"] and "whatif-lab" not in body["missed"]
     assert wm.card(body).startswith("What-if lab: 2 settled")
+    assert body["maker"]["weather-high"]["n"] == 1 and body["maker"]["weather-high"]["fill_rate"] == 1.0
 
 
 def test_registry_and_desk_wiring():
@@ -133,3 +136,38 @@ def test_rotation_keeps_the_volume_link(tmp_path, monkeypatch):
     assert os.path.islink(tower / "research.jsonl") and os.path.islink(tower / "research.jsonl.1")
     assert (volume / "research.jsonl.1").read_text().startswith("xxx")
     assert json.loads((volume / "research.jsonl").read_text())["note"] == "note"
+
+
+def test_maker_fill_rule():
+    assert wm.maker_price({"bid": 0.37, "ask": 0.40}) == 0.38
+    assert wm.maker_price({"bid": 0.39, "ask": 0.40}) is None            # no room inside the spread
+    assert wm.maker_price({"bid": None, "ask": 0.40}) is None
+    sold_yes = {"taker_side": "no", "yes_price_dollars": "0.37", "no_price_dollars": "0.63"}
+    bought_yes = {"taker_side": "yes", "yes_price_dollars": "0.40", "no_price_dollars": "0.60"}
+    assert wm.maker_filled([sold_yes], "yes", 0.38)
+    assert not wm.maker_filled([dict(sold_yes, yes_price_dollars="0.39")], "yes", 0.38)
+    assert not wm.maker_filled([bought_yes], "yes", 0.38)
+    assert wm.maker_filled([dict(bought_yes, no_price_dollars="0.58")], "no", 0.60)
+
+
+def test_maker_report_waits_for_window_and_grades():
+    log = [_check(120, _d("A", 0.08, ask=0.40, bid=0.37)), _check(120, _d("B", 0.08, ask=0.40, bid=0.37)),
+           _check(10, _d("C", 0.08, ask=0.40, bid=0.37))]
+    trades = {"A": [{"taker_side": "no", "yes_price_dollars": "0.38"}], "B": []}
+    calls = []
+
+    def tf(ticker, a, b):
+        calls.append(ticker)
+        assert b - a == 30 * 60
+        return trades[ticker]
+
+    quotes = {}
+    report, reads = wm.maker([("x", 0.05, log)], {"A": "yes", "B": "yes"}, quotes, tf, NOW)
+    assert sorted(calls) == ["A", "B"] and reads == 2                  # C's window has not closed
+    r = report["x"]
+    assert r["n"] == 2 and r["fill_rate"] == 0.5
+    assert abs(r["maker_avg"] - (1 - 0.38 - 0.0175 * 0.38 * 0.62)) < 1e-4
+    assert r["taker_avg_same"] == 0.58
+    calls.clear()
+    wm.maker([("x", 0.05, log)], {"A": "yes", "B": "yes"}, quotes, tf, NOW)
+    assert calls == []                                                  # cached
