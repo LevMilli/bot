@@ -92,6 +92,63 @@ class KalshiTapeTests(unittest.TestCase):
     def test_self_check(self):
         kalshi_tape.self_check()
 
+    def _markets(self, n):
+        return [{"ticker": f"KXBTC15M-26NOV02{i:04d}-00", "close_time": f"2099-01-01T00:{i:02d}:00Z"}
+                for i in range(n)]
+
+    def test_429_stops_the_tape_instead_of_asking_every_market(self):
+        calls = []
+
+        def fake_fetch(ticker, min_ts=None, limit=200):
+            calls.append(ticker)
+            raise kalshi_tape.RateLimited("429")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(kalshi_tape, "list_open_markets", return_value=self._markets(10)), \
+                 mock.patch.object(kalshi_tape, "fetch_trades_for_ticker", side_effect=fake_fetch):
+                state = kalshi_tape.sync_tape(tmp, series=("KXBTC15M",))
+        self.assertEqual(len(calls), 1)
+        self.assertIn("rate limited", state["last_error"])
+        self.assertIn("10 market(s) left", state["last_stopped"])
+
+    def test_time_budget_leaves_the_rest_for_next_check(self):
+        now = [0.0]
+
+        def clock():
+            return now[0]
+
+        def fake_fetch(ticker, min_ts=None, limit=200):
+            now[0] += 4.0
+            return []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(kalshi_tape, "list_open_markets", return_value=self._markets(20)), \
+                 mock.patch.object(kalshi_tape, "fetch_trades_for_ticker", side_effect=fake_fetch):
+                state = kalshi_tape.sync_tape(tmp, series=("KXBTC15M",), budget_sec=10, clock=clock)
+        self.assertIn("tape budget 10s hit", state["last_stopped"])
+        self.assertIn("17 market(s) left", state["last_stopped"])
+
+    def test_get_json_does_not_retry_a_429(self):
+        import urllib.error
+        hits = []
+
+        def boom(req, timeout=None):
+            hits.append(1)
+            raise urllib.error.HTTPError(req.full_url, 429, "Too Many", {}, None)
+
+        with mock.patch.object(kalshi_tape.urllib.request, "urlopen", side_effect=boom), \
+             mock.patch.object(kalshi_tape.time, "sleep") as nap:
+            with self.assertRaises(kalshi_tape.RateLimited):
+                kalshi_tape._get_json("https://example.invalid/x")
+        self.assertEqual(len(hits), 1)
+        nap.assert_not_called()
+
+    def test_budget_env_reaches_tower_children(self):
+        import pimp_desk
+        self.assertIn("KALSHI_TAPE_BUDGET_SEC", pimp_desk._ENV_KEEP)
+        with mock.patch.dict(os.environ, {"KALSHI_TAPE_BUDGET_SEC": "12"}):
+            self.assertEqual(kalshi_tape.tape_budget_sec(), 12.0)
+
 
 class BtcMultiWindowTests(unittest.TestCase):
     def test_evaluate_window_respects_guidelines(self):

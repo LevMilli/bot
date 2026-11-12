@@ -60,3 +60,27 @@ class CommodityScan(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CommodityListOpenSkipsClosedWindows(unittest.TestCase):
+    def test_a_window_that_already_closed_is_not_a_candidate(self):
+        from unittest import mock
+        bot = _load()
+        now = dt.datetime.now(dt.timezone.utc)
+
+        def row(ticker, minutes, status="active"):
+            return {
+                "ticker": ticker, "status": status, "floor_strike": 100.0,
+                "close_time": (now + dt.timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "yes_ask_dollars": "0.5", "no_ask_dollars": "0.5",
+                "yes_bid_dollars": "0.4", "no_bid_dollars": "0.4",
+            }
+
+        feed = {"markets": [
+            row("OLD", -30, "closed"),
+            row("PAST", -1),
+            row("LIVE", 9),
+        ]}
+        with mock.patch.object(bot, "get_json", return_value=feed):
+            rows = bot.list_open("KXGOLD15M")
+        self.assertEqual([r["ticker"] for r in rows], ["LIVE"])
