@@ -60,3 +60,17 @@ def test_registry_and_desk_wiring():
     sys.path.insert(0, os.path.join(HERE, "tools"))
     import new_tower
     assert new_tower.check_tower("scorekeeper")["ok"]
+
+
+def test_extra_slot_trades_are_split_out(tmp_path):
+    spec = importlib.util.spec_from_file_location("score_bot_x", os.path.join(HERE, "scorekeeper-paper", "bot.py"))
+    bot = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bot)
+    folder = tmp_path / "weather-high-paper"
+    folder.mkdir()
+    closed = [dict(ticker="A", contracts=10, pnl=3.0, extra=True), dict(ticker="B", contracts=10, pnl=-1.0)]
+    (folder / "paper_account.json").write_text(json.dumps({"cash": 500.0, "open": [], "closed": closed}))
+    got = bot.extra_split(str(tmp_path), 0.01)
+    assert got == {"weather-high": {"extra": {"n": 1, "avg": 2.9}, "normal": {"n": 1, "avg": -1.1}}}
+    body = {"bots": [], "counts": {g: 0 for g in sm.ORDER}, "min_n": 50, "extra_slots": got}
+    assert sm.card(body).endswith("Extra-slot trades closed: 1 (avg $ per trade, extra vs normal: weather-high +2.90 vs -1.10)")

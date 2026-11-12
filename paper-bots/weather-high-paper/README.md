@@ -13,7 +13,7 @@ Kalshi settles on the NWS climate report for each city's station (CLINYC Central
 ## When it buys
 - Only after **15:00 local standard time** on the day. This is the afternoon lock, when most of the high is already recorded. Morning and next-day brackets are priced and logged to `research.jsonl` for the calibration lab, but not bought.
 - Edge = fair − ask − Kalshi fee must be at least the locked econ floor **0.05**. An edge above **0.25** is logged but not bought, because it usually means a bad input.
-- $25 fixed ticket from a $500 sleeve, max 3 open, one per city-day, one new buy per check.
+- $25 fixed ticket from a $500 sleeve, max 7 open, one per city-day, one new buy per check.
 
 ## Exits
 - **Model flip:** sell at the bid when bid − fee beats the model fair by 2¢.

@@ -39,6 +39,32 @@ def histories(root: str, now: dt.datetime) -> dict:
     return out
 
 
+def extra_split(root: str, fill_tax: float) -> dict:
+    """{bot_id: {extra: {n, avg}, normal: {n, avg}}} from engine towers' closed trades.
+
+    Trades opened in an extra slot carry ``extra: true``. P&L here is after fees
+    and the same 1-cent-a-contract fill tax the grades use.
+    """
+    import new_towers
+
+    out = {}
+    for tid, row in new_towers.BY_ID.items():
+        if tid in new_towers.RESEARCH:
+            continue
+        state = engine.read_json(os.path.join(root, row["folder"], "paper_account.json")) or {}
+        split = {"extra": [], "normal": []}
+        for trade in state.get("closed") or []:
+            pnl = engine.num(trade.get("pnl"))
+            if pnl is None:
+                continue
+            pnl -= fill_tax * float(trade.get("contracts") or 0)
+            split["extra" if trade.get("extra") else "normal"].append(pnl)
+        if split["extra"]:
+            out[tid] = {k: {"n": len(v), "avg": round(sum(v) / len(v), 4) if v else None}
+                        for k, v in split.items()}
+    return out
+
+
 def main(argv: list[str] | None = None, *, root: str | None = None, now: dt.datetime | None = None) -> int:
     import desk_profit
 
@@ -56,6 +82,7 @@ def main(argv: list[str] | None = None, *, root: str | None = None, now: dt.date
                                          fill_tax=desk_profit.FILL_ADVERSE_TAX)
 
     body = sm.run(histories(root, now), now, pnls_of=pnls_of)
+    body["extra_slots"] = extra_split(root, desk_profit.FILL_ADVERSE_TAX)
     engine.write_json(os.path.join(here, "scorecard.json"), body)
     state["checks"] = int(state.get("checks") or 0) + 1
     state["last_check"] = now.isoformat(timespec="seconds")

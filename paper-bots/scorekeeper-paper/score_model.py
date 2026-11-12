@@ -66,4 +66,11 @@ def card(body: dict) -> str:
     graded = len(body["bots"]) - c["too few"]
     head = f"{graded} of {len(body['bots'])} bots have {body['min_n']}+ trades"
     parts = [f"{c[g]} {g}" for g in ("promote", "keep", "pause", "retire") if c[g]]
-    return head + (": " + ", ".join(parts) if parts else "")
+    line = head + (": " + ", ".join(parts) if parts else "")
+    extra = body.get("extra_slots") or {}
+    if extra:
+        n = sum(v["extra"]["n"] for v in extra.values())
+        bits = [f"{tid} {v['extra']['avg']:+.2f} vs {v['normal']['avg']:+.2f}" if v["normal"]["avg"] is not None
+                else f"{tid} {v['extra']['avg']:+.2f}" for tid, v in sorted(extra.items())]
+        line += f". Extra-slot trades closed: {n} (avg $ per trade, extra vs normal: {'; '.join(bits)})"
+    return line

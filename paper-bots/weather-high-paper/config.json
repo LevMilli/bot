@@ -5,6 +5,6 @@
   "venue_min_edge": 0.05,
   "stake_usd": 25,
   "starter_cash": 500,
-  "max_open": 3,
+  "max_open": 7,
   "note": "Kalshi daily-high brackets. Econ floor 0.05 locked. Buys only after the 15:00 local lock."
 }

@@ -26,7 +26,7 @@ import calibration_lab as lab  # noqa: E402
 import harvest_model as hm  # noqa: E402
 import kalshi_shadow_tower as engine  # noqa: E402
 
-SPEC = {"id": "favorite-harvest", "name": "Favorite harvest", "floor": 0.05, "max_open": 3,
+SPEC = {"id": "favorite-harvest", "name": "Favorite harvest", "floor": 0.05, "max_open": 3, "extra_slots": 0,
         "max_edge": 0.10, "min_ask": hm.MIN_PRICE, "max_ask": hm.MAX_PRICE}
 
 

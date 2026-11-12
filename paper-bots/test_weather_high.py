@@ -192,3 +192,51 @@ def test_registry_and_desk_wiring():
     sys.path.insert(0, os.path.join(HERE, "tools"))
     import new_tower
     assert new_tower.check_tower("weather-high")["ok"]
+
+
+def test_extra_slots_only_for_strong_edges(tmp_path, capsys):
+    spec = dict(SPEC, max_open=1)
+    now = dt.datetime(2026, 11, 12, 21, tzinfo=dt.timezone.utc)
+    q = lambda t, fair, ask: {"ticker": t, "event": t, "side": "yes", "fair": fair, "ask": ask,  # noqa: E731
+                              "bid": ask - 0.02, "label": t}
+    run = lambda quotes: engine.run_tower(spec, str(tmp_path), None, now=now, fetch=lambda t: {}, quotes=quotes)  # noqa: E731
+    run([q("A", 0.70, 0.50)])                                   # normal slot, edge 0.18
+    assert "extra" not in _state(tmp_path)["open"][0]
+    capsys.readouterr()
+    run([q("B", 0.57, 0.50)])                                   # edge 0.05: floor ok, not 2x
+    assert "max open; extra slot needs edge 0.1+" in capsys.readouterr().out
+    run([q("C", 0.67, 0.50)])                                   # edge 0.15 >= 0.10: extra slot
+    out = capsys.readouterr().out
+    assert "[extra slot]" in out and "shadow, extra slot" in out
+    run([q("D", 0.72, 0.50)])                                   # second extra slot
+    state = _state(tmp_path)
+    assert [p.get("extra", False) for p in state["open"]] == [False, True, True]
+    capsys.readouterr()
+    run([q("E", 0.72, 0.50)])                                   # 1 + 2 extra: full
+    assert "max open (extra slots full)" in capsys.readouterr().out
+    assert len(_state(tmp_path)["open"]) == 3
+
+
+def test_extra_slots_respect_trust_cap_and_can_be_off(tmp_path, capsys):
+    cfg = engine.locked_cfg(dict(SPEC, extra_slots=5))
+    assert cfg["extra_slots"] == 2 and cfg["extra_min_edge"] == 0.1
+    assert engine.locked_cfg(SPEC, {"extra_slots": 9})["extra_slots"] == 2        # config cannot raise
+    assert engine.locked_cfg(SPEC, {"extra_slots": 0})["extra_slots"] == 0        # config can lower
+    off = dict(SPEC, max_open=1, extra_slots=0)
+    now = dt.datetime(2026, 11, 12, 21, tzinfo=dt.timezone.utc)
+    for t in ("A", "B"):
+        engine.run_tower(off, str(tmp_path), None, now=now, fetch=lambda t: {},
+                         quotes=[{"ticker": t, "event": t, "side": "yes", "fair": 0.75, "ask": 0.50, "label": t}])
+    assert len(_state(tmp_path)["open"]) == 1 and "SKIP B YES max open" in capsys.readouterr().out
+    # over the trust cap stays a skip even with a free extra slot
+    capped = engine.locked_cfg(dict(SPEC, max_edge=0.15))
+    assert engine.decide({"fair": 0.80, "ask": 0.50}, capped)["action"] == "skip"
+
+
+def test_favorite_harvest_has_no_extra_slots():
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "favorite-harvest-paper", "bot.py")
+    spec = importlib.util.spec_from_file_location("fav_bot_x", path)
+    bot = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bot)
+    assert engine.locked_cfg(bot.SPEC)["extra_slots"] == 0

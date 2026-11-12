@@ -15,6 +15,12 @@ the same way for every tower, cloned from the Fed Watch rails:
   but not bought; it usually means a bad input, not a free lunch.
 * **Limits:** max open positions, one position per event, never both sides of
   one ticker, ask between 5¢ and 95¢ by default, and at most one new buy per check.
+* **Extra slots:** once max open is reached, up to ``extra_slots`` (default 2,
+  never more than 2) more positions may open, but only when the edge is at
+  least ``EXTRA_EDGE_MULT`` (2×) the floor and still under the trust cap. Every
+  other rule still applies. These positions carry ``extra: true`` so the
+  scorekeeper can show whether they beat the normal ones. A tower turns them
+  off with ``extra_slots: 0`` in its spec.
 * **Exits (partial quality):**
   - Model flip: sell at the bid when bid − fee beats the model's fair by a margin.
   - Settle backstop: $1 per contract when Kalshi's result matches our side.
@@ -39,6 +45,8 @@ STAKE_USD = 25.0
 STARTER_CASH = 500.0
 RESEARCH_MAX_BYTES = 4_000_000
 RESEARCH_ROWS = 60
+EXTRA_SLOTS_MAX = 2
+EXTRA_EDGE_MULT = 2.0
 
 
 # ------------------------------------------------------------------ config + math
@@ -61,6 +69,14 @@ def locked_cfg(spec: dict, raw: dict | None = None) -> dict:
     cfg["flip_margin"] = float(cfg.get("flip_margin") or 0.02)
     cap = spec.get("max_edge")
     cfg["max_edge"] = None if cap is None else float(cap)
+    # Spec decides extra slots (config can only lower them): 0 to EXTRA_SLOTS_MAX.
+    slots = int(spec.get("extra_slots", EXTRA_SLOTS_MAX))
+    try:
+        slots = min(slots, int(cfg.get("extra_slots", slots)))
+    except (TypeError, ValueError):
+        pass
+    cfg["extra_slots"] = max(0, min(EXTRA_SLOTS_MAX, slots))
+    cfg["extra_min_edge"] = round(EXTRA_EDGE_MULT * cfg["venue_min_edge"], 6)
     return cfg
 
 
@@ -310,8 +326,14 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
             why = "already holding this market"
         elif d["event"] and d["event"] in held_events:
             why = "already holding this event"
-        elif len(state["open"]) >= cfg["max_open"]:
-            why = "max open"
+        extra = False
+        if not why and len(state["open"]) >= cfg["max_open"]:
+            if len(state["open"]) >= cfg["max_open"] + cfg["extra_slots"]:
+                why = "max open (extra slots full)" if cfg["extra_slots"] else "max open"
+            elif float(d["edge"]) + 1e-12 < cfg["extra_min_edge"]:
+                why = f"max open; extra slot needs edge {cfg['extra_min_edge']:g}+"
+            else:
+                extra = True
         per = float(d["ask"]) + float(d["fee"] or 0)
         contracts = int(cfg["stake_usd"] // per) if per > 0 else 0
         if not why and contracts < 1:
@@ -330,7 +352,10 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
             "opened": now.isoformat(timespec="seconds"),
             "paper_only": True, "shadow_only": True,
             "exit_plan": {"kind": "model-flip+settle", "flip_margin": cfg["flip_margin"]},
+            **({"extra": True} if extra else {}),
         })
+        if extra:
+            d["extra"] = True
         bought = d
     state["checks"] = int(state.get("checks") or 0) + 1
     state["last_check"] = now.isoformat(timespec="seconds")
@@ -347,9 +372,10 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
               f"pnl {row['pnl']:+.2f}")
     priced = sum(1 for d in decisions if d.get("edge") is not None)
     if bought:
-        print(f"SIGNAL: BUY {bought['label']} {bought['side'].upper()} {bought['reason']}")
+        tag = " [extra slot]" if bought.get("extra") else ""
+        print(f"SIGNAL: BUY {bought['label']} {bought['side'].upper()} {bought['reason']}{tag}")
         print(f"CARD: paper buy {bought['label']} {bought['side'].upper()} at {bought['ask']:.2f} "
-              f"({name}, shadow). {bought['why']}".rstrip())
+              f"({name}, shadow{', extra slot' if tag else ''}). {bought['why']}".rstrip())
         return 0
     if not decisions:
         text = note or "no market priced this check"
