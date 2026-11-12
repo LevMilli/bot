@@ -22,7 +22,9 @@ import datetime as dt
 import json
 import os
 import sys
+import urllib.error
 import urllib.parse
+import urllib.request
 from zoneinfo import ZoneInfo
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -241,7 +243,6 @@ def _odds_fetch(sport, key, bookmaker):
         "apiKey": key, "regions": "eu", "markets": "h2h",
         "oddsFormat": "decimal", "bookmakers": bookmaker,
     })
-    import urllib.request
     req = urllib.request.Request(ODDS_API.format(sport=sport) + "?" + query,
                                  headers={"User-Agent": "paper-bots/1.0 (paper-only read)"})
     with urllib.request.urlopen(req, timeout=15) as resp:
@@ -322,6 +323,9 @@ def live_quotes(tower, now=None, *, kalshi=None, odds=None):
             break
         try:
             events, left = odds(sport, key, bookmaker)
+        except urllib.error.HTTPError as exc:
+            errors.append(f"{league}: HTTP {exc.code}")
+            continue
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{league}: {type(exc).__name__}")
             continue
@@ -353,6 +357,8 @@ def live_quotes(tower, now=None, *, kalshi=None, odds=None):
     }
     if low:
         status["note"] = f"Odds API credits low ({remaining:g} left); using the last lines only"
+    elif errors and not fetched:
+        status["note"] = "Odds API read failed: " + "; ".join(errors[:4])
     elif not active:
         status["note"] = "no Kalshi games in the next day and a half"
     return quotes, status

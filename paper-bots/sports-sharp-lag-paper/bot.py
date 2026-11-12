@@ -317,9 +317,12 @@ def _live_or_file(tower: str, now: dt.datetime):
     except OSError:
         pass
     if not quotes and not status.get("note"):
+        left = status.get("remaining")
         status["note"] = (
             f"no matched pre-game lines ({status.get('unmatched', 0)} unmatched, "
-            f"leagues {','.join(status.get('leagues') or []) or 'none'})"
+            f"leagues {','.join(status.get('leagues') or []) or 'none'}"
+            + (f", {left:g} credits left" if isinstance(left, (int, float)) else "")
+            + ")"
         )
     return quotes, status
 
