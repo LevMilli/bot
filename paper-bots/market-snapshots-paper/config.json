@@ -1,0 +1,8 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "research": true,
+  "stake_usd": 0,
+  "note": "Support building. Saves top-of-book snapshots of the series the towers watch, for later tests. Buys nothing."
+}
