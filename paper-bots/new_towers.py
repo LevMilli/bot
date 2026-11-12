@@ -159,6 +159,43 @@ TOWERS = (
         "office": "Nasdaq",
         "color": "#4d8bff",
     },
+    {
+        "id": "poly-sports-lean",
+        "name": "Poly sports lean",
+        "folder": "poly-sports-lean-paper",
+        "venue": "kalshi_sports",
+        "floor": 0.06,
+        "kind": "sports",
+        "every_sec": 300,
+        "timeout": 60,
+        "max_open": 2,
+        "blurb": (
+            "Shadow Kalshi NBA, NFL and NHL game winners. Uses Polymarket's moneyline mid for "
+            "the same game as the fair price and buys only when Kalshi lags it by more than the "
+            "0.06 floor after fee. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXNBAGAME / KXNFLGAME / KXNHLGAME winners, matched to Polymarket by Eastern date + team codes",
+            "Fair = Polymarket moneyline mid; only when its spread ≤ 3¢ and liquidity ≥ $10k",
+            "Window: 5 minutes to 48 hours before start (pre-game only)",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked sports 0.06 and ≤ 0.15 trust cap",
+            "Fixed $25 ticket in whole contracts; max 2 open, one per game, one new buy per check",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the Polymarket fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Sports floor 0.06 cannot be lowered in config",
+            "Game must match exactly one Kalshi event with both team codes; otherwise skipped",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("poly sports lean", "poly lean", "sports lean"),
+        "office": "Poly sports lean",
+        "color": "#2ec4b6",
+    },
 )
 
 BY_ID = {row["id"]: row for row in TOWERS}

@@ -54,6 +54,7 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'gas-weekly': '#ffb347',
   'crypto-ladder': '#f7931a',
   'nasdaq': '#4d8bff',
+  'poly-sports-lean': '#2ec4b6',
   'wall-street': '#c6a15b',
 }
 
