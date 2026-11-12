@@ -60,6 +60,7 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'treasury-10y': '#9ad1d4',
   'cpi-nowcast': '#e8a0bf',
   'gdp-nowcast': '#b5d99c',
+  'soccer-tennis-lean': '#f2a65a',
   'wall-street': '#c6a15b',
 }
 
