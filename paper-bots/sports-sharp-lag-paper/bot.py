@@ -51,6 +51,9 @@ def lag_decision(quote: dict, cfg: dict | None = None) -> dict:
     game = str(quote.get("game") or quote.get("ticker") or "game")
     row = {
         "game": game,
+        "ticker": str(quote.get("ticker") or ""),
+        "league": str(quote.get("league") or ""),
+        "source": str(quote.get("source") or ""),
         "action": "skip",
         "reason": "",
         "sharp_fair": fair,
@@ -210,8 +213,18 @@ def run_once(
     state["paper_only"] = True
     state["shadow_only"] = True
     state["live_orders"] = False
-    rows = list(quotes) if quotes is not None else load_quotes(tower)
+    feed = None
+    if quotes is not None:
+        rows = list(quotes)
+    else:
+        rows, feed = _live_or_file(tower, now)
+    settled = settle_open(state, now)
+    held = {str(p.get("kalshi_ticker") or "") for p in state.get("open") or []}
     decisions = [lag_decision(row, cfg) for row in rows]
+    for decision in decisions:
+        if decision.get("action") == "buy" and decision.get("ticker") in held:
+            decision["action"] = "skip"
+            decision["reason"] = "already holding this side"
     bought = None
     blocked = os.environ.get("DESK_BLOCK_ENTRIES") == "1"
     if blocked:
@@ -235,12 +248,23 @@ def run_once(
                 decision["action"] = "skip"
                 decision["reason"] = "shadow cash below ticket"
                 continue
-            state["cash"] = round(cash - stake, 4)
+            per = float(decision.get("ask") or 0) + float(decision.get("fee") or 0)
+            contracts = int(stake // per) if per > 0 else 0
+            if contracts < 1:
+                decision["action"] = "skip"
+                decision["reason"] = "ticket buys no contract"
+                continue
+            cost = round(contracts * per, 2)
+            state["cash"] = round(cash - cost, 4)
             state["open"].append({
                 "ticker": decision.get("game"),
+                "kalshi_ticker": decision.get("ticker"),
+                "league": decision.get("league"),
+                "source": decision.get("source"),
                 "side": "buy",
-                "contracts": 1,
-                "cost": stake,
+                "contracts": contracts,
+                "fee": decision.get("fee"),
+                "cost": cost,
                 "ask": decision.get("ask"),
                 "sharp_fair": decision.get("sharp_fair"),
                 "edge": decision.get("edge"),
@@ -259,12 +283,15 @@ def run_once(
     state["last_check"] = now.isoformat(timespec="seconds")
     _write_json(os.path.join(tower, "paper_account.json"), state)
     _append_research(tower, now, decisions)
+    for row in settled:
+        print(f"SETTLE: {row.get('ticker')} {row.get('result')} pnl {row.get('pnl'):+.2f}")
     if bought:
         print(f"SIGNAL: BUY {bought}")
         print(f"CARD: paper buy {bought} sharp lag")
     elif not decisions:
-        print("SIGNAL: SKIP waiting on sharp book quotes")
-        print("CARD: waiting on sharp_quotes.json (no invent)")
+        note = (feed or {}).get("note") or "waiting on sharp book quotes"
+        print(f"SIGNAL: SKIP {note}")
+        print(f"CARD: {note} (no invent)")
         print("no trade")
     else:
         first = decisions[0]
@@ -272,6 +299,75 @@ def run_once(
         print("CARD: " + str(first.get("reason") or "no fee-clear sharp lag"))
         print("no trade")
     return 0
+
+
+def _live_or_file(tower: str, now: dt.datetime):
+    """Live Pinnacle-vs-Kalshi quotes when ODDS_API_KEY is set, else the file."""
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    try:
+        import odds_feed
+    except Exception:  # noqa: BLE001
+        return load_quotes(tower), None
+    if not odds_feed.api_key():
+        return load_quotes(tower), {"note": "waiting on ODDS_API_KEY (no sharp book wired)"}
+    quotes, status = odds_feed.live_quotes(tower, now)
+    try:
+        write_sharp_quotes(tower, quotes, note=f"live {status.get('bookmaker')} vs Kalshi ask")
+    except OSError:
+        pass
+    if not quotes and not status.get("note"):
+        status["note"] = (
+            f"no matched pre-game lines ({status.get('unmatched', 0)} unmatched, "
+            f"leagues {','.join(status.get('leagues') or []) or 'none'})"
+        )
+    return quotes, status
+
+
+def _kalshi_market(ticker: str) -> dict:
+    if DESK_ROOT not in sys.path:
+        sys.path.insert(0, DESK_ROOT)
+    import public_http
+    url = f"https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}"
+    data = json.loads(public_http.read(url, timeout=10).decode("utf-8"))
+    return data.get("market") or {}
+
+
+def settle_open(state: dict, now: dt.datetime, fetch=None) -> list:
+    """Close shadow rows whose Kalshi market has a result. $1 per contract on YES."""
+    fetch = fetch or _kalshi_market
+    closed = []
+    keep = []
+    for pos in state.get("open") or []:
+        ticker = str(pos.get("kalshi_ticker") or "")
+        if not ticker:
+            keep.append(pos)
+            continue
+        try:
+            market = fetch(ticker)
+        except Exception:  # noqa: BLE001
+            keep.append(pos)
+            continue
+        result = str(market.get("result") or "").lower()
+        if result not in ("yes", "no"):
+            keep.append(pos)
+            continue
+        contracts = int(pos.get("contracts") or 0)
+        payout = float(contracts) if result == "yes" else 0.0
+        cost = float(pos.get("cost") or 0)
+        row = dict(pos)
+        row.update({
+            "result": result,
+            "payout": round(payout, 2),
+            "pnl": round(payout - cost, 2),
+            "closed": now.isoformat(timespec="seconds"),
+            "exit": "settled",
+        })
+        state["cash"] = round(float(state.get("cash") or 0) + payout, 4)
+        state.setdefault("closed", []).append(row)
+        closed.append(row)
+    state["open"] = keep
+    return closed
 
 
 def _num(value):

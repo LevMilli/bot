@@ -687,14 +687,14 @@ BOT_PLANS = {
     "sports-sharp-lag": {
         "buy": [
             "Shadow sleeve only — spends no desk cash and takes no tower risk share",
-            "Sharp-book fair vs Kalshi ask (sharp_quotes.json fixture or injected quotes)",
+            "Pinnacle no-vig fair (The Odds API, ODDS_API_KEY) vs Kalshi ask, pre-game only",
             "Edge = sharp_fair − ask − Kalshi fee; buy only if edge ≥ locked sports 0.06",
-            "Fixed $25 from the shadow $500 sleeve; max 1 open",
-            "Empty quotes wait on sharp book — never invent fills",
+            "Fixed $25 ticket in whole contracts from the shadow $500 sleeve; max 1 open",
+            "No key or no matched game → waits; never invent fills",
         ],
         "sell": [
+            "Holds to the Kalshi result: $1 per contract on YES",
             "Model-flip when sharp fair collapses through the ask",
-            "Settle / staff close is the backstop",
         ],
         "failsafes": [
             "Desk entry_gate still blocks new buys",

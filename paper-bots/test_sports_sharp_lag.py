@@ -67,7 +67,9 @@ class SportsSharpLag(unittest.TestCase):
                 state = json.load(handle)
             self.assertEqual(len(state["open"]), 1)
             self.assertTrue(state["shadow_only"])
-            self.assertAlmostEqual(state["cash"], 475.0, places=2)
+            # 46 whole contracts at 0.52 + 0.02 fee = $24.84 of the $25 ticket.
+            self.assertEqual(state["open"][0]["contracts"], 46)
+            self.assertAlmostEqual(state["cash"], 475.16, places=2)
 
     def test_harvest_from_matched_writes_quotes(self):
         bot = _bot()
