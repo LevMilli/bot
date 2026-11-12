@@ -63,6 +63,7 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'soccer-tennis-lean': '#f2a65a',
   'settlement-auditor': '#8fb8de',
   'scorekeeper': '#e6c07b',
+  'whatif-lab': '#7fd1b9',
   'wall-street': '#c6a15b',
 }
 

@@ -1,0 +1,8 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "research": true,
+  "stake_usd": 0,
+  "note": "Research building. Grades the trades the towers logged but did not buy, and measures how long cross-venue price gaps last. Buys nothing."
+}

@@ -492,6 +492,41 @@ TOWERS = (
         "office": "Scorekeeper",
         "color": "#e6c07b",
     },
+    {
+        "id": "whatif-lab",
+        "name": "What-if lab",
+        "folder": "whatif-lab-paper",
+        "keep": ("whatif.json",),
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "research",
+        "research": True,
+        "every_sec": 21600,
+        "timeout": 180,
+        "max_open": 0,
+        "blurb": (
+            "Research building. Every 6 hours it checks what the towers' logged-but-not-bought rows "
+            "would have made after fees (weather before its window, edges over the trust cap), and how "
+            "long Kalshi vs Polymarket price gaps last. Buys nothing."
+        ),
+        "buy": [
+            "Never buys. Zero cash, zero stake, no tower risk share",
+            "A would-be trade is the first time a contract cleared the tower's floor after fee",
+            "Flags a group only with 50+ settled rows and a 95% low end above $0",
+        ],
+        "sell": [
+            "Nothing to sell",
+            "Writes whatif.json: missed-trade grades per tower and gap stats for the Polymarket towers",
+        ],
+        "failsafes": [
+            "Reads only the towers' own logs plus Kalshi results through the shared gateway",
+            "At most 40 Kalshi reads a run; an open contract is read again after 12 hours",
+            "Suggests only: it never turns a window or cap on",
+        ],
+        "aliases": ("what-if lab", "whatif", "what if", "missed trades", "gap monitor"),
+        "office": "What-if lab",
+        "color": "#7fd1b9",
+    },
 )
 
 BY_ID = {row["id"]: row for row in TOWERS}
