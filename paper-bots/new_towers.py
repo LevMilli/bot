@@ -350,6 +350,44 @@ TOWERS = (
         "color": "#b5d99c",
     },
     {
+        "id": "soccer-tennis-lean",
+        "name": "Soccer & tennis lean",
+        "folder": "soccer-tennis-lean-paper",
+        "venue": "kalshi_sports",
+        "floor": 0.06,
+        "kind": "sports",
+        "every_sec": 600,
+        "timeout": 120,
+        "max_open": 3,
+        "blurb": (
+            "Shadow Kalshi soccer and tennis winners. Uses Polymarket's moneyline mid for the same "
+            "game as the fair price and buys only when Kalshi lags it by more than the 0.06 floor "
+            "after fee. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "EPL, La Liga, Champions League, Bundesliga, Serie A, Ligue 1, MLS, ATP and WTA game winners",
+            "Fair = Polymarket moneyline mid (soccer win/draw/win scaled to add up to 1)",
+            "Matched by date and team or player names; a game is used only if every side matches",
+            "Pre-game only: 10 minutes to 48 hours before start; Polymarket spread ≤ 3¢ and liquidity ≥ $5k",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked sports 0.06 and ≤ 0.15 trust cap",
+            "Fixed $25 ticket in whole contracts; max 3 open, one per event, one new buy per check",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Sports floor 0.06 cannot be lowered in config",
+            "No Odds API credits used (those stay with sports-sharp-lag)",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("soccer", "tennis", "soccer tennis", "football", "epl", "atp", "wta"),
+        "office": "Soccer & tennis lean",
+        "color": "#f2a65a",
+    },
+    {
         "id": "calibration-lab",
         "name": "Calibration lab",
         "folder": "calibration-lab-paper",
