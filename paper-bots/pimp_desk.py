@@ -3771,6 +3771,20 @@ def _btc_carry_paper(root: str) -> bool:
     return cfg.get("paper_only") is True and cfg.get("live_orders") is not True
 
 
+def _log_tape(root: str | None, bot_id: str) -> None:
+    """Tally plus settled-window lines for the 15-minute towers. Log only."""
+    try:
+        import desk_tape_log
+        if bot_id not in desk_tape_log.TAPE_BOTS:
+            return
+        base = _root(root)
+        log.info("%s", desk_tape_log.tally_line(base, bot_id))
+        for line in desk_tape_log.window_lines(base):
+            log.info("%s", line)
+    except Exception as exc:  # noqa: BLE001 - logging must never stop the timer
+        log.info("tape log skipped for %s: %s", bot_id, type(exc).__name__)
+
+
 def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: bool = False,
             stake=None, prob=None, shadow_profile: dict | None = None) -> dict:
     root = _root(root)
@@ -4123,6 +4137,7 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
             log.info("paper timer %s %s skipped, desk limit already hit: %s", bot_id, action, head)
         elif row["ok"]:
             log.info("paper timer %s %s finished: %s", bot_id, action, head or "no output")
+            _log_tape(root, bot_id)
         else:
             log.warning("paper timer %s %s did not finish: %s", bot_id, action, head or "no output")
         return row
@@ -4446,7 +4461,7 @@ def run_shadow_tick(
         # INX paper smoke — settle outside scan windows; during AUTO run windows
         # smoke the real paper scan so tip why is not settle "No open paper"
         # while the tower is in-window (#496 firm-queue twin). Never LIVE.
-        now_ct = dt.datetime.now(CT)
+        now_ct = now.astimezone(CT) if isinstance(now, dt.datetime) else dt.datetime.now(CT)
         for inx_bot in ("kalshi-sp", "kalshi-sized"):
             in_run = any(
                 isinstance(slot, dict)
