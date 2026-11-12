@@ -52735,14 +52735,20 @@ class PicksBot(discord.Client):
             push = getattr(desk, "push_books", None)
             if push is None:
                 return
-            result = await asyncio.get_running_loop().run_in_executor(None, push)
+            result = {}
+            for attempt in range(6):
+                result = await asyncio.get_running_loop().run_in_executor(None, push)
+                # Both services redeploy together; wait for the trading service to come up.
+                if result.get("ok") or "did not answer" not in str(result.get("error") or ""):
+                    break
+                await asyncio.sleep(30)
         except Exception:
             log.exception("Paper book copy to the trading service failed")
             return
         if result.get("ok"):
             await self._paper_audit(f"Copied {result.get('files', 0)} paper file(s) to the trading service.")
         else:
-            log.info("Paper book copy skipped: %s", result.get("error"))
+            log.warning("Paper book copy skipped: %s", result.get("error"))
 
     async def paper_timer(self) -> None:
         """Run the paper desk checks on a timer. Paper only. No live orders."""

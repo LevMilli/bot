@@ -136,6 +136,32 @@ class DeskApiTests(unittest.TestCase):
                 self.assertIn("5", handle.read())
             again = desk_web.import_books(desk, buf.getvalue())
             self.assertFalse(again["ok"])
+            self.assertTrue(desk_web.imported(desk))
+
+    def test_first_copy_replaces_fresh_service_books_and_keeps_a_backup(self):
+        with tempfile.TemporaryDirectory() as bot_root, tempfile.TemporaryDirectory() as svc_root:
+            # The service started first and wrote fresh starter books.
+            os.makedirs(os.path.join(svc_root, "memecoin-paper"))
+            with open(os.path.join(svc_root, "memecoin-paper", "positions.json"), "w") as handle:
+                handle.write('{"cash_usd": 100}')
+            os.makedirs(os.path.join(bot_root, "memecoin-paper"))
+            with open(os.path.join(bot_root, "memecoin-paper", "positions.json"), "w") as handle:
+                handle.write('{"cash_usd": 42}')
+            svc = FakeDesk(svc_root)
+            out = desk_web.import_books(svc, desk_web.pack_books(FakeDesk(bot_root)))
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(out["backed_up"], 1)
+            with open(os.path.join(svc_root, "memecoin-paper", "positions.json")) as handle:
+                self.assertIn("42", handle.read())
+            backups = os.listdir(os.path.join(svc_root, desk_web.BACKUP_DIR))
+            with open(os.path.join(svc_root, desk_web.BACKUP_DIR, backups[0], "memecoin-paper", "positions.json")) as handle:
+                self.assertIn("100", handle.read())
+            # A later copy from the bot never replaces the service's books.
+            self.assertFalse(desk_web.import_books(svc, desk_web.pack_books(FakeDesk(bot_root)))["ok"])
+            # The service's own copy back out leaves the backup and marker behind.
+            with tarfile.open(fileobj=io.BytesIO(desk_web.pack_books(svc)), mode="r:gz") as tar:
+                names = tar.getnames()
+            self.assertFalse(any(n.startswith(desk_web.BACKUP_DIR) or n == desk_web.IMPORT_MARKER for n in names))
 
     def test_pack_then_import_moves_the_books(self):
         with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as dst:
