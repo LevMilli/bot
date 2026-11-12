@@ -262,6 +262,9 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
     now = now or dt.datetime.now(dt.timezone.utc)
     acct = os.path.join(tower, "paper_account.json")
     state = read_json(acct) or empty_state(cfg)
+    # The desk may seed a bare account ({"paper_only": true}) before the first run.
+    for key, value in empty_state(cfg).items():
+        state.setdefault(key, value)
     state.setdefault("open", [])
     state.setdefault("closed", [])
     state.update({"paper_only": True, "shadow_only": True, "live_orders": False})

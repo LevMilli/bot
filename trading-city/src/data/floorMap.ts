@@ -43,6 +43,7 @@ export const FLOORS: FloorDef[] = [
       { officeId: 'btc-carry', botId: 'btc-carry', label: 'BTC carry' },
       { officeId: 'weather-high', botId: 'weather-high', label: 'Weather high' },
       { officeId: 'gas-weekly', botId: 'gas-weekly', label: 'Gas weekly' },
+      { officeId: 'crypto-ladder', botId: 'crypto-ladder', label: 'Crypto ladder' },
       { officeId: 'wall-street', botId: 'wall-street', label: 'Wall Street' },
       { officeId: 'boss', botId: 'kalshi-sized', label: 'Boss · Sized Kalshi', boss: true },
     ],

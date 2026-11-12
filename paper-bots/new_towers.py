@@ -85,6 +85,43 @@ TOWERS = (
         "office": "Gas weekly",
         "color": "#ffb347",
     },
+    {
+        "id": "crypto-ladder",
+        "name": "Crypto ladder",
+        "folder": "crypto-ladder-paper",
+        "venue": "kalshi_btc15m",
+        "floor": 0.05,
+        "kind": "crypto",
+        "every_sec": 300,
+        "timeout": 60,
+        "max_open": 2,
+        "blurb": (
+            "Shadow Kalshi daily BTC and ETH strikes (5pm ET). Prices each strike from Coinbase "
+            "spot and Deribit's option smile, and buys only when edge after fee clears 0.05. "
+            "Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXBTCD / KXETHD \"above $X at 5pm ET\" strikes, settled on the CF Benchmarks 60-second average",
+            "Fair = lognormal N(d2) from Coinbase spot and Deribit implied vol at that strike, blended across expiries",
+            "Window: 15 minutes to 30 hours before the print",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked BTC 0.05 and ≤ 0.20 trust cap",
+            "Fixed $25 ticket in whole contracts; max 2 open, one per event, one new buy per check",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "BTC floor 0.05 cannot be lowered in config",
+            "Deribit vs Coinbase gap > 0.5%, missing spot or smile → that coin skips",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("crypto ladder", "ladder"),
+        "office": "Crypto ladder",
+        "color": "#f7931a",
+    },
 )
 
 BY_ID = {row["id"]: row for row in TOWERS}
