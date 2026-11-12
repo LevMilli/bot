@@ -53,6 +53,12 @@ def one_pass(desk) -> dict:
     if health.get("alert"):
         out["audit"].append(str(health["alert"]))
     desk.run_scheduled()
+    watchdog = getattr(desk, "tower_watchdog", None)
+    if callable(watchdog):
+        try:
+            out["audit"].extend(str(note) for note in (watchdog() or []))
+        except Exception:  # noqa: BLE001 - the watchdog never stops a pass
+            log.exception("Tower watchdog failed")
     for note in desk.drain_alerts() or []:
         if "outside a bot run" in str(note):
             out["audit"].append(str(note))
