@@ -88,3 +88,32 @@ def test_registry_and_desk_wiring():
     sys.path.insert(0, os.path.join(HERE, "tools"))
     import new_tower
     assert new_tower.check_tower("nasdaq")["ok"]
+
+
+def test_reads_every_page_and_names_failures(monkeypatch):
+    import urllib.error
+    import kalshi_shadow_tower as engine
+    pages = {"": {"markets": [{"ticker": "A"}], "cursor": "c1"}, "c1": {"markets": [{"ticker": "B"}], "cursor": ""}}
+    monkeypatch.setattr(engine, "public_json", lambda url, **k: pages[url.split("cursor=")[1] if "cursor=" in url else ""])
+    assert [m["ticker"] for m in engine.kalshi_open_markets("X", limit=1000, pages=5)] == ["A", "B"]
+    assert [m["ticker"] for m in engine.kalshi_open_markets("X")] == ["A"]
+    bot = _bot()
+    open_at = dt.datetime(2026, 11, 12, 15, tzinfo=UTC)   # 10:00 ET Thursday
+
+    def boom(sym, now):
+        raise urllib.error.HTTPError("u", 429, "slow down", {}, None)
+    monkeypatch.setattr(bot, "_yahoo", boom)
+    assert bot.model({}, open_at) == ([], "Yahoo NDX quote HTTP 429; waiting")
+
+
+def test_only_the_4pm_events_are_priced(monkeypatch):
+    bot = _bot()
+    import kalshi_shadow_tower as engine
+    rows = [{"ticker": "A", "event_ticker": "KXNASDAQ100U-26NOV12H1000"},
+            {"ticker": "B", "event_ticker": "KXNASDAQ100U-26NOV12H1600"}]
+    monkeypatch.setattr(engine, "kalshi_open_markets", lambda series, **k: rows)
+    monkeypatch.setattr(bot, "_yahoo", lambda sym, now: (28000.0, 5) if "NDX" in sym else (25.0, 5))
+    seen = {}
+    monkeypatch.setattr(bot, "quotes_for", lambda markets, *a: seen.setdefault("m", markets) and [])
+    bot.model({}, dt.datetime(2026, 11, 12, 15, tzinfo=UTC))
+    assert {m["ticker"] for m in seen["m"]} == {"B"}
