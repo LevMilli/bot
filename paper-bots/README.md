@@ -136,20 +136,39 @@ make living-test
 
 Staff map: `LIVING_UPGRADE.md`. Plan tickets: `POSITIVE_ROI_PLAN.md`. Day-one oaths: `STAFF_DAY_ONE.md`.
 
-## Desk timer without the Discord bot
+## Trading service (separate from the Discord bot)
 
-By default the Discord bot runs the paper timer every 60 seconds. The same pass
-can run on its own, with no Discord login:
+The trading desk can run as its own service. It holds the paper books on its
+own volume and runs the 60-second timer. The Discord bot keeps the staff login,
+the PIMP-TRADING page, and APEX-CITY, and forwards every desk call to the
+service over a private key.
+
+Trading service (same Docker image, different start command):
 
 ```
 python paper-bots/desk_service.py
 ```
 
-- Set `PAPER_TIMER=external` on the Discord bot when this runs, so the checks
-  never run twice.
-- Recaps go to `PAPER_RECAP_WEBHOOK` and audit notes to `PAPER_AUDIT_WEBHOOK`
-  (Discord channel webhooks). Without them the notes go to the log.
-- Paper only. No exchange keys, no wallets, no live orders.
+- `DESK_SERVICE_KEY`: a long random secret (24+ characters). Same value on both services.
+- `PORT`: the port the private desk API listens on (default 8080).
+- `PAPER_RECAP_WEBHOOK` / `PAPER_AUDIT_WEBHOOK`: Discord channel webhooks for recaps and audit notes. Without them notes go to the log.
+- A volume mounted at `/data` so the books survive a redeploy.
+
+Discord bot:
+
+- `DESK_SERVICE_URL`: the trading service's private address, for example `http://trading-desk.railway.internal:8080`.
+- `DESK_SERVICE_KEY`: the same secret.
+
+With `DESK_SERVICE_URL` set, the Discord bot never runs the timer. On its first
+start it copies its paper books to the trading service, but only when the
+service has none yet. Its own copy stays put as a backup. Remove
+`DESK_SERVICE_URL` to go back to the old setup.
+
+`python paper-bots/desk_service.py --timer-only` runs just the timer with no
+API. In that case set `PAPER_TIMER=external` on the Discord bot so the checks
+never run twice.
+
+Paper only. No exchange keys, no wallets, no live orders.
 
 ## Notes
 - All times are shown in US Central (CT) or UTC as labeled.

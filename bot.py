@@ -41896,8 +41896,11 @@ def pimp_mod():
         mod.keep_closed_settlements()
     except Exception:
         log.exception("paper settlements")
-    _PIMP = mod
-    return mod
+    # DESK_SERVICE_URL set: the trading service holds the books and runs the
+    # timer. Desk calls go there; the staff login and pages stay here.
+    import desk_remote
+    _PIMP = desk_remote.wrap(mod)
+    return _PIMP
 
 
 def _pimp_access(uid: int, gid: int, desk) -> dict:
@@ -41984,7 +41987,7 @@ async def dash_api_pimp(request):
         return web.json_response({"ok": False, "error": "The paper desk is not on this checkout."}, status=500)
     if str(request.query.get("export") or "") == "xlsx":
         try:
-            data = desk.export_xlsx()
+            data = await asyncio.get_running_loop().run_in_executor(None, desk.export_xlsx)
         except Exception:
             log.exception("pimp export")
             return web.json_response({"ok": False, "error": "Could not build the paper workbook."}, status=500)
@@ -41996,7 +41999,8 @@ async def dash_api_pimp(request):
     except (TypeError, ValueError):
         page = 1
     try:
-        body = desk.snapshot(q=str(request.query.get("q") or ""), filt=str(request.query.get("filter") or "all"), page=page)
+        q, filt = str(request.query.get("q") or ""), str(request.query.get("filter") or "all")
+        body = await asyncio.get_running_loop().run_in_executor(None, lambda: desk.snapshot(q=q, filt=filt, page=page))
     except Exception:
         log.exception("pimp snapshot")
         return web.json_response({"ok": False, "error": "Could not read the paper desk."}, status=500)
@@ -42020,18 +42024,18 @@ async def dash_api_pimp_post(request):
     role = crew_role_name(uid, gid)
     loop = asyncio.get_running_loop()
 
-    def denied(err: str, status: int = 403):
-        snap = _pimp_public(desk.snapshot(), uid, gid, desk)
+    async def denied(err: str, status: int = 403):
+        snap = _pimp_public(await loop.run_in_executor(None, desk.snapshot), uid, gid, desk)
         return web.json_response({"ok": False, "error": desk.public_error(err) or "Staff only.", **snap}, status=status)
 
     try:
         if op == "save":
             err = desk.auth_error(role, "save")
             if err:
-                return denied(err)
+                return await denied(err)
             raw = body.get("settings") if isinstance(body.get("settings"), dict) else {}
-            cfg, err = desk.save_settings(raw, who=who)
-            snap = _pimp_public(desk.snapshot(), uid, gid, desk)
+            cfg, err = await loop.run_in_executor(None, lambda: desk.save_settings(raw, who=who))
+            snap = _pimp_public(await loop.run_in_executor(None, desk.snapshot), uid, gid, desk)
             if err:
                 return web.json_response({"ok": False, "error": desk.public_error(err), **snap}, status=400)
             staff_log_add(gid, "ok", "Saved paper desk limits", who)
@@ -42039,32 +42043,33 @@ async def dash_api_pimp_post(request):
         if op == "run":
             err = desk.auth_error(role, "run")
             if err:
-                return denied(err)
+                return await denied(err)
             bot_id = str(body.get("bot") or "")
             action = str(body.get("action") or "run")
             result = await loop.run_in_executor(
                 None, lambda: desk.run_bot(bot_id, action, manual=True, stake=body.get("stake"), prob=body.get("prob")))
             if result.get("ok"):
                 staff_log_add(gid, "ok", f"Paper check {bot_id} {action}", who)
-            snap = _pimp_public(desk.snapshot(), uid, gid, desk)
+            snap = _pimp_public(await loop.run_in_executor(None, desk.snapshot), uid, gid, desk)
             status = 200 if result.get("ok") else (409 if result.get("blocked") else 400)
             return web.json_response({"ok": bool(result.get("ok")), "error": desk.public_error(result.get("error") or ""), **snap}, status=status)
         if op == "run-due":
             err = desk.auth_error(role, "run")
             if err:
-                return denied(err)
+                return await denied(err)
             result = await loop.run_in_executor(None, desk.run_due)
             if result.get("ok"):
                 staff_log_add(gid, "ok", "Ran the paper checks that were due", who)
-            snap = _pimp_public(desk.snapshot(), uid, gid, desk)
+            snap = _pimp_public(await loop.run_in_executor(None, desk.snapshot), uid, gid, desk)
             status = 200 if result.get("ok") else 429
             return web.json_response({"ok": bool(result.get("ok")), "error": desk.public_error(result.get("error") or ""), **snap}, status=status)
         if op == "pause":
             err = desk.auth_error(role, "pause")
             if err:
-                return denied(err)
-            result = desk.set_pause(None, str(body.get("bot") or ""), bool(body.get("on")), who, bool(body.get("all")))
-            snap = _pimp_public(desk.snapshot(), uid, gid, desk)
+                return await denied(err)
+            result = await loop.run_in_executor(None, lambda: desk.set_pause(
+                None, str(body.get("bot") or ""), bool(body.get("on")), who, bool(body.get("all"))))
+            snap = _pimp_public(await loop.run_in_executor(None, desk.snapshot), uid, gid, desk)
             if result.get("ok"):
                 staff_log_add(gid, "ok", result.get("summary") or "Paused a paper bot", who)
             status = 200 if result.get("ok") else 400
@@ -42072,29 +42077,30 @@ async def dash_api_pimp_post(request):
         if op == "note":
             err = desk.auth_error(role, "note")
             if err:
-                return denied(err)
-            result = desk.annotate(None, str(body.get("bot") or ""), str(body.get("trade") or ""),
-                                   str(body.get("note") or ""), body.get("skipped"), body.get("stake_idea"), who)
-            snap = _pimp_public(desk.snapshot(), uid, gid, desk)
+                return await denied(err)
+            result = await loop.run_in_executor(None, lambda: desk.annotate(
+                None, str(body.get("bot") or ""), str(body.get("trade") or ""),
+                str(body.get("note") or ""), body.get("skipped"), body.get("stake_idea"), who))
+            snap = _pimp_public(await loop.run_in_executor(None, desk.snapshot), uid, gid, desk)
             status = 200 if result.get("ok") else 400
             return web.json_response({"ok": bool(result.get("ok")), "error": desk.public_error(result.get("error") or ""), **snap}, status=status)
         if op == "seen":
-            desk.mark_seen()
-            snap = _pimp_public(desk.snapshot(), uid, gid, desk)
+            await loop.run_in_executor(None, desk.mark_seen)
+            snap = _pimp_public(await loop.run_in_executor(None, desk.snapshot), uid, gid, desk)
             return web.json_response({"ok": True, **snap})
         if op == "reset":
             err = desk.auth_error(role, "reset")
             if err:
-                return denied(err)
+                return await denied(err)
             confirm = desk.confirm_reset(str(body.get("confirm") or ""))
             if confirm:
-                snap = _pimp_public(desk.snapshot(), uid, gid, desk)
+                snap = _pimp_public(await loop.run_in_executor(None, desk.snapshot), uid, gid, desk)
                 return web.json_response({"ok": False, "error": confirm, **snap}, status=400)
             bot_id = str(body.get("bot") or "")
             result = await loop.run_in_executor(None, lambda: desk.reset_bot(bot_id, who=who))
             if result.get("ok"):
                 staff_log_add(gid, "ok", f"Reset paper state {bot_id}", who)
-            snap = _pimp_public(desk.snapshot(), uid, gid, desk)
+            snap = _pimp_public(await loop.run_in_executor(None, desk.snapshot), uid, gid, desk)
             status = 200 if result.get("ok") else 400
             return web.json_response(
                 {"ok": bool(result.get("ok")), "error": desk.public_error(result.get("error") or ""), **snap},
@@ -52722,6 +52728,22 @@ class PicksBot(discord.Client):
             except Exception:
                 log.warning("Paper recap failed")
 
+    async def _push_books_once(self) -> None:
+        """First start against an empty trading service: send it this bot's paper books."""
+        try:
+            desk = pimp_mod()
+            push = getattr(desk, "push_books", None)
+            if push is None:
+                return
+            result = await asyncio.get_running_loop().run_in_executor(None, push)
+        except Exception:
+            log.exception("Paper book copy to the trading service failed")
+            return
+        if result.get("ok"):
+            await self._paper_audit(f"Copied {result.get('files', 0)} paper file(s) to the trading service.")
+        else:
+            log.info("Paper book copy skipped: %s", result.get("error"))
+
     async def paper_timer(self) -> None:
         """Run the paper desk checks on a timer. Paper only. No live orders."""
         await self.wait_until_ready()
@@ -52730,7 +52752,8 @@ class PicksBot(discord.Client):
             import desk_service
             if desk_service.timer_mode() == "external":
                 # The trading service runs the timer. Two timers would run the same checks twice.
-                log.info("Paper timer is off here. PAPER_TIMER=external: the trading service runs it.")
+                log.info("Paper timer is off here. The trading service runs it.")
+                await self._push_books_once()
                 return
         except Exception:
             log.exception("Paper timer could not read PAPER_TIMER; running here")

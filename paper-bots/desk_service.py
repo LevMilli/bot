@@ -36,7 +36,12 @@ WARMUP_S = 20
 
 
 def timer_mode() -> str:
-    """``internal`` (Discord bot runs the timer) or ``external`` (this service does)."""
+    """``internal`` (Discord bot runs the timer) or ``external`` (this service does).
+
+    A bot pointed at a trading service (``DESK_SERVICE_URL``) never runs the timer.
+    """
+    if str(os.environ.get("DESK_SERVICE_URL") or "").strip():
+        return "external"
     raw = str(os.environ.get("PAPER_TIMER") or "").strip().lower()
     return "external" if raw in ("external", "off", "service") else "internal"
 
@@ -104,6 +109,28 @@ def run_forever(desk=None, sleep=time.sleep, passes: int | None = None) -> None:
         sleep(INTERVAL_S)
 
 
+def serve() -> None:
+    """Timer in a background thread, private desk API on PORT (default 8080)."""
+    import threading
+
+    from aiohttp import web
+
+    import desk_web
+    import pimp_desk
+
+    pimp_desk.keep_closed_settlements()
+    threading.Thread(target=run_forever, args=(pimp_desk,), name="desk-timer", daemon=True).start()
+    if len(desk_web.service_key()) < desk_web.MIN_KEY_LEN:
+        log.warning("DESK_SERVICE_KEY is missing or short. The desk API refuses every call until it is set.")
+    port = int(os.environ.get("PORT") or 8080)
+    host = os.environ.get("DESK_SERVICE_HOST") or "::"
+    log.info("Desk service API on %s:%s. Paper only.", host, port)
+    web.run_app(desk_web.make_app(pimp_desk), host=host, port=port, print=None)
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    run_forever()
+    if "--timer-only" in sys.argv:
+        run_forever()
+    else:
+        serve()
