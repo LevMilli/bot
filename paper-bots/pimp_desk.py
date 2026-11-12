@@ -6217,6 +6217,15 @@ def touch_heartbeat(root: str | None = None, now: dt.datetime | None = None) -> 
     _write_json(heartbeat_path(root), {"at": _iso(when), "paper_only": True})
 
 
+def tower_watchdog(root: str | None = None, now: dt.datetime | None = None) -> list:
+    """New audit notes for towers that timed out, failed twice, or stalled (desk_watchdog)."""
+    import desk_watchdog
+
+    root = _root(root)
+    alive = bool(timer_health(root, now=now).get("alive"))
+    return desk_watchdog.check(sys.modules[__name__], root, now=now, timer_alive=alive)
+
+
 def timer_health(root: str | None = None, now: dt.datetime | None = None) -> dict:
     now = now or dt.datetime.now(dt.timezone.utc)
     if now.tzinfo is None:

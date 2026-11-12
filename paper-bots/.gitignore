@@ -147,3 +147,4 @@ __pycache__/
 helpers/__pycache__/
 teller_memory.json
 .kalshi_gateway/
+pimp-watchdog.json
