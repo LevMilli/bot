@@ -94,6 +94,7 @@ export const FLOORS: FloorDef[] = [
     offices: [
       { officeId: 'risk', botId: null, label: 'Risk sentinel', helper: true },
       { officeId: 'settlement-auditor', botId: 'settlement-auditor', label: 'Settlement auditor' },
+      { officeId: 'scorekeeper', botId: 'scorekeeper', label: 'Scorekeeper' },
     ],
   },
   {

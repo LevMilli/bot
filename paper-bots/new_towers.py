@@ -457,6 +457,41 @@ TOWERS = (
         "office": "Settlement auditor",
         "color": "#8fb8de",
     },
+    {
+        "id": "scorekeeper",
+        "name": "Scorekeeper",
+        "folder": "scorekeeper-paper",
+        "keep": ("scorecard.json",),
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "research",
+        "research": True,
+        "every_sec": 21600,
+        "timeout": 180,
+        "max_open": 0,
+        "blurb": (
+            "Support building. Every 6 hours it grades each bot on its paper record after fees: "
+            "promote, keep, pause or retire. It only suggests; it never changes a bot. Buys nothing."
+        ),
+        "buy": [
+            "Never buys. Zero cash, zero stake, no tower risk share",
+            "Grades need 50+ closed trades; under that a bot shows \"too few\"",
+            "P&L per trade is after fees and after the desk's 1 cent a contract fill tax",
+        ],
+        "sell": [
+            "Nothing to sell",
+            "Promote: even the low end of the 95% range is above $0. Keep: average above $0",
+            "Pause: average $0 or worse but could still be positive. Retire: clearly losing",
+        ],
+        "failsafes": [
+            "Read-only: suggests only, never pauses, funds or edits a bot",
+            "No network reads; it only reads the desk's own state files",
+            "Writes scorecard.json",
+        ],
+        "aliases": ("scorekeeper", "scorecard", "grades"),
+        "office": "Scorekeeper",
+        "color": "#e6c07b",
+    },
 )
 
 BY_ID = {row["id"]: row for row in TOWERS}
