@@ -29,6 +29,8 @@ import nasdaq_model as nm  # noqa: E402
 SPEC = {"id": "nasdaq", "name": "Nasdaq", "floor": 0.02, "max_open": 2, "max_edge": 0.15}
 SERIES = ("KXNASDAQ100U", "KXNASDAQ100")
 YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1m&range=1d"
+CNBC = ("https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol"
+        "?symbols=.NDX%7C.VXN&requestMethod=itv&noform=1&partnerId=2&fund=1&exthrs=1&output=json")
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
 
@@ -75,6 +77,28 @@ def _yahoo(sym: str, now: dt.datetime):
     return price, now.timestamp() - when
 
 
+def _cnbc(body: dict, now: dt.datetime) -> dict:
+    """{"NDX": (level, age s), "VXN": (level, age s)} from CNBC's quote feed (NDX real-time)."""
+    out = {}
+    try:
+        rows = body["FormattedQuoteResult"]["FormattedQuote"]
+    except (KeyError, TypeError):
+        return out
+    for row in rows or []:
+        name = str(row.get("symbol") or "").lstrip(".")
+        try:
+            level = float(str(row["last"]).replace(",", ""))
+        except (KeyError, TypeError, ValueError):
+            continue
+        try:
+            at = dt.datetime.strptime(str(row.get("last_time")), "%Y-%m-%dT%H:%M:%S.%f%z")
+            age = (now - at).total_seconds()
+        except ValueError:
+            age = float("inf")   # date-only stamp (VXN often carries yesterday's close)
+        out[name] = (level, age)
+    return out
+
+
 def _why(exc: Exception) -> str:
     code = getattr(exc, "code", None)
     return f"HTTP {code}" if code else type(exc).__name__
@@ -84,13 +108,23 @@ def model(cfg: dict, now: dt.datetime):
     close_et = now.astimezone(nm.ET).replace(hour=16, minute=0, second=0, microsecond=0)
     if nm.minutes_left(now, close_et) is None:
         return [], "market closed"
-    got = {}
-    for name, sym in (("NDX", "%5ENDX"), ("VXN", "%5EVXN")):
-        try:
-            got[name] = _yahoo(sym, now)
-        except Exception as exc:  # noqa: BLE001 - name the source on the card
-            return [], f"Yahoo {name} quote {_why(exc)}; waiting"
-    ndx, vxn = got["NDX"], got["VXN"]
+    # CNBC first: Yahoo answers the shared server with HTTP 429 at the open
+    try:
+        got = _cnbc(engine.public_json(CNBC, headers=UA), now)
+    except Exception as exc:  # noqa: BLE001
+        got, cnbc_miss = {}, f"CNBC {_why(exc)}"
+    else:
+        cnbc_miss = "CNBC empty"
+    if not got.get("NDX") or got["NDX"][1] > nm.MAX_QUOTE_AGE_SEC or not got.get("VXN"):
+        for name, sym in (("NDX", "%5ENDX"), ("VXN", "%5EVXN")):
+            if got.get(name) and (name == "VXN" or got[name][1] <= nm.MAX_QUOTE_AGE_SEC):
+                continue
+            try:
+                got[name] = _yahoo(sym, now) or got.get(name)
+            except Exception as exc:  # noqa: BLE001 - name the sources on the card
+                if not got.get(name):
+                    return [], f"{name} quote: {cnbc_miss}, Yahoo {_why(exc)}; waiting"
+    ndx, vxn = got.get("NDX"), got.get("VXN")
     if not ndx or not vxn:
         return [], "index quote missing"
     if ndx[1] > nm.MAX_QUOTE_AGE_SEC:
