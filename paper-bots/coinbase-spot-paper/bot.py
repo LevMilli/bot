@@ -1191,7 +1191,11 @@ def _read_state(path: str) -> dict | None:
 
 
 def _write_json(path: str, payload: dict) -> None:
-    tmp = path + ".tmp"
+    # Follow the desk's volume link so the save is not undone by the next re-link.
+    if os.path.islink(path):
+        path = os.path.realpath(path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2)
         handle.write("\n")
