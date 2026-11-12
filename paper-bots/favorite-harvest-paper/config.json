@@ -1,0 +1,12 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "venue_min_edge": 0.05,
+  "stake_usd": 25,
+  "starter_cash": 500,
+  "max_open": 3,
+  "min_ask": 0.88,
+  "max_ask": 0.94,
+  "note": "Heavy favorites (88-94c) 1/3/6h before a scheduled Kalshi close. Fair = calibration lab Wilson low end. Floor 0.05 locked. Waits until a cell has 50 settled sides."
+}

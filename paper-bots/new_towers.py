@@ -197,6 +197,44 @@ TOWERS = (
         "color": "#2ec4b6",
     },
     {
+        "id": "favorite-harvest",
+        "name": "Favorite harvest",
+        "folder": "favorite-harvest-paper",
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "macro",
+        "every_sec": 900,
+        "timeout": 90,
+        "max_open": 3,
+        "blurb": (
+            "Shadow Kalshi heavy favorites (88-94c) 1, 3 or 6 hours before a scheduled close. "
+            "Fair is the cautious win rate the calibration lab measured for that price band. "
+            "Buys only when it beats ask plus fee by the 0.05 floor. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "Weather highs, gas weekly, BTC/ETH daily, Nasdaq, S&P: sides priced 88-94c",
+            "Only 1, 3 or 6 hours (±) before close, matching the lab's horizons",
+            "Fair = low end of the Wilson 95% win-rate range for that family, horizon and 5c band",
+            "Waits (logs only) until a cell has at least 50 settled sides",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked 0.05 and ≤ 0.10 trust cap",
+            "Fixed $25 ticket in whole contracts; max 3 open, one per event, one new buy per check",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the cautious fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Floor 0.05 cannot be lowered in config",
+            "No buys if the calibration table is missing or more than 48 hours old",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("favorite harvest", "favorites", "harvest"),
+        "office": "Favorite harvest",
+        "color": "#e6c84f",
+    },
+    {
         "id": "calibration-lab",
         "name": "Calibration lab",
         "folder": "calibration-lab-paper",

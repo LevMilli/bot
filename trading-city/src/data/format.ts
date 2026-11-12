@@ -56,6 +56,7 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'nasdaq': '#4d8bff',
   'poly-sports-lean': '#2ec4b6',
   'calibration-lab': '#c792ea',
+  'favorite-harvest': '#e6c84f',
   'wall-street': '#c6a15b',
 }
 
