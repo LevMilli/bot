@@ -460,10 +460,10 @@ class PimpDeskTests(unittest.TestCase):
             # Interval bots fire again. A no-trade sized scan is still inside
             # its window, so that slot retries. It still does not buy.
             got = {(row["bot"], row["action"]) for row in more}
-            # Research rows (calibration lab) run every 6 hours, and slow towers (30+ min,
-            # e.g. CPI/GDP nowcasts) are not due again 25 minutes later.
+            # Slow rows (30+ min: CPI/GDP nowcasts, the 6-hour research labs) are not due
+            # again 25 minutes later. The 15-minute market snapshots are.
             shadow_runs = {(spec["id"], "run") for spec in shadow_missing.ACTIVE + new_towers.ACTIVE
-                           if not spec.get("research") and int(spec.get("every_sec") or 0) <= 1500}
+                           if int(spec.get("every_sec") or 0) <= 1500}
             self.assertTrue({
                 ("sports-gap", "run"), ("btc15m", "run"), ("btc15m", "shadow"),
                 ("commodity-15m", "run"), ("memecoin", "run"), ("coinbase-spot", "run"),

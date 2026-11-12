@@ -1,0 +1,102 @@
+"""Market snapshots: top-of-book snapshots of the Kalshi series the towers watch.
+
+Every 15 minutes it lists each watched series' open markets (one public read
+per series, through the shared gateway) and saves one compact row per market:
+
+    [ticker, yes_bid, yes_ask, yes_bid_size, yes_ask_size, last, volume, open_interest]
+
+Rows go to ``recordings/YYYY-MM-DD.jsonl.gz`` (one gzip member per snapshot,
+so a crash loses at most one snapshot). On the desk the folder lives on the
+/data volume. When the folder passes ``MAX_BYTES`` the oldest days are
+deleted. Only the best bid/ask and their sizes are kept, not the full book.
+"""
+from __future__ import annotations
+
+import datetime as dt
+import gzip
+import json
+import os
+
+SERIES = (
+    # weather, gas, crypto daily, indexes
+    "KXHIGHNY", "KXHIGHCHI", "KXHIGHMIA", "KXHIGHAUS", "KXHIGHDEN", "KXHIGHPHIL", "KXHIGHLAX",
+    "KXAAAGASW", "KXBTCD", "KXETHD", "KXNASDAQ100U", "KXINXU",
+    # macro
+    "KXUST10A", "KXCPI", "KXCPIYOY", "KXGDP",
+    # sports game winners
+    "KXNBAGAME", "KXNFLGAME", "KXNHLGAME", "KXEPLGAME", "KXUCLGAME", "KXATPMATCH", "KXWTAMATCH",
+)
+MAX_BYTES = 150 * 1024 * 1024
+PER_SERIES = 200
+
+
+def _f(market: dict, key: str):
+    try:
+        value = float(market.get(key))
+    except (TypeError, ValueError):
+        return None
+    return round(value, 4)
+
+
+def compact(market: dict) -> list | None:
+    ticker = str(market.get("ticker") or "")
+    if not ticker:
+        return None
+    return [ticker, _f(market, "yes_bid_dollars"), _f(market, "yes_ask_dollars"),
+            _f(market, "yes_bid_size_fp"), _f(market, "yes_ask_size_fp"),
+            _f(market, "last_price_dollars"), _f(market, "volume_fp"), _f(market, "open_interest_fp")]
+
+
+def snapshot(list_open, now: dt.datetime, series=SERIES) -> tuple[dict, list[str]]:
+    """list_open(series, limit) -> markets. Returns (snapshot, notes)."""
+    rows, notes = {}, []
+    for s in series:
+        try:
+            markets = list_open(s, PER_SERIES)
+        except Exception as exc:  # noqa: BLE001 - one series failing must not stop the rest
+            notes.append(f"{s} read failed ({type(exc).__name__})")
+            continue
+        got = [r for r in (compact(m) for m in markets or []) if r]
+        if got:
+            rows[s] = got
+    return {"at": now.isoformat(timespec="seconds"), "cols": ["ticker", "yes_bid", "yes_ask", "bid_size",
+            "ask_size", "last", "volume", "oi"], "series": rows}, notes
+
+
+def save(folder: str, snap: dict, now: dt.datetime) -> str:
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, now.date().isoformat() + ".jsonl.gz")
+    with gzip.open(path, "ab") as handle:
+        handle.write((json.dumps(snap, separators=(",", ":")) + "\n").encode("utf-8"))
+    return path
+
+
+def prune(folder: str, max_bytes: int = MAX_BYTES) -> list[str]:
+    """Delete the oldest day files until the folder fits. Today's file is never deleted."""
+    files = sorted(f for f in os.listdir(folder) if f.endswith(".jsonl.gz")) if os.path.isdir(folder) else []
+    sizes = {f: os.path.getsize(os.path.join(folder, f)) for f in files}
+    total, gone = sum(sizes.values()), []
+    for f in files[:-1]:
+        if total <= max_bytes:
+            break
+        os.remove(os.path.join(folder, f))
+        total -= sizes[f]
+        gone.append(f)
+    return gone
+
+
+def read_day(path: str) -> list[dict]:
+    out = []
+    with gzip.open(path, "rt", encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                continue
+    return out
+
+
+def usage(folder: str) -> dict:
+    files = sorted(f for f in os.listdir(folder) if f.endswith(".jsonl.gz")) if os.path.isdir(folder) else []
+    return {"days": len(files), "bytes": sum(os.path.getsize(os.path.join(folder, f)) for f in files),
+            "first": files[0][:10] if files else None, "last": files[-1][:10] if files else None}

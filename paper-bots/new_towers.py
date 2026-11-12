@@ -564,6 +564,40 @@ TOWERS = (
         "office": "What-if lab",
         "color": "#7fd1b9",
     },
+    {
+        "id": "market-snapshots",
+        "name": "Market snapshots",
+        "folder": "market-snapshots-paper",
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "research",
+        "research": True,
+        "every_sec": 900,
+        "timeout": 120,
+        "max_open": 0,
+        "blurb": (
+            "Support building. Every 15 minutes it saves the best bid, ask and sizes of every open "
+            "market in the series the towers watch, so future ideas can be tested on real price "
+            "history. Buys nothing."
+        ),
+        "buy": [
+            "Never buys. Zero cash, zero stake, no tower risk share",
+            "23 series: weather, gas, crypto daily, Nasdaq, S&P, Treasury, CPI, GDP and game winners",
+            "One public Kalshi read per series per run, through the shared gateway",
+        ],
+        "sell": [
+            "Nothing to sell",
+            "Saves recordings/YYYY-MM-DD.jsonl.gz on the /data volume (about 2 MB a day)",
+        ],
+        "failsafes": [
+            "Size cap 150 MB: the oldest days are deleted first",
+            "Best bid/ask and sizes only, not the full order book",
+            "One series failing does not stop the rest",
+        ],
+        "aliases": ("snapshots", "book snapshots"),
+        "office": "Market snapshots",
+        "color": "#b4a7f5",
+    },
 )
 
 BY_ID = {row["id"]: row for row in TOWERS}

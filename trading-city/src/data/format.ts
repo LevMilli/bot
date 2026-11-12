@@ -65,6 +65,7 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'settlement-auditor': '#8fb8de',
   'scorekeeper': '#e6c07b',
   'whatif-lab': '#7fd1b9',
+  'market-snapshots': '#b4a7f5',
   'wall-street': '#c6a15b',
 }
 
