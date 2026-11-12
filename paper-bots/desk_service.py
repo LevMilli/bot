@@ -129,7 +129,8 @@ def serve() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # stdout: hosts like Railway paint every stderr line red, even INFO.
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     if "--timer-only" in sys.argv:
         run_forever()
     else:
