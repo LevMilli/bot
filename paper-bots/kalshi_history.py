@@ -24,6 +24,9 @@ import kalshi_gateway  # noqa: E402 - shared Kalshi pace / back-off / cache
 
 HISTORY_NAME = "kalshi_crypto_history.json"
 MAX_SNAPSHOTS = 4000
+# 15-minute windows get their own room: hourly ladders (dozens of strikes a run)
+# used to push a whole 15m window out of the file within ~13 minutes.
+MAX_15M_SNAPSHOTS = 6000
 CRYPTO_SERIES = (
     "KXBTC15M",
     "KXETH15M",
@@ -81,13 +84,36 @@ def load_history(root: str | None = None) -> dict:
     return base
 
 
+def _is_15m(row: Any) -> bool:
+    return isinstance(row, dict) and str(row.get("series") or "").endswith("15M")
+
+
+def _trim_snapshots(snaps: list) -> list:
+    """Newest MAX_SNAPSHOTS ladder/other rows plus newest MAX_15M_SNAPSHOTS 15m rows."""
+    if len(snaps) <= MAX_SNAPSHOTS:
+        return snaps
+    keep_15 = MAX_15M_SNAPSHOTS
+    keep_other = MAX_SNAPSHOTS
+    out = []
+    for row in reversed(snaps):
+        if _is_15m(row):
+            if keep_15 > 0:
+                out.append(row)
+                keep_15 -= 1
+        elif keep_other > 0:
+            out.append(row)
+            keep_other -= 1
+        if keep_15 <= 0 and keep_other <= 0:
+            break
+    out.reverse()
+    return out
+
+
 def save_history(state: dict, root: str | None = None) -> None:
     """Persist history — creates kalshi_crypto_history.json when snapshots exist."""
     path = history_path(root)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    snaps = list(state.get("snapshots") or [])
-    if len(snaps) > MAX_SNAPSHOTS:
-        snaps = snaps[-MAX_SNAPSHOTS:]
+    snaps = _trim_snapshots(list(state.get("snapshots") or []))
     state = dict(state)
     state["snapshots"] = snaps
     state["paper_only"] = True
@@ -97,7 +123,7 @@ def save_history(state: dict, root: str | None = None) -> None:
     state["holds"] = holds
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as handle:
-        json.dump(state, handle, indent=2)
+        json.dump(state, handle, separators=(",", ":"))  # rewritten every snapshot; keep it small
         handle.write("\n")
     os.replace(tmp, path)
 

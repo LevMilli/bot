@@ -46,3 +46,13 @@ def test_old_settles_skipped(tmp_path):
                      "ticker": "KXBTCD-26NOV1215-T1", "series": "KXBTCD", "result": "no"}]})
     t.reset_seen()
     assert t.window_lines(root) == []
+
+
+def test_history_keeps_15m_rows_when_ladder_floods():
+    import kalshi_history as kh
+    ladder = [{"series": "KXBTCD", "i": i} for i in range(kh.MAX_SNAPSHOTS + 500)]
+    early = [{"series": "KXGOLD15M", "i": i} for i in range(50)]
+    kept = kh._trim_snapshots(early + ladder)
+    assert sum(1 for r in kept if r["series"] == "KXGOLD15M") == 50
+    assert sum(1 for r in kept if r["series"] == "KXBTCD") == kh.MAX_SNAPSHOTS
+    assert kept[0]["series"] == "KXGOLD15M"  # order kept
