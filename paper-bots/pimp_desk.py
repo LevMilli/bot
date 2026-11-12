@@ -4786,14 +4786,14 @@ _ZERO_STAKE_IDS = frozenset()
 
 
 def _install_shadow_loggers() -> None:
-    """Register the seven log-only towers. Does not change an existing buy plan."""
+    """Register the active log-only towers (paused ones stay off). Does not change a buy plan."""
     global BOTS, AUTO, SETTLEMENT_FILES, _ZERO_STAKE_IDS
     import shadow_missing
 
-    _ZERO_STAKE_IDS = frozenset(spec["id"] for spec in shadow_missing.TOWERS)
+    _ZERO_STAKE_IDS = frozenset(spec["id"] for spec in shadow_missing.ACTIVE)
     bots = list(BOTS)
     insert_at = next(i for i, row in enumerate(bots) if row["id"] == "wall-street")
-    for offset, spec in enumerate(shadow_missing.TOWERS):
+    for offset, spec in enumerate(shadow_missing.ACTIVE):
         bots.insert(insert_at + offset, {
             "id": spec["id"],
             "name": spec["name"],
@@ -4844,7 +4844,7 @@ def _install_shadow_loggers() -> None:
     BOTS = tuple(bots)
     slots = list(AUTO)
     after = next(i for i, slot in enumerate(slots) if slot.get("id") == "exclusive-set")
-    for offset, spec in enumerate(shadow_missing.TOWERS):
+    for offset, spec in enumerate(shadow_missing.ACTIVE):
         slots.insert(after + 1 + offset, {
             "id": spec["id"],
             "action": "run",
@@ -4852,7 +4852,7 @@ def _install_shadow_loggers() -> None:
         })
     AUTO = tuple(slots)
     extra = []
-    for spec in shadow_missing.TOWERS:
+    for spec in shadow_missing.ACTIVE:
         extra.append(f"{spec['folder']}/paper_account.json")
         extra.append(f"{spec['folder']}/evidence.jsonl")
     SETTLEMENT_FILES = tuple(list(SETTLEMENT_FILES) + extra)
