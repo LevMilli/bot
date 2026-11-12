@@ -547,10 +547,12 @@ def _sports_quote_cache_put(root: str | None, url: str, body: Any) -> None:
 def _default_kalshi_fetch(url: str):
     import urllib.request
 
+    import kalshi_gateway
+
     req = urllib.request.Request(
         url, headers={"User-Agent": "Mozilla/5.0 (paper warm_tip_books)"}
     )
-    with urllib.request.urlopen(req, timeout=20) as response:
+    with kalshi_gateway.urlopen(req, timeout=20) as response:
         return json.load(response)
 
 

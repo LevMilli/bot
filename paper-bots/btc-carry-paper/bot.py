@@ -1223,12 +1223,23 @@ def _append_research(tower: str, now: dt.datetime, state: dict, marks: dict) -> 
         return
 
 
+def _kalshi_urlopen(req, timeout):
+    """Kalshi GETs share one pace / back-off / cache across towers (kalshi_gateway)."""
+    if DESK_ROOT not in sys.path:
+        sys.path.insert(0, DESK_ROOT)
+    try:
+        import kalshi_gateway
+    except ImportError:
+        return urllib.request.urlopen(req, timeout=timeout)
+    return kalshi_gateway.urlopen(req, timeout=timeout)
+
+
 def _urlopen(url: str) -> bytes | None:
     if "fapi.binance.com" in url:
         return None
     req = urllib.request.Request(url, headers=UA)
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        with _kalshi_urlopen(req, timeout=8) as resp:
             return resp.read()
     except urllib.error.HTTPError:
         return None

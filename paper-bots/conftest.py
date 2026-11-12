@@ -59,11 +59,15 @@ def _read(path: str) -> bytes | None:
 
 
 @pytest.fixture(autouse=True)
-def _no_live_requote(monkeypatch):
+def _no_live_requote(monkeypatch, tmp_path_factory):
     """Paper buys re-read the live order book before filling (strict_fill).
     Tests stay offline; test_strict_fill.py turns it on with a fake book."""
     monkeypatch.setenv("PAPER_STRICT_FILL", "0")
     monkeypatch.setenv("PUBLIC_HTTP_GAP_SECONDS", "0")
+    # Shared Kalshi gateway: no pace, no cache, private state per test.
+    monkeypatch.setenv("KALSHI_READS_PER_SEC", "0")
+    monkeypatch.setenv("KALSHI_CACHE_SECONDS", "0")
+    monkeypatch.setenv("KALSHI_GATEWAY_DIR", str(tmp_path_factory.mktemp("kalshi_gateway")))
     yield
 
 

@@ -146,3 +146,4 @@ wall-street-paper/paper_account.json
 __pycache__/
 helpers/__pycache__/
 teller_memory.json
+.kalshi_gateway/

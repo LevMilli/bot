@@ -232,6 +232,22 @@ def _cache_put(url, body):
     os.replace(tmp, CACHE)
 
 
+def _kalshi_urlopen(req, timeout):
+    """Kalshi GETs share one pace / back-off / cache across towers (kalshi_gateway)."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        import kalshi_gateway
+    except ImportError:
+        return urllib.request.urlopen(req, timeout=timeout)
+    return kalshi_gateway.urlopen(req, timeout=timeout)
+
+
+def _gateway_busy(exc) -> bool:
+    return type(exc).__name__ == "GatewayBusy"
+
+
 def get(url, tries=3):
     """Public GET with a one-minute cache and a retry. A failure stays a failure."""
     hit = _cache_get(url)
@@ -240,12 +256,12 @@ def get(url, tries=3):
     for i in range(tries):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (paper)"})
-            with urllib.request.urlopen(req, timeout=20) as response:
+            with _kalshi_urlopen(req, timeout=20) as response:
                 body = json.load(response)
             _cache_put(url, body)
             return body
-        except Exception:
-            if i == tries - 1:
+        except Exception as exc:
+            if i == tries - 1 or _gateway_busy(exc):
                 raise RuntimeError("public GET failed")
             time.sleep(1.5)
 

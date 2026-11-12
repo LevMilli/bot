@@ -8,6 +8,10 @@ public book could not be read" and skip the whole check.
 or a server hiccup (5xx, timeout), waits and tries again: the server's
 Retry-After if it sends one, otherwise 1s, 2s, 4s. A 404 or other client
 error is raised right away (a missing series is not retried).
+
+Kalshi URLs go through ``kalshi_gateway``: every tower shares one pace and one
+back-off, so a 429 here waits on the shared door (not a private sleep), and a
+door shut longer than the gateway's max wait is raised straight away.
 """
 from __future__ import annotations
 
@@ -16,6 +20,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
+
+import kalshi_gateway
 
 UA = {"User-Agent": "paper-bots/1.0 (paper-only read)"}
 _LOCK = threading.Lock()
@@ -55,13 +61,17 @@ def read(url, headers=None, timeout=10, tries=4, sleep=time.sleep):
         _space()
         try:
             req = urllib.request.Request(url, headers=headers or UA)
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with kalshi_gateway.urlopen(req, timeout=timeout) as resp:
                 return resp.read()
+        except kalshi_gateway.GatewayBusy:
+            raise  # the shared door is shut for a while; skip this read now
         except urllib.error.HTTPError as exc:
             if exc.code != 429 and exc.code < 500:
                 raise
             last = exc
             wait = _retry_after(exc) if exc.code == 429 else None
+            if exc.code == 429 and kalshi_gateway.is_kalshi(url):
+                wait = 0.0  # the gateway's shared back-off does the waiting
         except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
             last = exc
             wait = None

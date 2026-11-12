@@ -16,6 +16,12 @@ import os
 import time
 from typing import Any
 
+import sys as _sys
+
+if os.path.dirname(os.path.abspath(__file__)) not in _sys.path:
+    _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import kalshi_gateway  # noqa: E402 - shared Kalshi pace / back-off / cache
+
 HISTORY_NAME = "kalshi_crypto_history.json"
 MAX_SNAPSHOTS = 4000
 CRYPTO_SERIES = (
@@ -200,7 +206,7 @@ def snapshot_open_15m_series(root: str | None, series_list: tuple | list | None 
 
     def _get(path: str) -> dict:
         req = urllib.request.Request(base + path, headers=ua)
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        with kalshi_gateway.urlopen(req, timeout=20) as resp:
             return json.load(resp)
 
     for series in watched:
@@ -364,7 +370,7 @@ def settle_open_windows(
         ticker = str(snap.get("ticker") or "")
         try:
             req = urllib.request.Request(f"{base}/markets/{ticker}", headers=ua)
-            with urllib.request.urlopen(req, timeout=20) as resp:
+            with kalshi_gateway.urlopen(req, timeout=20) as resp:
                 payload = json.load(resp)
             market = payload.get("market") if isinstance(payload, dict) else None
             if not isinstance(market, dict):
