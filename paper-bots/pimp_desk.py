@@ -1772,7 +1772,7 @@ def _kalshi_drawdown_halt_line(
         return (
             f"Staff cleared soft drawdown halt: bankroll ${float(bankroll):.2f} ≤ "
             f"${float(dd_halt):.2f} (start ${float(start):.0f}). "
-            "Paper buys may resume; kill $400 + fee/band/max-1/day stay stone."
+            "Paper buys may resume; kill $400 + fee/band/daily-loss stay stone."
         )
     return (
         f"Tower drawdown halt: bankroll ${float(bankroll):.2f} ≤ "

@@ -363,7 +363,7 @@ def firm_roi_rescue(
                     "action": "staff_cleared_soft_dd",
                     "why": (
                         f"Staff cleared soft DD (cash ${cash:.2f} ≤ $460); "
-                        "paper buys may resume — kill $400 + fee/band/max-1/day stay stone"
+                        "paper buys may resume — kill $400 + fee/band/daily-loss stay stone"
                     ),
                 })
             else:

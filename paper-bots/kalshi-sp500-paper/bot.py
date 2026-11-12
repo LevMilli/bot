@@ -153,7 +153,7 @@ def _sync_kalshi_tape():
 def step_scan(args, state, day):
     _sync_kalshi_tape()
     now = dt.datetime.now(CT)
-    # #515 pre-noon INX book warm @11:50 CT — observe into quote_cache; still 1/day.
+    # #515 pre-noon INX book warm @11:50 CT — observe into quote_cache only.
     try:
         if DESK_ROOT not in sys.path:
             sys.path.insert(0, DESK_ROOT)
@@ -165,7 +165,7 @@ def step_scan(args, state, day):
         if warm.get("warmed"):
             print(
                 f"Pre-noon INX warm @11:50 CT: {warm.get('warmed_n') or 0} series "
-                f"(1/day buy limit unchanged)"
+                f"(buy limits unchanged)"
             )
     except Exception as exc:
         print(f"Pre-noon INX warm skipped: {type(exc).__name__}")
@@ -178,7 +178,7 @@ def step_scan(args, state, day):
                 logger.learn(f"{day}: no trade - {reason}", "skip")
                 _densify_scan_skip(reason)
             return
-    # 2) risk rules (skip days, 1/day, loss limit, kill switch)
+    # 2) risk rules (skip days, max per day, loss limit, kill switch)
     if state.get("halted"):
         print("HALTED by kill switch earlier. A human must review paper_state.json before trading resumes.")
         return
@@ -277,9 +277,13 @@ def step_scan(args, state, day):
     if DESK_ROOT not in sys.path:
         sys.path.insert(0, DESK_ROOT)
     import desk_inx
+    held = paper_sim.held_tickers(state)
     for row in ranked:
         cand = row.get("pick") if isinstance(row, dict) else None
         if not isinstance(cand, dict):
+            continue
+        if str(cand.get("ticker") or "") in held:
+            last_fair_reason = "already hold this contract; never buy the same one twice"
             continue
         confirmed, ob_try = confirm_with_orderbook(cand)
         if not confirmed:

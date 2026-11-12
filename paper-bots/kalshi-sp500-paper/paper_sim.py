@@ -138,15 +138,20 @@ def record_close(pos, *, bankroll, reason, bid=None, root=None):
         return None
 
 
+def held_tickers(state) -> set:
+    """Contracts already bought today or still open: never buy one twice."""
+    return {str(p.get("ticker") or "") for p in state.get("open") or []}
+
+
 def second_fill_block(trades_today, max_trades=1) -> str:
-    """One paper buy per Chicago day. A later candidate is a skip."""
+    """Cap on paper buys per Chicago day (config max_trades_per_day)."""
     try:
         done = int(trades_today)
         cap = int(max_trades)
     except (TypeError, ValueError):
         return ""
     if done >= cap:
-        return "second candidate the same Chicago day is a skip"
+        return f"already made {done} paper buy(s) today (max {cap})"
     return ""
 
 
