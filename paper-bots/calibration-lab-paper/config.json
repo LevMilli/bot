@@ -1,0 +1,8 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "research": true,
+  "stake_usd": 0,
+  "note": "Research building. Builds calibration.json from settled Kalshi markets and scores the new towers. Buys nothing."
+}
