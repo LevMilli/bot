@@ -422,6 +422,41 @@ TOWERS = (
         "office": "Calibration lab",
         "color": "#c792ea",
     },
+    {
+        "id": "settlement-auditor",
+        "name": "Settlement auditor",
+        "folder": "settlement-auditor-paper",
+        "keep": ("audit.json",),
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "research",
+        "research": True,
+        "every_sec": 86400,
+        "timeout": 180,
+        "max_open": 0,
+        "blurb": (
+            "Support building. Once a day it rechecks every paper trade that was held to the end "
+            "against Kalshi's official result, and flags any trade whose recorded result or payout "
+            "does not match. Buys nothing, holds no cash."
+        ),
+        "buy": [
+            "Never buys. Zero cash, zero stake, no tower risk share",
+            "Checks every desk bot's settled Kalshi trades (sold trades are skipped)",
+            "Flags a wrong result, or a payout that does not match the result",
+        ],
+        "sell": [
+            "Nothing to sell",
+            "Writes audit.json; each trade is checked once, a mismatch stays listed until fixed",
+        ],
+        "failsafes": [
+            "Public Kalshi data only, through the shared gateway",
+            "At most 40 Kalshi reads a run; the rest wait for the next run",
+            "Read-only on other bots' books: it never edits a trade",
+        ],
+        "aliases": ("settlement auditor", "auditor", "audit"),
+        "office": "Settlement auditor",
+        "color": "#8fb8de",
+    },
 )
 
 BY_ID = {row["id"]: row for row in TOWERS}

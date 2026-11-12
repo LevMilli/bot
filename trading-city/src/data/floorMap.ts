@@ -91,7 +91,10 @@ export const FLOORS: FloorDef[] = [
     id: '5',
     name: 'Risk & Compliance',
     wing: 'Risk',
-    offices: [{ officeId: 'risk', botId: null, label: 'Risk sentinel', helper: true }],
+    offices: [
+      { officeId: 'risk', botId: null, label: 'Risk sentinel', helper: true },
+      { officeId: 'settlement-auditor', botId: 'settlement-auditor', label: 'Settlement auditor' },
+    ],
   },
   {
     id: '6',
