@@ -283,7 +283,7 @@ class CommodityCardSkipDensify(unittest.TestCase):
         card = cmd._card_sentence(
             buys=0,
             open_windows=False,
-            skip_reasons=["spot failed (yahoo)"],
+            skip_reasons=["spot failed (index feed)"],
         )
         self.assertIn("spot failed", card)
         self.assertNotIn("No open windows", card)
@@ -306,7 +306,7 @@ class CommodityCardSkipDensify(unittest.TestCase):
         self.assertGreater(empty_idx, 0)
         chunk = src[empty_idx:empty_idx + 4200]
         self.assertIn("if not spots:", chunk)
-        self.assertIn("spot failed (yahoo)", chunk)
+        self.assertIn("spot failed (index feed)", chunk)
         self.assertIn("commodity spot densify", chunk)
         self.assertIn("_densify_evaluate_skip", chunk)
         self.assertIn("skip_reasons=empty_skip_reasons", chunk)
@@ -317,7 +317,7 @@ class CommodityCardSkipDensify(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cmd.DESK_ROOT = tmp
             cmd._densify_evaluate_skip(
-                reasons=["spot failed (yahoo)"],
+                reasons=["spot failed (index feed)"],
                 note="commodity spot densify",
             )
             journal = desk_brain.load_journal(tmp)
@@ -337,7 +337,7 @@ class CommodityCardSkipDensify(unittest.TestCase):
         self.assertIn("missing_spots", chunk)
         self.assertIn("elif missing_spots:", chunk)
         self.assertIn("commodity partial spot densify", chunk)
-        self.assertIn("spot incomplete (yahoo", chunk)
+        self.assertIn("spot incomplete (index feed", chunk)
         self.assertIn("_densify_evaluate_skip", chunk)
         # Partial must beat invent: CARD prefers densified skip over No open windows.
         # Incomplete (not total "spot failed") — spotted series may be true empty.
@@ -345,7 +345,7 @@ class CommodityCardSkipDensify(unittest.TestCase):
         card = cmd._card_sentence(
             buys=0,
             open_windows=False,
-            skip_reasons=["spot incomplete (yahoo 2/6 missing)"],
+            skip_reasons=["spot incomplete (index feed 2/6 missing)"],
         )
         self.assertIn("spot incomplete", card)
         self.assertNotIn("No open windows", card)
@@ -355,7 +355,7 @@ class CommodityCardSkipDensify(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cmd.DESK_ROOT = tmp
             cmd._densify_evaluate_skip(
-                reasons=["spot incomplete (yahoo 2/6 missing)"],
+                reasons=["spot incomplete (index feed 2/6 missing)"],
                 note="commodity partial spot densify",
             )
             journal = desk_brain.load_journal(tmp)

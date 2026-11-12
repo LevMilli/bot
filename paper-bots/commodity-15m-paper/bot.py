@@ -37,7 +37,24 @@ SERIES = (
     "KXNATGAS15M",     # thin / high-σ — last
 )
 
-# Yahoo symbols for spot (fail-closed if missing).
+# Kalshi settles every commodity 15m window on a Pyth index (rules_primary), and
+# the window target is that index at the open. Hyperliquid's xyz dex publishes
+# an oracle price for the same indexes, live and keyless. Yahoo/CNBC futures are
+# ~10 minutes delayed and a different contract (oil/gas/copper sit 1-10% off the
+# Kalshi target), so they are no longer used to pick a side.
+HYPERLIQUID_INFO = "https://api.hyperliquid.xyz/info"
+HYPERLIQUID = {
+    "KXPALLADIUM15M": "xyz:PALLADIUM",
+    "KXNATGAS15M": "xyz:NATGAS",
+    "KXCOPPER15M": "xyz:COPPER",
+    "KXBRENT15M": "xyz:BRENTOIL",
+    "KXWTI15M": "xyz:CL",
+    "KXSILVER15M": "xyz:SILVER",
+    "KXGOLD15M": "xyz:GOLD",
+    "KXPLATINUM15M": "xyz:PLATINUM",
+}
+
+# Old Yahoo futures symbols (reference only; delayed, not used for sides).
 YAHOO = {
     "KXPALLADIUM15M": "PA=F",
     "KXNATGAS15M": "NG=F",
@@ -309,14 +326,78 @@ def yahoo_spot(symbol: str) -> float | None:
         return None
 
 
-def spots_by_series() -> dict[str, float]:
-    out = {}
-    for series, symbol in YAHOO.items():
-        px = yahoo_spot(symbol)
-        if px is not None and px > 0:
-            out[series] = px
-        time.sleep(0.05)
+def hyperliquid_oracles(timeout: int = 15) -> dict[str, float]:
+    """Live oracle price per Hyperliquid xyz asset name (one public POST)."""
+    body = json.dumps({"type": "metaAndAssetCtxs", "dex": "xyz"}).encode("utf-8")
+    req = urllib.request.Request(
+        HYPERLIQUID_INFO, data=body, method="POST",
+        headers={**UA, "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        meta, ctxs = json.load(resp)
+    out: dict[str, float] = {}
+    for asset, ctx in zip(meta.get("universe") or [], ctxs or []):
+        try:
+            px = float((ctx or {}).get("oraclePx"))
+        except (TypeError, ValueError):
+            continue
+        if px > 0:
+            out[str(asset.get("name") or "")] = px
     return out
+
+
+# Feed-to-Kalshi offset as a fraction of price. Seeds from Nov 12 2026 opens
+# (gas and copper sit ~0.3-0.4% under the Kalshi index); each fresh window
+# open re-learns it.
+BASIS_SEED = {"KXNATGAS15M": 0.0038, "KXCOPPER15M": 0.0028}
+BASIS_FILE = "index_basis.json"
+BASIS_LEARN_MIN = 3.0   # only learn while the window is at most 3 minutes old
+BASIS_WEIGHT = 0.3
+
+
+def _basis_state() -> dict:
+    try:
+        with open(os.path.join(HERE, BASIS_FILE), encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def anchored_spot(series: str, spot: float, m: dict, now: dt.datetime | None = None) -> float:
+    """Feed price shifted onto Kalshi's index using the learned open offset."""
+    state = _basis_state()
+    row = state.get(series) or {}
+    frac = float(row.get("frac", BASIS_SEED.get(series, 0.0)))
+    now = now or dt.datetime.now(dt.timezone.utc)
+    try:
+        age = 15.0 - (m["close_time"] - now).total_seconds() / 60.0
+        target = float(m["target"])
+    except (KeyError, TypeError, ValueError):
+        return spot * (1.0 + frac)
+    ticker = str(m.get("ticker") or "")
+    if 0.0 <= age <= BASIS_LEARN_MIN and spot > 0 and row.get("last") != ticker:
+        seen = (target - spot) / spot
+        frac = seen if "frac" not in row else (1 - BASIS_WEIGHT) * frac + BASIS_WEIGHT * seen
+        state[series] = {"frac": round(frac, 6), "last": ticker, "n": int(row.get("n") or 0) + 1}
+        try:
+            tmp = os.path.join(HERE, BASIS_FILE + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(state, fh)
+            os.replace(tmp, os.path.join(HERE, BASIS_FILE))
+        except OSError:
+            pass
+    return spot * (1.0 + frac)
+
+
+def spots_by_series() -> dict[str, float]:
+    """Spot per Kalshi series from the live index feed. Missing means skip."""
+    try:
+        oracles = hyperliquid_oracles()
+    except Exception as exc:  # noqa: BLE001 - fail closed: no spot, no buy
+        print(f"  index feed failed: {type(exc).__name__}")
+        return {}
+    return {series: oracles[name] for series, name in HYPERLIQUID.items() if name in oracles}
 
 
 def list_open(series: str, limit: int = 4) -> list[dict]:
@@ -1934,7 +2015,7 @@ def main() -> int:
             continue
         try:
             for m in list_open(series, limit=3):
-                windows.append((series, spot, m))
+                windows.append((series, anchored_spot(series, spot, m), m))
         except Exception as exc:
             # Prefer-1: do not collapse Kalshi list-down into empty windows.
             list_errs.append(series)
@@ -1949,7 +2030,7 @@ def main() -> int:
         empty_note = "no open commodity windows"
         missing_spots = [s for s in SERIES if s not in spots]
         if not spots:
-            spot_reason = "spot failed (yahoo)"
+            spot_reason = "spot failed (index feed)"
             empty_skip_reasons.append(spot_reason)
             empty_note = spot_reason
             _densify_evaluate_skip(
@@ -1986,7 +2067,7 @@ def main() -> int:
             # Name incomplete (not total "spot failed") — spotted series may be
             # truly empty Kalshi; still must not invent a complete empty check.
             spot_reason = (
-                f"spot incomplete (yahoo "
+                f"spot incomplete (index feed "
                 f"{len(missing_spots)}/{len(SERIES)} missing)"
             )
             empty_skip_reasons.append(spot_reason)
