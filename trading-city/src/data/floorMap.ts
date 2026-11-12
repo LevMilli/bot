@@ -122,9 +122,12 @@ export function isResearchTower(botId: string): boolean {
   return isSupportTower(botId)
 }
 
-/** Staff floor. One book, six desks. It does not trade. */
+/**
+ * Support: towers that never trade. Wall Street (staff floor, one book, six desks)
+ * plus the Risk & Compliance checkers (settlement auditor, scorekeeper).
+ */
 export function isStaffSupport(botId: string): boolean {
-  return botId === 'wall-street'
+  return botId === 'wall-street' || floorForBot(botId)?.id === '5'
 }
 
 export function parseCityHash(hash: string): {
