@@ -97,3 +97,16 @@ def test_registry_and_desk_wiring():
     import new_tower
     res = new_tower.check_tower("favorite-harvest")
     assert res["ok"], res
+
+
+def test_label_is_cut_at_a_word_and_says_the_side_once():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "fav_bot_label", os.path.join(os.path.dirname(os.path.abspath(__file__)), "favorite-harvest-paper", "bot.py"))
+    bot = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bot)
+    long = "Will the S&P 500 be between 7550 and 7574.9999 on Nov 12, 2026?"
+    short = bot._short(long)
+    assert short == "Will the S&P 500 be between 7550 and 7574.9999 on Nov 12..."
+    assert bot._short("High in NYC on Nov 12?") == "High in NYC on Nov 12"
+    assert not short.endswith(("NO", "YES"))
