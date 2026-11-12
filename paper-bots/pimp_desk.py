@@ -2105,7 +2105,9 @@ def _sports_positions(state: dict, day: dt.date):
     for pos in open_all:
         cost = _num(pos.get("cost")) or 0.0
         risk += cost
-        title = _clean(f"{pos.get('contracts') or '?'} YES {pos.get('team') or pos.get('ticker') or 'contract'}")
+        side = str(pos.get("side") or "yes").upper()
+        name = pos.get("team") or pos.get("label") or pos.get("ticker") or "contract"
+        title = _clean(f"{pos.get('contracts') or '?'} {side} {name}")
         detail = _clean(f"{pos.get('game') or ''} · cost ${cost:.2f} · {pos.get('opened') or ''}")
         open_rows.append(_fill_row(pos, title, detail, cost, str(pos.get("opened") or "")))
     closed = _dedupe_pos([pos for pos in (state.get("closed") or []) if isinstance(pos, dict)])
@@ -2272,7 +2274,7 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
         line = f"{view['traders']} traders on six desks. One book. It does not trade."
         view["why"] = card_copy(summary) or line
         return _finish_bot(view, spec, root)
-    if spec["kind"] in ("btc", "spot", "carry", "log"):
+    if spec["kind"] in ("btc", "spot", "carry", "log", "shadow"):
         summary = str(run.get("summary") or "")
         view["skip"] = _btc_skip(summary)
         if spec["kind"] == "btc":
@@ -4883,7 +4885,8 @@ def _install_new_towers() -> None:
             "script": "bot.py",
             "blurb": spec["blurb"],
             "state": "paper_account.json",
-            "kind": spec.get("kind") or "macro",
+            "kind": "shadow",
+            "category": spec.get("kind") or "macro",
             "log": "",
             "empty": "No paper account yet. A check writes paper_account.json.",
             "shadow_only": True,

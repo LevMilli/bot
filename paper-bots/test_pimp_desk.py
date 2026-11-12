@@ -179,7 +179,7 @@ class PimpDeskTests(unittest.TestCase):
             "exclusive-set": 0.0,
             "wall-street": 0.0,
             **{spec["id"]: 0.0 for spec in shadow_missing.ACTIVE},
-            **{spec["id"]: None for spec in new_towers.ACTIVE},
+            **{spec["id"]: 500.0 for spec in new_towers.ACTIVE},
         }
         for bot in snap["bots"]:
             self.assertTrue(bot["present"], bot["id"])

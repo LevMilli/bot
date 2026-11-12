@@ -101,3 +101,30 @@ def test_registry_and_desk_wiring():
     sys.path.insert(0, os.path.join(HERE, "tools"))
     import new_tower
     assert new_tower.check_tower("poly-sports-lean")["ok"]
+
+
+def test_desk_view_shows_shadow_engine_positions(tmp_path):
+    """New towers are read with the cash/positions reader, not the memecoin one."""
+    import json
+    import shutil
+    import pimp_desk
+
+    spec = next(b for b in pimp_desk.BOTS if b["id"] == "poly-sports-lean")
+    assert spec["kind"] == "shadow" and spec["category"] == "sports"
+    root = tmp_path / "desk"
+    shutil.copytree(os.path.join(HERE, "poly-sports-lean-paper"), root / "poly-sports-lean-paper",
+                    ignore=shutil.ignore_patterns("paper_account.json", "research.jsonl*", "__pycache__"))
+    state = {
+        "cash": 475.0, "paper_only": True, "shadow_only": True, "live_orders": False,
+        "open": [{"ticker": "KXNBAGAME-26NOV12TORPHI-TOR", "side": "no", "label": "NBA Tor to win",
+                  "contracts": 30, "ask": 0.8, "fee": 0.02, "cost": 24.6, "opened": "2026-11-12T15:00:00+00:00"}],
+        "closed": [{"ticker": "X", "side": "yes", "label": "NBA X to win", "contracts": 10, "cost": 5.0,
+                    "payout": 10.0, "pnl": 5.0, "closed": "2026-11-11T03:00:00+00:00", "exit": "settled"}],
+    }
+    (root / "poly-sports-lean-paper" / "paper_account.json").write_text(json.dumps(state))
+    import datetime as _dt
+    view = pimp_desk._bot_view(spec, str(root), {}, _dt.date(2026, 11, 12))
+    assert view["cash"] == 475.0
+    assert view["open_count"] == 1 and view["open_risk"] == 24.6
+    assert view["positions"][0]["title"].startswith("30 NO NBA Tor to win")
+    assert view["realized"] == 5.0
