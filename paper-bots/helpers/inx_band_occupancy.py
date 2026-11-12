@@ -225,7 +225,7 @@ def fetch_open_markets(*, opener=None, limit: int = 200) -> list[dict]:
     import urllib.request
 
     opener = opener or (
-        lambda u: urllib.request.urlopen(
+        lambda u: _kalshi_gateway().urlopen(
             urllib.request.Request(u, headers=UA), timeout=12,
         ).read()
     )
@@ -304,3 +304,16 @@ def write_digest_from_desk(root: str | None = None, *, opener=None) -> dict:
 
 if __name__ == "__main__":
     print(json.dumps(write_digest_from_desk(), indent=2, sort_keys=True))
+
+
+def _kalshi_gateway():
+    """Shared Kalshi pace / back-off / cache (paper-bots/kalshi_gateway.py)."""
+    import os
+    import sys
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    import kalshi_gateway
+
+    return kalshi_gateway

@@ -3356,7 +3356,7 @@ def backfill_sports_exit_shadow_from_closed(
             + str(ticker)
         )
         try:
-            with urllib.request.urlopen(url, timeout=8) as resp:
+            with __import__("kalshi_gateway").urlopen(url, timeout=8) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
         except Exception:
             return None
@@ -4334,7 +4334,7 @@ def label_near_miss_catchup(
             + str(ticker)
         )
         try:
-            with urllib.request.urlopen(url, timeout=8) as resp:
+            with __import__("kalshi_gateway").urlopen(url, timeout=8) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
         except Exception:
             return None
@@ -9780,7 +9780,7 @@ def _fetch_kalshi_series_markets(
         return []
     url = f"{KALSHI_PUBLIC}/markets?series_ticker={series}&status=open&limit={int(limit)}"
     opener = opener or (
-        lambda u: urllib.request.urlopen(
+        lambda u: __import__("kalshi_gateway").urlopen(
             urllib.request.Request(u, headers=MACRO_HARVEST_UA), timeout=12,
         ).read()
     )

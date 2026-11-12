@@ -27,6 +27,7 @@ Key ideas a beginner needs:
 """
 import json
 import os
+import sys
 import time
 import urllib.request
 import urllib.error
@@ -74,6 +75,22 @@ def _cache_put(path, body):
     os.replace(tmp, _CACHE_PATH)
 
 
+def _kalshi_urlopen(req, timeout):
+    """Kalshi GETs share one pace / back-off / cache across towers (kalshi_gateway)."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        import kalshi_gateway
+    except ImportError:
+        return urllib.request.urlopen(req, timeout=timeout)
+    return kalshi_gateway.urlopen(req, timeout=timeout)
+
+
+def _gateway_busy(exc) -> bool:
+    return type(exc).__name__ == "GatewayBusy"
+
+
 def get_json(path, retries=5):
     """GET one public API path (e.g. '/markets?...') and return parsed JSON.
 
@@ -88,7 +105,7 @@ def get_json(path, retries=5):
     for attempt in range(retries):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "paper-bot/1.0 (read-only)"})
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with _kalshi_urlopen(req, timeout=30) as resp:
                 time.sleep(PAUSE)            # be polite to the public API
                 body = json.load(resp)
             _cache_put(path, body)
@@ -97,6 +114,8 @@ def get_json(path, retries=5):
             if e.code == 404:
                 return {}
             last_err = e
+            if _gateway_busy(e):
+                break                        # shared Kalshi door is shut
             time.sleep(1.5 * (attempt + 1))  # 429 / 5xx: wait and retry
         except Exception as e:               # timeouts, connection resets
             last_err = e

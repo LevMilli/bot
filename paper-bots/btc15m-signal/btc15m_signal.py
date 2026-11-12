@@ -1022,6 +1022,22 @@ def _store(url, body):
     os.replace(tmp, _CACHE)
 
 
+def _kalshi_urlopen(req, timeout):
+    """Kalshi GETs share one pace / back-off / cache across towers (kalshi_gateway)."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        import kalshi_gateway
+    except ImportError:
+        return urllib.request.urlopen(req, timeout=timeout)
+    return kalshi_gateway.urlopen(req, timeout=timeout)
+
+
+def _gateway_busy(exc) -> bool:
+    return type(exc).__name__ == "GatewayBusy"
+
+
 def get_json(url, headers=None, tries=3):
     hit = _cached(url)
     if hit is not None:
@@ -1030,12 +1046,14 @@ def get_json(url, headers=None, tries=3):
     for i in range(tries):
         try:
             req = urllib.request.Request(url, headers=headers or UA)
-            with urllib.request.urlopen(req, timeout=15) as r:
+            with _kalshi_urlopen(req, timeout=15) as r:
                 body = json.load(r)
             _store(url, body)
             return body
         except Exception as e:  # network hiccup -> retry, then mark it failed
             err = e
+            if _gateway_busy(e):
+                break  # shared Kalshi door is shut; skip this read now
             time.sleep(1 + i)
     raise RuntimeError("public GET failed")
 

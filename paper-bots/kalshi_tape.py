@@ -16,6 +16,12 @@ import urllib.error
 import urllib.request
 from typing import Iterable
 
+import sys as _sys
+
+if os.path.dirname(os.path.abspath(__file__)) not in _sys.path:
+    _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import kalshi_gateway  # noqa: E402 - shared Kalshi pace / back-off / cache
+
 KALSHI = "https://api.elections.kalshi.com/trade-api/v2"
 UA = {"User-Agent": "paper-bot/1.0 (kalshi-tape read-only)"}
 
@@ -158,10 +164,10 @@ def _get_json(url: str, tries: int = 3) -> dict:
     for attempt in range(tries):
         try:
             req = urllib.request.Request(url, headers=UA)
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with kalshi_gateway.urlopen(req, timeout=15) as resp:
                 return json.load(resp)
         except urllib.error.HTTPError as exc:
-            if exc.code == 429:
+            if exc.code == 429:  # includes kalshi_gateway.GatewayBusy
                 raise RateLimited("Kalshi tape GET rate limited (429)") from exc
             err = exc
             if exc.code < 500:
