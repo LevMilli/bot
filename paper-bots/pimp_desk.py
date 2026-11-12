@@ -709,15 +709,15 @@ BOT_PLANS = {
     "fed-watch": {
         "buy": [
             "Shadow sleeve only — spends no desk cash and takes no tower risk share",
-            "CME FedWatch fair vs Kalshi ask (fedwatch_quotes.json fixture or injected bins)",
-            "Edge = fedwatch_fair − ask − Kalshi fee; buy only if edge ≥ locked econ 0.05",
-            "Fixed $25 from the shadow $500 sleeve; max 1 open",
-            "Empty quotes wait on FedWatch — never invent fills",
+            "Polymarket Fed decision mid vs Kalshi KXFEDDECISION YES/NO ask, same meeting and outcome",
+            "Edge = Polymarket fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked econ 0.05",
+            "Fixed $25 ticket in whole contracts from the shadow $500 sleeve; max 1 open",
+            "Polymarket spread over 4¢ or no matching meeting → skip; never invent fills",
             "Idea-bank: KXFED/rates refuse main AUTO graduation",
         ],
         "sell": [
-            "Model-flip when FedWatch fair collapses through the ask",
-            "Settle / staff close is the backstop",
+            "Holds to the Kalshi result: $1 per contract when our side wins",
+            "Model-flip when the Polymarket fair collapses through the ask",
         ],
         "failsafes": [
             "Desk entry_gate still blocks new buys",

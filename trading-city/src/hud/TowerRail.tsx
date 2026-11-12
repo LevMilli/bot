@@ -29,8 +29,9 @@ function bookPnlApplies(bot: BotRow): boolean {
 function supportHeadline(bot: BotRow): string {
   const raw = statusLabel(bot)
   const low = raw.toLowerCase()
+  if (low.includes('odds_api_key')) return 'Waiting on Odds API key'
   if (low.includes('sharp')) return 'Waiting on sharp quotes'
-  if (low.includes('fedwatch') || low.includes('fed watch')) return 'Waiting on FedWatch quotes'
+  if (low.includes('fed quotes') || low.includes('fedwatch') || low.includes('fed watch')) return 'Waiting on Fed quotes'
   const cleaned = raw
     .replace(/\s*\(no invent\)\s*/gi, '')
     .replace(/\.json\b/gi, '')

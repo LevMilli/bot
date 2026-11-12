@@ -53,7 +53,7 @@ class FedWatch(unittest.TestCase):
             buf = io.StringIO()
             with redirect_stdout(buf):
                 bot.run_once(desk_root=tmp, quotes=[])
-            self.assertIn("waiting on fedwatch", buf.getvalue().lower())
+            self.assertIn("waiting on fed quotes", buf.getvalue().lower())
             buf = io.StringIO()
             with redirect_stdout(buf):
                 bot.run_once(
@@ -70,7 +70,9 @@ class FedWatch(unittest.TestCase):
             self.assertEqual(len(state["open"]), 1)
             self.assertTrue(state["shadow_only"])
             self.assertTrue(state["idea_bank_only"])
-            self.assertAlmostEqual(state["cash"], 475.0, places=2)
+            # 46 whole contracts at 0.52 + 0.02 fee = $24.84.
+            self.assertEqual(state["open"][0]["contracts"], 46)
+            self.assertAlmostEqual(state["cash"], 475.16, places=2)
 
     def test_harvest_from_bins_writes_quotes(self):
         bot = _bot()
