@@ -181,3 +181,49 @@ def stamp(pos, check):
             ("decided_ask", "quoted_ask", "slip", "depth", "capped", "requoted", "note")
         }
     return pos
+
+
+def spot_recheck(price, quote, *, side="buy", max_slip=None, fallback=None, wait=None, force=False):
+    """Re-quote a coin price right before a paper buy or sell.
+
+    ``quote()`` returns the live price (ask for a buy, bid for a sell) or None.
+    Buys fill at the higher of the two prices, sells at the lower. A buy whose
+    price rose more than ``max_slip`` (a fraction, e.g. 0.05 = 5%) is skipped.
+    Sells are never skipped (an exit must still happen), just filled worse.
+    If the live price can't be read, ``fallback`` (default 1%) worse is used.
+    """
+    decided = float(price)
+    buying = str(side).lower() != "sell"
+    out = {"ok": True, "price": decided, "decided": decided, "quoted": None,
+           "slip_pct": 0.0, "requoted": False, "reason": "", "note": ""}
+    if not force and not enabled():
+        out["note"] = "strict fill off"
+        return out
+    delay = _env_float("PAPER_REQUOTE_SECONDS", 3) if wait is None else float(wait)
+    if delay > 0:
+        time.sleep(delay)
+    try:
+        live = quote()
+        live = float(live) if live is not None else None
+        if live is not None and not (live > 0):
+            live = None
+    except Exception:  # noqa: BLE001
+        live = None
+    worse = _env_float("PAPER_SPOT_FALLBACK_SLIP", 0.01) if fallback is None else float(fallback)
+    if live is None:
+        fill = decided * (1 + worse) if buying else decided * (1 - worse)
+        out["note"] = f"price not re-read; assumed {worse * 100:.1f}% worse"
+    else:
+        out["requoted"], out["quoted"] = True, live
+        fill = max(decided, live) if buying else min(decided, live)
+    slip = (fill / decided - 1.0) if buying else (1.0 - fill / decided)
+    out["price"], out["slip_pct"] = fill, round(slip * 100, 4)
+    limit = _env_float("PAPER_SPOT_MAX_SLIP", 0.05) if max_slip is None else float(max_slip)
+    if buying and slip > limit + 1e-12:
+        out.update(ok=False, reason=f"price ran away before the fill (+{slip * 100:.2f}%)")
+        return out
+    if slip > 0 and not out["note"]:
+        out["note"] = f"filled {slip * 100:.2f}% worse than decided"
+    elif not out["note"]:
+        out["note"] = "price held on re-check"
+    return out

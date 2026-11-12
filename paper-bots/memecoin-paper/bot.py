@@ -260,6 +260,11 @@ def commit_paper_buy(st, *, mint, symbol, pair, price, liq, ticket, conf, lane, 
         return "buy intent needs a real price"
     if price_n != price_n or price_n <= 0 or liq_n != liq_n or liq_n <= 0 or ticket_n <= 0:
         return "buy intent needs a real price"
+    check = _strict_quote(pair, price_n, liq_n, "buy")
+    if check is not None:
+        if not check["ok"]:
+            return check["reason"]
+        price_n, liq_n = float(check["price"]), float(check["liq"])
     fill_id = f"{mint}|{now_iso()}"
     try:
         write_buy_intent(
@@ -279,6 +284,9 @@ def commit_paper_buy(st, *, mint, symbol, pair, price, liq, ticket, conf, lane, 
         fill_id=fill_id, exit_rule=BUY_EXIT_NAME, paper_only=True,
         fee_usd=fee, impact=imp,
     )
+    if check is not None:
+        pos["fill_check"] = {k: check.get(k) for k in
+                             ("decided", "quoted", "slip_pct", "requoted", "note")}
     try:
         desk_root = os.path.dirname(BASE)
         if desk_root not in sys.path:
@@ -311,7 +319,42 @@ def pair_now(pair_addr):
         return None, None
 
 
+def _strict_quote(pair, price, liq, side):
+    """Re-read the pool a few seconds later and keep the worse price and the
+    thinner pool (strict_fill). None when the check is off or unavailable."""
+    try:
+        desk_root = os.path.dirname(BASE)
+        if desk_root not in sys.path:
+            sys.path.insert(0, desk_root)
+        import strict_fill
+    except ImportError:
+        return None
+    if not strict_fill.enabled() or not pair:
+        return None
+    seen = {}
+
+    def _quote():
+        px, lq = pair_now(pair)
+        seen["liq"] = lq
+        return px
+
+    check = strict_fill.spot_recheck(
+        price, _quote, side=side,
+        max_slip=float(os.environ.get("PAPER_MEME_MAX_SLIP", 0.05)),
+    )
+    live_liq = seen.get("liq")
+    try:
+        live_liq = float(live_liq) if live_liq is not None else None
+    except (TypeError, ValueError):
+        live_liq = None
+    check["liq"] = min(float(liq), live_liq) if live_liq and live_liq > 0 else float(liq)
+    return check
+
+
 def sell(st, pos, frac_of_original, reason, price, liq, full=False):
+    check = _strict_quote(pos.get("pair"), price, liq, "sell")
+    if check is not None:
+        price, liq = float(check["price"]), float(check["liq"])
     qty = pos["tokens_left"] if full else min(pos["tokens_left"], pos["tokens"] * frac_of_original)
     proceeds, fee, imp = paper_sell(price, liq, qty)
     cost = pos["cost_usd"] * qty / pos["tokens"]

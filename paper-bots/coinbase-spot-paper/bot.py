@@ -352,6 +352,39 @@ def replacement_block(state) -> str:
     return ""
 
 
+TICKER_URL = "https://api.exchange.coinbase.com/products/{product}/ticker"
+
+
+def live_quote(product: str, side: str = "buy"):
+    """Live best ask (buy) or bid (sell) from Coinbase's public ticker."""
+    req = urllib.request.Request(TICKER_URL.format(product=product), headers=UA)
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    return _num(payload.get("ask" if side == "buy" else "bid"))
+
+
+def strict_mark(product: str, mark, side: str = "buy"):
+    """Re-check the price right before a paper fill (strict_fill).
+
+    The candle close can be up to 15 minutes old. Buys pay the higher of the
+    close and the live ask; sells get the lower of the close and the live bid.
+    Returns the check dict, or None when the check is off.
+    """
+    try:
+        if DESK_ROOT not in sys.path:
+            sys.path.insert(0, DESK_ROOT)
+        import strict_fill
+    except ImportError:
+        return None
+    px = _num(mark)
+    if not strict_fill.enabled() or px is None or px <= 0:
+        return None
+    return strict_fill.spot_recheck(
+        px, lambda: live_quote(product, side), side=side,
+        max_slip=float(os.environ.get("PAPER_COINBASE_MAX_SLIP", 0.005)),
+    )
+
+
 def failsafe_sale(state, prices, z_by_product=None, now=None, cfg=None) -> dict:
     """Sell an open long at its own real mark when one of this tower's exits fired.
 
@@ -391,7 +424,13 @@ def failsafe_sale(state, prices, z_by_product=None, now=None, cfg=None) -> dict:
         reason = exit_reason(pos, mark, _num(zs.get(product)), cfg, when)
         if not reason:
             continue
+        check = strict_mark(product, mark, "sell")
+        if check is not None:
+            mark = float(check["price"])
         closed = apply_exit(book, pos, mark, reason, cfg, when)
+        if check is not None:
+            closed["fill_check"] = {k: check.get(k) for k in
+                                    ("decided", "quoted", "slip_pct", "requoted", "note")}
         closed["exit_name"] = EXIT_NAME.get(reason, reason)
         closed["tower"] = "coinbase-spot"
         closed["stake"] = closed.get("cost")
@@ -999,6 +1038,13 @@ def run_once(
                 decision["reason"] = "shadow cash below ticket"
                 continue
             mark = (books.get(product) or [None])[-1]
+            check = strict_mark(product, mark, "buy")
+            if check is not None:
+                if not check["ok"]:
+                    decision["action"] = "flat"
+                    decision["reason"] = check["reason"]
+                    continue
+                mark = float(check["price"])
             bought_row = place_shadow_buy(
                 state,
                 decision,
@@ -1011,6 +1057,10 @@ def run_once(
                 decision["action"] = "flat"
                 decision["reason"] = bought_row.get("reason") or "refused"
                 continue
+            if check is not None and state.get("open"):
+                state["open"][-1]["fill_check"] = {
+                    k: check.get(k) for k in ("decided", "quoted", "slip_pct", "requoted", "note")
+                }
             bought = product
             break
     for product in cfg["products_research_only"]:
