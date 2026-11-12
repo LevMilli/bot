@@ -7,7 +7,9 @@ from unittest import mock
 
 import strict_fill
 import test_btc15m_buy as btc_buy
+import test_coinbase_sell as cb_sell
 import test_commodity_buy as com_buy
+import test_memecoin_buy as meme_buy
 
 
 def _book(no_bids=(), yes_bids=()):
@@ -173,6 +175,116 @@ class CommodityStrictBuy(com_buy.CommodityBuy):
         self.assertIn("edge gone", msg)
         self.assertEqual(state["open"], [])
         self.assertFalse(os.path.exists(self.path))
+
+
+class SpotRecheckTests(unittest.TestCase):
+    def _go(self, live, side="buy", **kw):
+        return strict_fill.spot_recheck(100.0, lambda: live, side=side, wait=0, force=True, **kw)
+
+    def test_buy_pays_the_higher_price(self):
+        self.assertEqual(self._go(101.0)["price"], 101.0)
+        self.assertEqual(self._go(99.0)["price"], 100.0)
+
+    def test_sell_gets_the_lower_price_and_is_never_skipped(self):
+        self.assertEqual(self._go(99.0, "sell")["price"], 99.0)
+        self.assertEqual(self._go(101.0, "sell")["price"], 100.0)
+        crash = self._go(50.0, "sell", max_slip=0.01)
+        self.assertTrue(crash["ok"])
+        self.assertEqual(crash["price"], 50.0)
+
+    def test_buy_that_ran_away_skips(self):
+        out = self._go(106.0, max_slip=0.05)
+        self.assertFalse(out["ok"])
+        self.assertIn("ran away", out["reason"])
+
+    def test_unreadable_price_assumes_one_percent_worse(self):
+        self.assertAlmostEqual(self._go(None)["price"], 101.0)
+        self.assertAlmostEqual(self._go(None, "sell")["price"], 99.0)
+        boom = strict_fill.spot_recheck(100.0, lambda: 1 / 0, wait=0, force=True)
+        self.assertAlmostEqual(boom["price"], 101.0)
+
+
+class MemecoinStrict(unittest.TestCase):
+    def setUp(self):
+        self.case = meme_buy.MemecoinBuy("test_intent_names_the_flip_and_the_stop_before_cash_moves")
+        self.case.setUp()
+        self.bot = self.case.bot
+        self.env = mock.patch.dict(os.environ, {"PAPER_STRICT_FILL": "1", "PAPER_REQUOTE_SECONDS": "0"})
+        self.env.start()
+
+    def tearDown(self):
+        self.env.stop()
+        self.case.tearDown()
+
+    def test_buy_fills_at_the_worse_price_and_thinner_pool(self):
+        state = {"cash_usd": 100.0, "open": []}
+        self.bot.pair_now = lambda pair: (1.02, 50000.0)
+        pos = self.bot.commit_paper_buy(
+            state, mint="M", symbol="X", pair="P", price=1.0, liq=100000,
+            ticket=10, conf=0.9, lane="accurate",
+        )
+        self.assertIsInstance(pos, dict)
+        self.assertEqual(pos["entry_market_price"], 1.02)
+        self.assertEqual(pos["entry_liq"], 50000.0)
+        self.assertEqual(pos["fill_check"]["decided"], 1.0)
+        tokens, _fee, _imp, _fill = self.bot.paper_buy(1.02, 50000.0, 10)
+        self.assertAlmostEqual(pos["tokens"], tokens)
+
+    def test_buy_that_ran_away_books_nothing(self):
+        state = {"cash_usd": 100.0, "open": []}
+        self.bot.pair_now = lambda pair: (1.20, 100000.0)
+        out = self.bot.commit_paper_buy(
+            state, mint="M", symbol="X", pair="P", price=1.0, liq=100000,
+            ticket=10, conf=0.9, lane="accurate",
+        )
+        self.assertIn("ran away", out)
+        self.assertEqual(state["open"], [])
+        self.assertEqual(state["cash_usd"], 100.0)
+
+    def test_sell_takes_the_lower_price(self):
+        rows = []
+        self.bot.append_csv = lambda path, cols, row: rows.append(row)
+        self.bot.pair_now = lambda pair: (0.90, 100000.0)
+        pos = {"mint": "M", "symbol": "X", "pair": "P", "tokens": 10.0, "tokens_left": 10.0,
+               "cost_usd": 10.0}
+        st = {"cash_usd": 0.0, "realized_pnl_usd": 0.0}
+        try:
+            self.bot.sell(st, pos, 1, "stop", 1.0, 100000.0, full=True)
+        except Exception:
+            pass  # desk ledgers after the fill are not under test here
+        self.assertEqual(rows[0]["market_price_usd"], 0.90)
+
+
+class CoinbaseStrict(unittest.TestCase):
+    def setUp(self):
+        self.bot = cb_sell._bot()
+        self.env = mock.patch.dict(os.environ, {"PAPER_STRICT_FILL": "1", "PAPER_REQUOTE_SECONDS": "0"})
+        self.env.start()
+
+    def tearDown(self):
+        self.env.stop()
+
+    def test_exit_sells_at_the_lower_live_bid(self):
+        self.bot.live_quote = lambda product, side="buy": 97.0
+        pos = cb_sell._pos(self.bot)
+        state = {"cash": 475.0, "open": [pos], "closed": []}
+        out = self.bot.failsafe_sale(state, {"ETH-USD": 98.0}, z_by_product={"ETH-USD": -3},
+                                     now=cb_sell.NOW)
+        self.assertTrue(out["sold"])
+        closed = state["closed"][0]
+        self.assertEqual(closed["exit_price"], 97.0)
+        self.assertEqual(closed["fill_check"]["decided"], 98.0)
+
+    def test_buy_check_pays_the_live_ask(self):
+        self.bot.live_quote = lambda product, side="buy": 100.3
+        check = self.bot.strict_mark("ETH-USD", 100.0, "buy")
+        self.assertAlmostEqual(check["price"], 100.3)
+        self.bot.live_quote = lambda product, side="buy": 101.0
+        self.assertFalse(self.bot.strict_mark("ETH-USD", 100.0, "buy")["ok"])
+
+    def test_off_switch(self):
+        with mock.patch.dict(os.environ, {"PAPER_STRICT_FILL": "0"}):
+            self.assertIsNone(self.bot.strict_mark("ETH-USD", 100.0, "buy"))
 
 
 if __name__ == "__main__":
