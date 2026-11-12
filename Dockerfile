@@ -27,4 +27,6 @@ RUN mkdir -p /data
 ENV DB_PATH=/data/picks.db \
     PYTHONUNBUFFERED=1
 
-CMD ["python", "bot.py"]
+# One image, two services. SERVICE_ROLE=trading starts the trading desk
+# (timer + private desk API). Anything else starts the Discord bot.
+CMD ["sh", "-c", "if [ \"$SERVICE_ROLE\" = \"trading\" ]; then exec python paper-bots/desk_service.py; else exec python bot.py; fi"]

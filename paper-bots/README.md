@@ -143,7 +143,8 @@ own volume and runs the 60-second timer. The Discord bot keeps the staff login,
 the PIMP-TRADING page, and APEX-CITY, and forwards every desk call to the
 service over a private key.
 
-Trading service (same Docker image, different start command):
+Trading service (same Docker image). Set `SERVICE_ROLE=trading` and the image
+starts the trading desk instead of the Discord bot. Same as running:
 
 ```
 python paper-bots/desk_service.py
