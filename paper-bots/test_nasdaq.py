@@ -70,6 +70,7 @@ def test_model_closed_and_stale(monkeypatch):
     bot = _bot()
     assert bot.model({}, dt.datetime(2026, 11, 12, 10, tzinfo=UTC)) == ([], "market closed")
     monkeypatch.setattr(bot, "_yahoo", lambda sym, now: (28400.0, 900) if "NDX" in sym else (27.0, 10))
+    monkeypatch.setattr(bot.engine, "public_json", lambda *a, **k: {})  # CNBC empty, no network
     quotes, note = bot.model({}, NOON)
     assert quotes == [] and "min old" in note
 

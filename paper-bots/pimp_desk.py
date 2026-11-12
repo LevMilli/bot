@@ -4461,7 +4461,7 @@ def run_shadow_tick(
         # INX paper smoke — settle outside scan windows; during AUTO run windows
         # smoke the real paper scan so tip why is not settle "No open paper"
         # while the tower is in-window (#496 firm-queue twin). Never LIVE.
-        now_ct = dt.datetime.now(CT)
+        now_ct = now.astimezone(CT) if isinstance(now, dt.datetime) else dt.datetime.now(CT)
         for inx_bot in ("kalshi-sp", "kalshi-sized"):
             in_run = any(
                 isinstance(slot, dict)
