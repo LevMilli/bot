@@ -1,4 +1,4 @@
-"""Memecoin scan stays on names the tower already scores. A fee fail is a skip."""
+"""Memecoin scans new feed names again. A fee fail is still a skip."""
 from __future__ import annotations
 
 import importlib.util
@@ -28,7 +28,7 @@ def _load():
 
 
 class MemecoinScan(unittest.TestCase):
-    def test_a_new_name_is_not_added_and_a_facts_pass_that_fails_the_fee_skips(self):
+    def test_new_names_are_scanned_and_a_facts_pass_that_fails_the_fee_skips(self):
         bot = _load()
         known = bot.scored_mints({
             "open": [{"mint": "MINT-HELD"}],
@@ -39,9 +39,14 @@ class MemecoinScan(unittest.TestCase):
             {"MINT-HELD": "profiles", "MINT-NEW": "boosts_top"},
             known,
         )
-        self.assertEqual(kept, {"MINT-HELD": "profiles"})
-        self.assertNotIn("MINT-NEW", kept)
-        self.assertEqual(bot.scan_mints({"MINT-NEW": "boosts_top"}, set()), {})
+        self.assertEqual(kept, {"MINT-HELD": "profiles", "MINT-NEW": "boosts_top"})
+        # A fresh account (nothing held, nothing cooled) still scans the feed.
+        self.assertEqual(bot.scan_mints({"MINT-NEW": "boosts_top", "": "x"}, set()), {"MINT-NEW": "boosts_top"})
+        # Held / cooled names are still refused by scan()'s own gates.
+        import inspect
+        src = inspect.getsource(bot.scan)
+        self.assertIn("mint in open_mints", src)
+        self.assertIn('st["cooldown"].get(mint)', src)
         skip = bot.facts_fee_skip(True, 0.90, lane="accurate", venue_need=0.02)
         self.assertIn("fee-aware", skip)
         self.assertEqual(bot.facts_fee_skip(False, 0.90), "")

@@ -791,13 +791,13 @@ def scored_mints(st) -> set:
     return out
 
 
-def scan_mints(feed, known) -> dict:
-    """Keep the names the tower already scores. Do not add a feed name to find cash."""
-    allowed = {str(mint) for mint in (known or set()) if str(mint or "").strip()}
+def scan_mints(feed, known=None) -> dict:
+    """Every feed name with an address. Held and cooled names stay in the list;
+    scan() skips them by its own open / cooldown gates, so nothing is bought twice."""
     kept = {}
     for mint, tag in (feed or {}).items():
         name = str(mint or "").strip()
-        if name and name in allowed:
+        if name:
             kept[name] = tag
     return kept
 
@@ -831,7 +831,7 @@ def candidates():
 def scan(st, stats):
     F = C.FACTS
     known = scored_mints(st)
-    cands = scan_mints(candidates() if known else {}, known)
+    cands = scan_mints(candidates(), known)
     mints = list(cands)
     pairs_by_mint = {}
     for i in range(0, len(mints), 30):  # DexScreener allows up to 30 addresses per call
