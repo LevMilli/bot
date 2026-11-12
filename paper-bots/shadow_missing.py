@@ -670,9 +670,9 @@ def _fetch(url: str, opener):
 
 
 def _default_opener(url: str):
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=8) as response:
-        return response.read()
+    # Spaced out with a retry on 429 so a busy minute is not "could not be read".
+    import public_http
+    return public_http.read(url, headers=UA, timeout=8)
 
 
 def _decode_body(blob):

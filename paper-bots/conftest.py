@@ -63,6 +63,7 @@ def _no_live_requote(monkeypatch):
     """Paper buys re-read the live order book before filling (strict_fill).
     Tests stay offline; test_strict_fill.py turns it on with a fake book."""
     monkeypatch.setenv("PAPER_STRICT_FILL", "0")
+    monkeypatch.setenv("PUBLIC_HTTP_GAP_SECONDS", "0")
     yield
 
 

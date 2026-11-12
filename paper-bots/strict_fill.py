@@ -88,11 +88,9 @@ def book_quote(data, side):
 
 
 def _fetch(ticker):
-    req = urllib.request.Request(
-        f"{KALSHI}/markets/{ticker}/orderbook", headers={"User-Agent": "paper-bot"},
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read().decode())
+    import public_http
+    body = public_http.read(f"{KALSHI}/markets/{ticker}/orderbook", timeout=10, tries=3)
+    return json.loads(body.decode())
 
 
 def recheck(ticker, side, ask, contracts, *, fee_per=None, edge=None, min_edge=0.0,

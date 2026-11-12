@@ -575,9 +575,10 @@ def _decode(blob) -> dict:
 
 
 def _default_opener(url: str):
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=8) as response:
-        return response.read()
+    if DESK_ROOT not in sys.path:
+        sys.path.insert(0, DESK_ROOT)
+    import public_http
+    return public_http.read(url, headers=UA, timeout=8)
 
 
 def _read_json(path: str):
