@@ -147,7 +147,13 @@ def read_json(path: str):
 
 
 def write_json(path: str, data: dict) -> None:
-    tmp = path + ".tmp"
+    """Atomic save. On Railway the desk links paper_account.json to the volume:
+    follow the link so the save lands there. Replacing the link itself would let
+    the desk's next re-link put the old volume copy back and lose this save."""
+    if os.path.islink(path):
+        path = os.path.realpath(path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2)
         handle.write("\n")

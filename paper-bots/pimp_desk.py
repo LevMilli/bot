@@ -1113,7 +1113,9 @@ def _atomic_write(path: str, text: str) -> None:
     folder = os.path.dirname(path) or "."
     with _FILE_LOCK:
         os.makedirs(folder, exist_ok=True)
-        tmp = path + ".tmp"
+        # Unique per process and thread: two writers sharing one ".tmp" name
+        # raced on Railway (FileNotFoundError on pimp-good.json.tmp).
+        tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
         with open(tmp, "w", encoding="utf-8") as handle:
             handle.write(text)
             handle.flush()
@@ -1202,9 +1204,13 @@ def _point_settlement(local: str, remote: str) -> None:
         os.makedirs(folder, exist_ok=True)
     if _same_settlement_link(local, remote):
         return
-    if os.path.lexists(local):
-        os.remove(local)
-    os.symlink(os.path.abspath(remote), local)
+    # Build the link aside, then swap it in: two binders at once used to race
+    # between remove and symlink (FileExistsError on kalshi_crypto_history.json).
+    tmp = f"{local}.{os.getpid()}.{threading.get_ident()}.link"
+    if os.path.lexists(tmp):
+        os.remove(tmp)
+    os.symlink(os.path.abspath(remote), tmp)
+    os.replace(tmp, local)
 
 
 def _copy_settlement(src: str, dest: str) -> None:
@@ -1214,9 +1220,19 @@ def _copy_settlement(src: str, dest: str) -> None:
     os.replace(tmp, dest)
 
 
+_LINKED: set = set()
+
+
 def _bind_settlement(local: str, remote: str) -> None:
     remote_ready = os.path.isfile(remote) and not os.path.islink(remote)
     local_file = os.path.isfile(local) and not os.path.islink(local)
+    if local_file and remote_ready and local in _LINKED:
+        # This process linked it earlier; a writer replaced the link instead of
+        # saving through it. The volume copy still wins (same as a fresh image),
+        # but say so: that writer's save is being dropped.
+        log.warning("paper settlement %s: link was replaced by a plain file; the volume copy wins. "
+                    "Its writer must save through the link.", local)
+    _LINKED.add(local)
     if remote_ready:
         _point_settlement(local, remote)
         return
@@ -6386,6 +6402,12 @@ def _outside(root: str, bot_id: str, stamp) -> bool:
 def _next_for(bot_id: str, root: str, now: dt.datetime) -> str:
     if bot_paused(root, bot_id):
         return "Paused"
+    best = _next_at(bot_id, root, now)
+    return central_text(best) if best is not None else ""
+
+
+def _next_at(bot_id: str, root: str, now: dt.datetime):
+    """The next scheduled check as a datetime (None if no timer slot)."""
     now_ct = now.astimezone(CT)
     if now.tzinfo is None:
         now = now.replace(tzinfo=dt.timezone.utc)
@@ -6434,7 +6456,7 @@ def _next_for(bot_id: str, root: str, now: dt.datetime) -> str:
                     when = now
         if best is None or when < best:
             best = when
-    return central_text(best) if best is not None else ""
+    return best
 
 
 def _apply_notes(root: str, bot_id: str, row: dict) -> dict:
@@ -6491,6 +6513,9 @@ def _finish_bot(view: dict, spec: dict, root: str) -> dict:
     view["shadow_only"] = bool(spec.get("shadow_only"))
     view["paused"] = bot_paused(root, spec["id"])
     view["next_run"] = _next_for(spec["id"], root, now)
+    if view["next_run"] and view["next_run"] != "Paused":
+        nxt_at = _next_at(spec["id"], root, now)
+        view["next_run_at"] = nxt_at.isoformat(timespec="seconds") if nxt_at is not None else ""
     view["central_check"] = _central_from_text(view.get("last_check") or "")
     run = view.get("last_run") or {}
     if view.get("paused"):
@@ -7026,11 +7051,21 @@ def _desk_row(bots: list, cashes: list, realized_rows: list, last_check: str, ga
         when = str(row.get("when") or "")
         if _day_hit(when, day):
             trades_today += 1
-    nxt = ""
+    # Earliest by time, not by text ("10:41 AM" sorts before "5:15 AM" as text).
+    nxt, nxt_at = "", None
     for bot in bots:
         text = bot.get("next_run") or ""
-        if text and text != "Paused" and (not nxt or text < nxt):
-            nxt = text
+        if not text or text == "Paused":
+            continue
+        at = _parsed(bot.get("next_run_at") or "")
+        if at is not None and at.tzinfo is None:
+            at = at.replace(tzinfo=dt.timezone.utc)
+        if at is None:
+            if not nxt:
+                nxt = text
+            continue
+        if nxt_at is None or at < nxt_at:
+            nxt, nxt_at = text, at
     central = _central_from_text(last_check)
     curve = _equity_curve(bots)
     spikes = _equity_spikes(curve)

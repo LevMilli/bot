@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Crypto ladder: shadow paper tower for Kalshi daily BTC / ETH strikes (KXBTCD, KXETHD).
 
-Prices every "above $X at 5pm ET" strike from Coinbase spot and Deribit's option
+Prices every "above $X" strike (5pm ET daily and the hourly closes) from Coinbase spot and Deribit's option
 smile (``ladder_model.py``), and buys a side only when the edge after the Kalshi
 fee clears the locked BTC floor of 0.05.
 
@@ -13,6 +13,7 @@ Exits: model flip at the bid, settle backstop.
 from __future__ import annotations
 
 import datetime as dt
+from zoneinfo import ZoneInfo
 import os
 import sys
 
@@ -38,6 +39,9 @@ def _close(market: dict):
         return None
 
 
+_ET = ZoneInfo("America/New_York")
+
+
 def coin_quotes(coin: str, markets: list[dict], spot: float, smile_map: dict, now: dt.datetime) -> list[dict]:
     out = []
     for market in markets:
@@ -59,11 +63,13 @@ def coin_quotes(coin: str, markets: list[dict], spot: float, smile_map: dict, no
         p_up = lm.p_above(spot, strike, vol, years)
         p_yes = p_up if kind == "greater" else 1.0 - p_up
         word = "above" if kind == "greater" else "below"
-        why = (f"{coin} spot {spot:,.2f}, {minutes:.0f} min to 5pm ET, Deribit vol {vol:.0%} at "
+        # KXBTCD/KXETHD list hourly events too; name the real close hour.
+        hour = close.astimezone(_ET).strftime("%-I%p").lower()
+        why = (f"{coin} spot {spot:,.2f}, {minutes:.0f} min to the {hour} ET close, Deribit vol {vol:.0%} at "
                f"{strike:,.0f}: P({word}) {p_yes:.3f}")
         for side in engine.sides(market):
             side["fair"] = p_yes if side["side"] == "yes" else 1.0 - p_yes
-            side["label"] = f"{coin} {close.strftime('%b %d')} {word} {strike:,.0f}"
+            side["label"] = f"{coin} {close.astimezone(_ET).strftime('%b %d')} {hour} ET {word} {strike:,.0f}"
             side["why"] = why
             out.append(side)
     return out
