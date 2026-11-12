@@ -132,6 +132,44 @@ class LiveQuoteTests(unittest.TestCase):
         self.assertEqual(status["state"], "low_credits")
 
 
+class OddsFetchTests(unittest.TestCase):
+    """Runs the real download code with a fake network response."""
+
+    def test_fetch_reads_body_and_credits(self):
+        class Resp:
+            headers = {"x-requests-remaining": "487"}
+
+            def read(self):
+                return json.dumps([_odds_event()]).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+        seen = {}
+
+        def fake_open(req, timeout=0):
+            seen["url"] = req.full_url
+            return Resp()
+        with mock.patch.object(odds_feed.urllib.request, "urlopen", fake_open):
+            events, left = odds_feed._odds_fetch("basketball_nba", "k", "pinnacle")
+        self.assertEqual(left, 487.0)
+        self.assertEqual(len(events), 1)
+        self.assertIn("bookmakers=pinnacle", seen["url"])
+        self.assertIn("/sports/basketball_nba/odds", seen["url"])
+
+    def test_http_errors_show_on_the_card(self):
+        import urllib.error
+
+        def bad(sport, key, book):
+            raise urllib.error.HTTPError("u", 401, "Unauthorized", {}, None)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"ODDS_API_KEY": "k"}):
+            _q, status = odds_feed.live_quotes(
+                tmp, NOW, kalshi=lambda s: _kalshi() if s == "KXNBAGAME" else [], odds=bad)
+        self.assertIn("HTTP 401", status["note"])
+
+
 class SharpLagRunTests(unittest.TestCase):
     def test_buy_then_settle_on_the_kalshi_result(self):
         bot = _bot()
