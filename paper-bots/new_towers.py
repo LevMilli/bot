@@ -312,6 +312,44 @@ TOWERS = (
         "color": "#e8a0bf",
     },
     {
+        "id": "gdp-nowcast",
+        "name": "GDP nowcast",
+        "folder": "gdp-nowcast-paper",
+        "keep": ("gdpnow_cache.json",),
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "macro",
+        "every_sec": 3600,
+        "timeout": 120,
+        "max_open": 2,
+        "blurb": (
+            "Shadow Kalshi quarterly GDP markets. Prices each strike from the Atlanta Fed's GDPNow "
+            "estimate and how far GDPNow has usually missed at that distance from the print. Buys "
+            "only in the last 45 days, when edge after fee clears 0.05. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXGDP: \"above X%\" on BEA's first (advance) real GDP print",
+            "Fair = GDPNow minus its usual run-high, with its measured miss by days to the print",
+            "Buys only in the last 45 days before the print; earlier rows are logged for calibration",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked econ 0.05 and ≤ 0.15 trust cap",
+            "Fixed $25 ticket in whole contracts; max 2 open, one per event, one new buy per check",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Econ floor 0.05 cannot be lowered in config",
+            "GDPNow older than 10 days or for a different quarter: no buys",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("gdp", "gdpnow", "gdp nowcast", "atlanta fed"),
+        "office": "GDP nowcast",
+        "color": "#b5d99c",
+    },
+    {
         "id": "calibration-lab",
         "name": "Calibration lab",
         "folder": "calibration-lab-paper",

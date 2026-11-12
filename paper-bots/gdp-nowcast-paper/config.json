@@ -1,0 +1,10 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "venue_min_edge": 0.05,
+  "stake_usd": 25,
+  "starter_cash": 500,
+  "max_open": 2,
+  "note": "Kalshi quarterly GDP first print (KXGDP). Fair = Atlanta Fed GDPNow + its measured historical miss by days to release. Floor 0.05 locked."
+}

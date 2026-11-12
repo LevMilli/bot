@@ -59,6 +59,7 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'favorite-harvest': '#e6c84f',
   'treasury-10y': '#9ad1d4',
   'cpi-nowcast': '#e8a0bf',
+  'gdp-nowcast': '#b5d99c',
   'wall-street': '#c6a15b',
 }
 
