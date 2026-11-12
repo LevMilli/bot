@@ -1,0 +1,10 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "venue_min_edge": 0.05,
+  "stake_usd": 25,
+  "starter_cash": 500,
+  "max_open": 2,
+  "note": "Kalshi KXAAAGASW weekly gas strikes on the AAA national average. Econ floor 0.05 locked. Until 21 days of AAA history, buys only within 1 day of settle."
+}

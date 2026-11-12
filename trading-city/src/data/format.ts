@@ -51,6 +51,7 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'polymarket-mentions': '#3ddc97',
   'esports-match': '#ff4d6d',
   'weather-high': '#5ec8ff',
+  'gas-weekly': '#ffb347',
   'wall-street': '#c6a15b',
 }
 
