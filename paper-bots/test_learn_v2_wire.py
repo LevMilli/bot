@@ -47,11 +47,18 @@ class LearnV2Wire(unittest.TestCase):
         sized = _read("kalshi-sized-paper/bot.py")
         meme = _read("memecoin-paper/bot.py")
         sports = _read("sports-gap-paper/gap_bot.py")
+        inx = _read("desk_inx.py")
         self.assertIn("hour_ct=hour_ct", sp)
-        self.assertIn('side=pick.get("side")', sp)
+        # The S&P scan hands the pick to desk_inx.inx_learn_corr_reason (d49fc85),
+        # which is where side and hour reach learning_skip.
+        self.assertIn("inx_learn_corr_reason(", sp)
+        self.assertIn('side=pick.get("side")', inx)
+        self.assertIn("hour_ct=hour_ct", inx)
         self.assertIn('"side": pos.get("side")', sp)
         self.assertIn("hour_ct=hour_ct", sized)
-        self.assertIn("hour_ct=datetime.now(CT).hour", meme)
+        # #614: the hour reaches learning_skip through mint_learning_skip.
+        self.assertIn("datetime.now(CT).hour", meme)
+        self.assertIn("hour_ct=hour_ct", meme)
         self.assertIn('"side": p.get("side")', sports)
 
     def test_fee_floors_untouched(self):

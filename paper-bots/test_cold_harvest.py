@@ -78,8 +78,8 @@ class ColdHarvest(unittest.TestCase):
         """Same-day stale week_pnl must not lag live commodity green (#486 twin)."""
         with tempfile.TemporaryDirectory() as tmp:
             morning = [{"id": "commodity-15m", "today": 10.16, "open_risk": 0, "history": [], "gate_a": {}}]
-            desk_roi_plan.capture_profit_lock(tmp, bots=morning, label="2026-11-09")
-            desk_roi_plan.capture_cold_harvest(tmp, bots=morning, label="2026-11-09", pct=0.40)
+            desk_roi_plan.capture_profit_lock(tmp, bots=morning, label=desk_roi_plan._chicago_day())
+            desk_roi_plan.capture_cold_harvest(tmp, bots=morning, label=desk_roi_plan._chicago_day(), pct=0.40)
             stale = (desk_roi_plan.cold_harvest_status(tmp).get("latest") or {})
             self.assertAlmostEqual(float(stale.get("week_pnl") or 0), 10.16, places=2)
             live = [{"id": "commodity-15m", "today": 35.02, "open_risk": 0, "history": [], "gate_a": {}}]

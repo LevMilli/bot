@@ -202,6 +202,15 @@ SETTLEMENT_FILES = (
     "wall-street-paper/paper_account.json",
     "pimp-learning.json",
     "pimp-good.json",
+    # Desk controls. Without these on the volume a redeploy clears a staff
+    # pause, puts the committed limits back over the ones staff saved, drops
+    # promoted shadow params, and forgets which day midnight already ran.
+    "pimp-pause.json",
+    "pimp-trading.json",
+    "pimp-bot-params.json",
+    "pimp-midnight.json",
+    "pimp-audit.json",
+    "pimp-runs.json",
 )
 
 # Fixed commands. Nothing from the request is concatenated onto these.
@@ -4946,15 +4955,29 @@ def _archive_tower_file(root: str, folder: str, name: str, day: str) -> str:
     src = _under(root, folder, name)
     if not os.path.isfile(src) and not os.path.islink(src):
         return ""
-    arch_dir = os.path.join(_root(root), "midnight-archive", day)
+    # With a /data volume the archive lives there too, so a redeploy keeps it.
+    durable = _allowed_durable(_root(root))
+    arch_dir = os.path.join(durable or _root(root), "midnight-archive", day)
     os.makedirs(arch_dir, exist_ok=True)
     safe = f"{folder.replace(os.sep, '_')}__{name}"
     dest = os.path.join(arch_dir, safe)
+    if os.path.islink(src):
+        # A settlement link points at the real book on the volume. Moving the
+        # link would archive a pointer to the live file, and the next
+        # keep_closed_settlements pass would bind the fresh account back to the
+        # old one. Copy the real file, clear it, and keep the link so the fresh
+        # write lands on the volume.
+        real = os.path.realpath(src)
+        if os.path.isfile(real):
+            shutil.copy2(real, dest)
+            _unlink(real)
+        else:
+            dest = ""
+        return dest
     # Prefer rename; fall back to copy+unlink for cross-device volumes.
     try:
         os.replace(src, dest)
     except OSError:
-        import shutil
         shutil.copy2(src, dest)
         _unlink(src)
     return dest

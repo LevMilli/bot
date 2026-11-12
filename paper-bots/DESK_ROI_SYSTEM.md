@@ -65,7 +65,7 @@ Bot-local stops that are **tighter** than desk (Kalshi −$50, meme −$50, max 
 | **absent** | No script | *(legacy only)* |
 
 **Locked venue floors (cannot lower):** sports 0.06 · BTC/commodity 0.05 · INX/DEX 0.02 · Coinbase spot 0.05 (excess return after the round trip, not a probability).  
-**Starve defaults:** `starve_min_n=4`, `starve_factor=0.15`. **Meme red lock:** −$8 / stop −12% / max 1 open when red. **INX drawdown halt:** cash ≤ $460.
+**Starve defaults:** `starve_min_n=4`, `starve_factor=0.15`. **Meme red lock:** −$5 / stop −12% / max 1 open when red. **INX drawdown halt:** cash ≤ $460.
 
 **ROI system target:** no present bot may stay below **partial** without an explicit waiver in `roi_system.waivers`. Weak books must at least: (a) hard entry filters, (b) calendar/news blocks where relevant, (c) desk entry_gate, (d) invalidation logging.
 

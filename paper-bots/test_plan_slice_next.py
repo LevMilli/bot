@@ -96,7 +96,7 @@ class PlanSliceNextTests(unittest.TestCase):
         bleed = desk_master.meme_stopbleed_measure(
             {
                 "id": "memecoin",
-                "today": -5,
+                "today": -4,
                 "history": [
                     {"side": "SELL", "exit_reason": "stop -20% <= -18%", "pnl": -3},
                     {"side": "SELL", "exit_reason": "model-flip momentum -9%", "pnl": -1},

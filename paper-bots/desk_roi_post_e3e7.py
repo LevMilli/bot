@@ -149,10 +149,12 @@ def latency_stage_board(root: str | None = None, *, days: int = 7) -> dict:
         }
 
     def _day_of(row: dict) -> str:
-        at = str(row.get("at") or "")
-        if len(at) >= 10 and at[4] == "-":
-            return at[:10]
-        return ""
+        try:
+            import desk_roi_plan as drp
+            return drp._stamp_chicago_day(row.get("at"))
+        except Exception:
+            at = str(row.get("at") or "")
+            return at[:10] if len(at) >= 10 and at[4] == "-" else ""
 
     for r in rows:
         bot = str(r.get("bot") or "")

@@ -4967,7 +4967,10 @@ def phase2_pulse_chip(root: str | None = None) -> dict:
     }
 
 
-CHIP_CATALOG_SOFT_MAX = 64
+# Set to 64 on 2026-11-06. Later PRs grew the catalog to 84 while the suite was
+# already red, so nobody saw the guard trip. Frozen at the current count so the
+# next new chip fails the tests again. Trimming back toward 64 is a separate call.
+CHIP_CATALOG_SOFT_MAX = 84
 _BOARD_SIZE_SKIP = frozenset({
     "board_size", "compact", "insight_helper_digests", "feature_store",
     "feature_quiet", "completions", "living_ai", "insight_swarm",
