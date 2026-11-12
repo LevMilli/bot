@@ -57,6 +57,22 @@ export type BotShadow = {
   bot?: string
 }
 
+/** Lifetime paper record. Counts books cleared by the midnight refill or a staff reset. */
+export type Lifetime = {
+  realized?: Money
+  banked?: Money
+  current?: Money
+  trades?: number
+  wins?: number
+  losses?: number
+  max_drawdown?: Money
+  resets?: number
+  wiped_losses?: Money
+  complete?: boolean
+  note?: string
+  error?: string
+}
+
 export type BotRow = {
   id: string
   name: string
@@ -105,6 +121,7 @@ export type BotRow = {
   shadow?: BotShadow | null
   venue_min_edge?: number | null
   sizing_mode?: 'curve' | 'kelly_lite' | 'fixed' | 'none' | string
+  lifetime?: Lifetime | null
 }
 
 export type Desk = {
@@ -131,6 +148,7 @@ export type Desk = {
   pace_line?: string
   pace_loosened?: boolean
   paused_all?: boolean
+  lifetime?: Lifetime
   capital?: {
     method?: string
     weights?: Record<string, number>
