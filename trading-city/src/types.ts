@@ -71,6 +71,17 @@ export type Lifetime = {
   complete?: boolean
   note?: string
   error?: string
+  /** Same trades with worse fills: 1¢/2¢ per contract (Kalshi) or 0.10%/0.25% each way (coins). */
+  worse?: {
+    kind?: string
+    label_1?: string
+    label_2?: string
+    realized_1?: Money
+    realized_2?: Money
+    measured?: number
+    trades?: number
+    note?: string
+  } | null
 }
 
 export type BotRow = {

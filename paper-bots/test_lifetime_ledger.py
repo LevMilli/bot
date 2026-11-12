@@ -137,6 +137,57 @@ class LifetimeLedgerTests(unittest.TestCase):
         self.assertEqual(resets[0]["source"], "reset")
         self.assertEqual(resets[0]["realized"], -55.0)
 
+class WorseFillTests(unittest.TestCase):
+    def test_contract_buy_held_to_settlement_pays_once(self):
+        hit = desk_lifetime.trade_hit({"contracts": 10, "ask": 0.4, "payout": 10.0}, "contract", 0)
+        self.assertAlmostEqual(hit, 0.10)
+        hit = desk_lifetime.trade_hit({"contracts": 10, "ask": 0.4, "payout": 0.0}, "contract", 1)
+        self.assertAlmostEqual(hit, 0.20)
+
+    def test_contract_sold_early_pays_on_both_fills(self):
+        hit = desk_lifetime.trade_hit({"contracts": 10, "payout": 6.2}, "contract", 0)
+        self.assertAlmostEqual(hit, 0.20)
+
+    def test_contracts_come_from_cost_over_ask_when_missing(self):
+        hit = desk_lifetime.trade_hit({"cost": 4.0, "ask": 0.4}, "contract", 0)
+        self.assertAlmostEqual(hit, 0.10)
+
+    def test_spot_pays_a_percent_each_way(self):
+        self.assertAlmostEqual(desk_lifetime.trade_hit({"cost": 100.0}, "spot", 0), 0.20)
+        self.assertAlmostEqual(desk_lifetime.trade_hit({"cost": 100.0}, "spot", 1), 0.50)
+
+    def test_unmeasurable_trades_are_left_out_not_guessed(self):
+        self.assertIsNone(desk_lifetime.trade_hit({"pnl": 1.0}, "contract", 0))
+        self.assertIsNone(desk_lifetime.trade_hit({"cost": 5.0}, "", 0))
+
+    def test_bot_board_shows_worse_fill_lifetime(self):
+        bot = {"id": "btc15m", "realized": 3.0, "history": [
+            {"when": "2026-11-01T10:00:00", "pnl": 5.0, "contracts": 10, "ask": 0.5, "payout": 10.0},
+            {"when": "2026-11-01T11:00:00", "pnl": -2.0, "contracts": 4, "ask": 0.5, "payout": 0.0},
+            {"when": "2026-11-01T12:00:00", "pnl": 0.0},
+        ]}
+        life = desk_lifetime._bot_lifetime(bot, {})
+        worse = life["worse"]
+        self.assertEqual(worse["kind"], "contract")
+        self.assertEqual(worse["measured"], 2)
+        self.assertEqual(worse["realized_1"], round(3.0 - 0.14, 2))
+        self.assertEqual(worse["realized_2"], round(3.0 - 0.28, 2))
+
+    def test_no_measured_trades_means_no_worse_number(self):
+        life = desk_lifetime._bot_lifetime({"id": "btc15m", "realized": 1.0, "history": [{"pnl": 1.0}]}, {})
+        self.assertIsNone(life["worse"])
+
+    def test_banked_trades_keep_what_the_report_needs(self):
+        with tempfile.TemporaryDirectory() as root:
+            bot = {"id": "btc15m", "realized": -2.0, "history": [
+                {"when": "2026-11-01T10:00:00", "pnl": -2.0, "contracts": 4, "ask": 0.5, "payout": 0.0, "cost": 2.0}]}
+            desk_lifetime.bank_before_reset(root, bot, "2026-11-02")
+            trade = desk_lifetime.load_ledger(root)["bots"]["btc15m"]["trades"][0]
+            self.assertEqual((trade["contracts"], trade["payout"], trade["ask"]), (4.0, 0.0, 0.5))
+            board = desk_lifetime.lifetime_board(root, [{"id": "btc15m", "realized": 0.0, "history": []}])
+            self.assertEqual(board["bots"]["btc15m"]["worse"]["realized_1"], -2.04)
+            self.assertEqual(board["desk"]["worse"]["realized_2"], -2.08)
+
 
 if __name__ == "__main__":
     unittest.main()

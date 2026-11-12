@@ -213,7 +213,14 @@
       "resets": 1,
       "wiped_losses": 94.91,
       "complete": true,
-      "note": "Lifetime counts every closed paper trade, including books cleared by the midnight refill or a staff reset."
+      "note": "Lifetime counts every closed paper trade, including books cleared by the midnight refill or a staff reset.",
+      "worse": {
+        "realized_1": -97.31,
+        "realized_2": -100.91,
+        "measured": 14,
+        "trades": 14,
+        "note": "Same trades, paid 1\u00a2/2\u00a2 more per contract (Kalshi) or 0.10%/0.25% more each way (coins)."
+      }
     }
   },
   "bots": [
@@ -499,7 +506,16 @@
         "max_drawdown": 101.4,
         "resets": 1,
         "wiped_losses": 94.91,
-        "complete": true
+        "complete": true,
+        "worse": {
+          "kind": "spot",
+          "label_1": "0.10% worse",
+          "label_2": "0.25% worse",
+          "realized_1": -97.31,
+          "realized_2": -100.91,
+          "measured": 14,
+          "trades": 14
+        }
       }
     },
     {

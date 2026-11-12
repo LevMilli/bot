@@ -60,13 +60,79 @@ def _closed_rows(bot: dict) -> list:
         pnl = desk._num(row.get("pnl"))
         if pnl is None:
             continue
-        rows.append({
+        out = {
             "when": str(row.get("when") or row.get("closed_at") or "")[:40],
             "pnl": round(float(pnl), 2),
             "name": str(row.get("title") or row.get("ticker") or row.get("what") or row.get("name") or "")[:80],
             "fill_id": str(row.get("fill_id") or "")[:80],
-        })
+        }
+        # Kept so the worse-fill report can redo the trade later.
+        for key in ("contracts", "cost", "payout", "ask"):
+            value = desk._num(row.get(key))
+            if value is not None:
+                out[key] = round(float(value), 4)
+        rows.append(out)
     return rows
+
+
+# Worse-fill stress. Contract venues: cents per contract on each fill.
+# Spot venues: a percent of the trade on each side.
+STRESS_CENTS = (0.01, 0.02)
+STRESS_SPOT = (0.0010, 0.0025)
+SPOT_VENUES = ("solana_dex", "coinbase_spot", "binance_btc_carry")
+
+
+def _venue_kind(bot_id: str) -> str:
+    try:
+        import desk_profit
+
+        venue = desk_profit.BOT_VENUE.get(bot_id) or ""
+    except Exception:  # noqa: BLE001
+        venue = ""
+    if venue in SPOT_VENUES:
+        return "spot"
+    if venue.startswith("kalshi"):
+        return "contract"
+    return ""
+
+
+def trade_hit(trade: dict, kind: str, level: int):
+    """Dollars a worse fill would have cost on one closed trade. None when it cannot be measured."""
+    desk = _desk()
+    cost = desk._num(trade.get("cost"))
+    if kind == "spot":
+        if cost is None or cost <= 0:
+            return None
+        return round(abs(cost) * STRESS_SPOT[level] * 2, 4)
+    if kind != "contract":
+        return None
+    n = desk._num(trade.get("contracts"))
+    ask = desk._num(trade.get("ask"))
+    if (n is None or n <= 0) and cost and ask and ask > 0:
+        n = cost / ask
+    if n is None or n <= 0:
+        return None
+    cents = STRESS_CENTS[level]
+    hit = n * cents  # the buy
+    payout = desk._num(trade.get("payout"))
+    if payout is not None:
+        settled = abs(payout) < 0.005 or abs(payout - n) <= max(0.01, n * 0.01)
+        if not settled:
+            hit += n * cents  # sold before the market settled: the sale fills worse too
+    return round(hit, 4)
+
+
+def stress_rows(trades: list, kind: str) -> dict:
+    hits = [0.0, 0.0]
+    measured = 0
+    for trade in trades:
+        one = trade_hit(trade, kind, 0)
+        if one is None:
+            continue
+        measured += 1
+        hits[0] += one
+        hits[1] += trade_hit(trade, kind, 1) or 0.0
+    return {"measured": measured, "hit_1": round(hits[0], 2), "hit_2": round(hits[1], 2)}
 
 
 def _sort_rows(rows: list) -> list:
@@ -315,7 +381,22 @@ def _bot_lifetime(bot: dict, book: dict) -> dict:
     series = [t["pnl"] for t in banked_trades] + [t["pnl"] for t in _sort_rows(current)]
     wins = sum(1 for v in series if v > 0)
     losses = sum(1 for v in series if v < 0)
+    kind = _venue_kind(str(bot.get("id") or ""))
+    stress = stress_rows(banked_trades + current, kind)
+    if kind and realized is not None and stress["measured"]:
+        worse = {
+            "kind": kind,
+            "label_1": "1¢ worse" if kind == "contract" else "0.10% worse",
+            "label_2": "2¢ worse" if kind == "contract" else "0.25% worse",
+            "realized_1": round(realized - stress["hit_1"], 2),
+            "realized_2": round(realized - stress["hit_2"], 2),
+            "measured": stress["measured"],
+            "trades": len(series),
+        }
+    else:
+        worse = None
     return {
+        "worse": worse,
         "realized": realized,
         "banked": round(banked, 2) if resets else 0.0,
         "current": None if now is None else round(float(now), 2),
@@ -344,6 +425,7 @@ def lifetime_board(root: str | None, bots: list) -> dict:
         desk_rows += [{"when": t.get("when"), "pnl": t["pnl"]} for t in (book.get("trades") or []) if isinstance(t, dict) and desk._num(t.get("pnl")) is not None]
         desk_rows += _closed_rows(bot)
     known = [v["realized"] for v in per.values() if v["realized"] is not None]
+    worse_rows = [v["worse"] for v in per.values() if v.get("worse")]
     series = [float(r["pnl"]) for r in _sort_rows(desk_rows)]
     totals = {
         "realized": round(sum(known), 2) if known else None,
@@ -356,6 +438,16 @@ def lifetime_board(root: str | None, bots: list) -> dict:
         "cash_added": round(sum(v["cash_added"] or 0.0 for v in per.values()), 2)
         if any(v["cash_added"] is not None for v in per.values()) else None,
         "complete": all(v["complete"] for v in per.values()),
+        # Desk total if every measured fill had been worse (1¢ or 0.10%, then 2¢ or 0.25%).
+        "worse": None if not worse_rows or not known else {
+            "realized_1": round(sum(known) - sum(v["realized"] - w["realized_1"] for v, w in
+                                                 ((v, v["worse"]) for v in per.values() if v.get("worse"))), 2),
+            "realized_2": round(sum(known) - sum(v["realized"] - w["realized_2"] for v, w in
+                                                 ((v, v["worse"]) for v in per.values() if v.get("worse"))), 2),
+            "measured": sum(w["measured"] for w in worse_rows),
+            "trades": sum(w["trades"] for w in worse_rows),
+            "note": "Same trades, paid 1¢/2¢ more per contract (Kalshi) or 0.10%/0.25% more each way (coins).",
+        },
         "note": "Lifetime counts every closed paper trade, including books cleared by the midnight refill or a staff reset.",
     }
     return {"bots": per, "desk": totals}
