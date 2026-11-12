@@ -1439,7 +1439,7 @@ class PimpDeskTests(unittest.TestCase):
         }
         clear = (
             "Staff cleared soft drawdown halt: bankroll $444.37 ≤ $460.00 "
-            "(start $500). Paper buys may resume; kill $400 + fee/band/max-1/day stay stone."
+            "(start $500). Paper buys may resume; kill $400 + fee/band/daily-loss stay stone."
         )
         view = {
             "id": "kalshi-sp",

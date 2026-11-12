@@ -1,6 +1,7 @@
 """Kalshi S&P writes a crash intent before cash moves. It does not invent a fill."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -80,10 +81,21 @@ class KalshiSpBuyIntent(unittest.TestCase):
     def test_second_candidate_same_day_is_a_skip(self):
         self.assertEqual(
             paper_sim.second_fill_block(1, 1),
-            "second candidate the same Chicago day is a skip",
+            "already made 1 paper buy(s) today (max 1)",
         )
         self.assertEqual(paper_sim.second_fill_block(0, 1), "")
         self.assertEqual(desk_profit.DEFAULT_VENUE_MIN_EDGE["kalshi_inx"], 0.02)
+
+    def test_up_to_three_buys_a_day_never_the_same_contract(self):
+        cfg = json.load(open(os.path.join(os.path.dirname(paper_sim.__file__), "config.json")))
+        self.assertEqual(cfg["max_trades_per_day"], 3)
+        self.assertEqual(cfg["daily_loss_limit"], 25.0)
+        self.assertEqual(cfg["max_stake_dollars"], 25.0)
+        self.assertEqual(cfg["kill_switch_bankroll"], 400.0)
+        self.assertEqual(paper_sim.second_fill_block(2, 3), "")
+        self.assertTrue(paper_sim.second_fill_block(3, 3))
+        state = {"open": [{"ticker": "KXINXU-A"}], "closed": [{"ticker": "KXINXU-B"}]}
+        self.assertEqual(paper_sim.held_tickers(state), {"KXINXU-A"})
 
 
 if __name__ == "__main__":

@@ -37,7 +37,7 @@ class KalshiSpDecide(unittest.TestCase):
         self.assertEqual(raised, 25.0)
         self.assertTrue(big["play_big"])
         self.assertTrue(any("capped" in note for note in big["notes"]))
-        self.assertEqual(risk_manager.CFG["max_trades_per_day"], 1)
+        self.assertEqual(risk_manager.CFG["max_trades_per_day"], 3)
         self.assertEqual(risk_manager.CFG["daily_loss_limit"], 25.0)
         self.assertEqual(risk_manager.CFG["max_stake_dollars"], 25.0)
 

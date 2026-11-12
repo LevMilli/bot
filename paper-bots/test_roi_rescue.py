@@ -51,7 +51,7 @@ class RoiRescueTests(unittest.TestCase):
         for folder in ("kalshi-sp500-paper", "kalshi-sized-paper"):
             with open(os.path.join(ROOT, folder, "config.json"), encoding="utf-8") as handle:
                 cfg = json.load(handle)
-            self.assertEqual(cfg["max_trades_per_day"], 1)
+            self.assertEqual(cfg["max_trades_per_day"], 3 if folder == "kalshi-sp500-paper" else 1)
             self.assertEqual(cfg["daily_loss_limit"], 25.0)
             self.assertEqual(cfg["drawdown_halt_bankroll"], 460.0)
             self.assertEqual(cfg["kill_switch_bankroll"], 400.0)

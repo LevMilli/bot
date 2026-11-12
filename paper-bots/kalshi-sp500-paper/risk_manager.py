@@ -4,7 +4,7 @@ risk_manager.py - the safety rules. Every trade must pass check_can_trade().
 Rules (Market_Context.md + Strategy.md):
   1. Skip news days: Fed decision, CPI, jobs report, GDP/PCE, election day and
      the day after, market holidays and half days  (dates in calendar.json).
-  2. Max 1 trade per day (daily strategy).
+  2. Max trades per day from config (one per scan, 3 scans).
   3. Daily loss limit $50: once today's realised loss reaches $50, stop for the day.
   4. Kill switch: if the paper bankroll is at or below $400, halt everything
      until a human reviews it.
@@ -174,7 +174,8 @@ if __name__ == "__main__":
     assert stake_contracts(0.85, bankroll=24.80) == 28
     assert stake_contracts(0.85, bankroll=0.50) == 0
     assert check_can_trade(dt.date(2026, 10, 27), 399, 0, 0)[0] is False
-    assert check_can_trade(dt.date(2026, 10, 27), 500, 1, 0)[0] is False
+    assert check_can_trade(dt.date(2026, 10, 27), 500, CFG["max_trades_per_day"], 0)[0] is False
+    assert check_can_trade(dt.date(2026, 10, 27), 500, 1, 0)[0] is True
     assert check_can_trade(dt.date(2026, 10, 27), 500, 0, -50)[0] is False
     assert check_can_trade(dt.date(2026, 10, 27), 500, 0, -25)[0] is False
     assert check_can_trade(dt.date(2026, 10, 27), 500, 0, 0)[0] is True
