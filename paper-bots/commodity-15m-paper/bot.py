@@ -346,6 +346,50 @@ def hyperliquid_oracles(timeout: int = 15) -> dict[str, float]:
     return out
 
 
+# Feed-to-Kalshi offset as a fraction of price. Seeds from Nov 12 2026 opens
+# (gas and copper sit ~0.3-0.4% under the Kalshi index); each fresh window
+# open re-learns it.
+BASIS_SEED = {"KXNATGAS15M": 0.0038, "KXCOPPER15M": 0.0028}
+BASIS_FILE = "index_basis.json"
+BASIS_LEARN_MIN = 3.0   # only learn while the window is at most 3 minutes old
+BASIS_WEIGHT = 0.3
+
+
+def _basis_state() -> dict:
+    try:
+        with open(os.path.join(HERE, BASIS_FILE), encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def anchored_spot(series: str, spot: float, m: dict, now: dt.datetime | None = None) -> float:
+    """Feed price shifted onto Kalshi's index using the learned open offset."""
+    state = _basis_state()
+    row = state.get(series) or {}
+    frac = float(row.get("frac", BASIS_SEED.get(series, 0.0)))
+    now = now or dt.datetime.now(dt.timezone.utc)
+    try:
+        age = 15.0 - (m["close_time"] - now).total_seconds() / 60.0
+        target = float(m["target"])
+    except (KeyError, TypeError, ValueError):
+        return spot * (1.0 + frac)
+    ticker = str(m.get("ticker") or "")
+    if 0.0 <= age <= BASIS_LEARN_MIN and spot > 0 and row.get("last") != ticker:
+        seen = (target - spot) / spot
+        frac = seen if "frac" not in row else (1 - BASIS_WEIGHT) * frac + BASIS_WEIGHT * seen
+        state[series] = {"frac": round(frac, 6), "last": ticker, "n": int(row.get("n") or 0) + 1}
+        try:
+            tmp = os.path.join(HERE, BASIS_FILE + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(state, fh)
+            os.replace(tmp, os.path.join(HERE, BASIS_FILE))
+        except OSError:
+            pass
+    return spot * (1.0 + frac)
+
+
 def spots_by_series() -> dict[str, float]:
     """Spot per Kalshi series from the live index feed. Missing means skip."""
     try:
@@ -1971,7 +2015,7 @@ def main() -> int:
             continue
         try:
             for m in list_open(series, limit=3):
-                windows.append((series, spot, m))
+                windows.append((series, anchored_spot(series, spot, m), m))
         except Exception as exc:
             # Prefer-1: do not collapse Kalshi list-down into empty windows.
             list_errs.append(series)

@@ -56,3 +56,28 @@ def test_history_keeps_15m_rows_when_ladder_floods():
     assert sum(1 for r in kept if r["series"] == "KXGOLD15M") == 50
     assert sum(1 for r in kept if r["series"] == "KXBTCD") == kh.MAX_SNAPSHOTS
     assert kept[0]["series"] == "KXGOLD15M"  # order kept
+
+
+def test_commodity_anchor_learns_open_offset(tmp_path, monkeypatch):
+    import datetime as dt
+    import importlib.util
+    here = os.path.dirname(os.path.abspath(__file__))
+    spec = importlib.util.spec_from_file_location("cmd_anchor_test", os.path.join(here, "commodity-15m-paper", "bot.py"))
+    cmd = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cmd)
+    monkeypatch.setattr(cmd, "HERE", str(tmp_path))
+    now = dt.datetime(2026, 11, 12, 20, 31, tzinfo=dt.timezone.utc)
+    m = {"ticker": "KXNATGAS15M-A", "target": 3.68, "close_time": now + dt.timedelta(minutes=14)}
+    # Seed applies before any learning (window too old to learn from).
+    old = {"ticker": "KXNATGAS15M-0", "target": 3.9, "close_time": now + dt.timedelta(minutes=6)}
+    assert abs(cmd.anchored_spot("KXNATGAS15M", 3.665, old, now) - 3.665 * 1.0038) < 1e-9
+    # A fresh window learns the open offset, so spot lands on the target.
+    assert abs(cmd.anchored_spot("KXNATGAS15M", 3.665, m, now) - 3.68) < 1e-9
+    # Metals have no seed and no shift.
+    assert cmd.anchored_spot("KXGOLD15M", 3884.0, {"ticker": "G", "target": 3884.0, "close_time": now}, now) == 3884.0
+    first = json.load(open(tmp_path / "index_basis.json"))["KXNATGAS15M"]
+    assert first["last"] == "KXNATGAS15M-A" and first["n"] == 1
+    # Old window: no re-learning.
+    late = {"ticker": "KXNATGAS15M-B", "target": 3.9, "close_time": now + dt.timedelta(minutes=5)}
+    cmd.anchored_spot("KXNATGAS15M", 3.665, late, now)
+    assert json.load(open(tmp_path / "index_basis.json"))["KXNATGAS15M"]["n"] == 1
