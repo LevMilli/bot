@@ -4862,6 +4862,61 @@ def _install_shadow_loggers() -> None:
 _install_shadow_loggers()
 
 
+def _install_new_towers() -> None:
+    """Register the new Kalshi shadow towers from new_towers.py. Shadow only, $25 ticket."""
+    global BOTS, AUTO, SETTLEMENT_FILES
+    import new_towers
+
+    bots = list(BOTS)
+    insert_at = next(i for i, row in enumerate(bots) if row["id"] == "wall-street")
+    for offset, spec in enumerate(new_towers.ACTIVE):
+        bots.insert(insert_at + offset, {
+            "id": spec["id"],
+            "name": spec["name"],
+            "folder": spec["folder"],
+            "script": "bot.py",
+            "blurb": spec["blurb"],
+            "state": "paper_account.json",
+            "kind": spec.get("kind") or "macro",
+            "log": "",
+            "empty": "No paper account yet. A check writes paper_account.json.",
+            "shadow_only": True,
+        })
+        ACCOUNT_FILES[spec["id"]] = "paper_account.json"
+        ACTIONS[spec["id"]] = {
+            "run": {"argv": ("bot.py",), "entry": True, "timeout": int(spec.get("timeout") or 60),
+                    "label": "Run one check"},
+        }
+        BOT_PLANS[spec["id"]] = {
+            "buy": list(spec["buy"]),
+            "sell": list(spec["sell"]),
+            "failsafes": list(spec["failsafes"]) + ["No tower_risk_budgets share while shadow_only", "Pause file"],
+            "exit_quality": "partial",
+            "entry_gated": True,
+            "stake": "fixed-25",
+        }
+        ROI_POLICY["waivers"][spec["id"]] = ["fixed_ticket_25", "shadow_only"]
+        ROI_POLICY["target_exit_quality"][spec["id"]] = "partial"
+        TOWER_STARTER_CASH[spec["id"]] = 500.0
+        TOWER_MIN_AMMO[spec["id"]] = 25.0
+    BOTS = tuple(bots)
+    slots = list(AUTO)
+    after = max(i for i, slot in enumerate(slots) if "every_sec" in slot)
+    for offset, spec in enumerate(new_towers.ACTIVE):
+        slots.insert(after + 1 + offset, {
+            "id": spec["id"],
+            "action": "run",
+            "every_sec": int(spec.get("every_sec") or 300),
+        })
+    AUTO = tuple(slots)
+    SETTLEMENT_FILES = tuple(
+        list(SETTLEMENT_FILES) + [f"{spec['folder']}/paper_account.json" for spec in new_towers.ACTIVE]
+    )
+
+
+_install_new_towers()
+
+
 def midnight_path(root: str | None = None) -> str:
     return _under(root, "pimp-midnight.json")
 

@@ -50,6 +50,7 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'champions-league': '#b14dff',
   'polymarket-mentions': '#3ddc97',
   'esports-match': '#ff4d6d',
+  'weather-high': '#5ec8ff',
   'wall-street': '#c6a15b',
 }
 

@@ -33,7 +33,7 @@ def scaffold(root: str, bot_id: str, name: str, floor: float) -> dict:
         "point-spread", "game-total", "player-props",
         "period-winner", "champions-league",
         "polymarket-mentions", "esports-match",
-    ):
+    ) or bot_id in _new_tower_ids():
         return {"ok": False, "reason": "that tower already exists"}
     if floor + 1e-12 < MIN_FLOOR or floor > 0.20:
         return {"ok": False, "reason": f"floor stays between {MIN_FLOOR:.2f} and 0.20"}
@@ -58,6 +58,16 @@ def scaffold(root: str, bot_id: str, name: str, floor: float) -> dict:
         "paper_only": True,
         "checklist": checklist(bot_id, floor),
     }
+
+
+def _new_tower_ids() -> set:
+    if DESK not in sys.path:
+        sys.path.insert(0, DESK)
+    try:
+        import new_towers
+    except ImportError:
+        return set()
+    return set(new_towers.BY_ID)
 
 
 def checklist(bot_id: str, floor: float) -> list[str]:

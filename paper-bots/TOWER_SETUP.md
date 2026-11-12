@@ -33,3 +33,14 @@ Coinbase spot (`coinbase-spot-paper/`) is the worked example.
 ## Coinbase spot base (first use of this process)
 
 US Advanced intro taker is 0.90% (16 Sep 2026 schedule). Round trip with 0.10% slippage each side is 2.00%. The tower only keeps 25% of the last 15-minute move as expected capture, then still requires 0.05 of excess return. A bar has to be about 28% with z ≥ 2. Normal ETH and SOL bars skip. BTC-USD is research-only because `btc15m` already owns that factor. Details: `coinbase-spot-paper/README.md`.
+
+## Kalshi shadow towers (shared engine)
+
+New Kalshi towers that price a fair value against the public book can skip most of the hand wiring:
+
+1. Write `<id>-paper/bot.py` with a `model(cfg, now) -> (quotes, note)` function and call `kalshi_shadow_tower.run_tower(SPEC, HERE, model)`. Each quote is `{ticker, event, side, fair, ask, bid, label, why}`. Set `log_only` on rows the tower should price and log but not buy.
+2. Add one row to `new_towers.py` (id, folder, venue that already exists, floor, buy/sell/failsafe lines, timer). `pimp_desk._install_new_towers` and `desk_profit` read it.
+3. Give the city an office row in `trading-city/src/data/floorMap.ts` and a beam color in `format.ts`, then run `npm run build`.
+4. `python tools/new_tower.py check <id>`.
+
+The engine keeps the rails the same for every tower: fee-aware edge against the locked floor, $25 ticket from a $500 shadow sleeve, one buy per check, one position per event, model-flip and settle exits, the desk entry gate, and `research.jsonl` for the calibration lab. `weather-high` is the first one.
