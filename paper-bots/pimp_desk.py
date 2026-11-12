@@ -4862,6 +4862,12 @@ def _install_shadow_loggers() -> None:
 _install_shadow_loggers()
 
 
+def _new_tower_ids() -> set:
+    import new_towers
+
+    return set(new_towers.BY_ID)
+
+
 def _install_new_towers() -> None:
     """Register the new Kalshi shadow towers from new_towers.py. Shadow only, $25 ticket."""
     global BOTS, AUTO, SETTLEMENT_FILES
@@ -5264,6 +5270,16 @@ def _account_body(bot_id: str) -> dict:
             "live_orders": False,
             "stake_usd": 0.0,
             "buys": 0,
+        }
+    if bot_id in _new_tower_ids():
+        return {
+            "cash": float(TOWER_STARTER_CASH.get(bot_id) or 500.0),
+            "open": [],
+            "closed": [],
+            "checks": 0,
+            "paper_only": True,
+            "shadow_only": True,
+            "live_orders": False,
         }
     if bot_id == "memecoin":
         return {

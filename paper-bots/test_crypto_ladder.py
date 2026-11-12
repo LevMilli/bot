@@ -101,3 +101,19 @@ def test_registry_and_desk_wiring():
     sys.path.insert(0, os.path.join(HERE, "tools"))
     import new_tower
     assert new_tower.check_tower("crypto-ladder")["ok"]
+
+
+def test_bare_desk_account_gets_starter_cash(tmp_path, capsys):
+    import json
+    import kalshi_shadow_tower as engine
+    import pimp_desk
+
+    body = pimp_desk._account_body("crypto-ladder")
+    assert body["cash"] == 500.0 and body["shadow_only"] and not body["live_orders"]
+    (tmp_path / "paper_account.json").write_text(json.dumps({"paper_only": True}))
+    spec = {"id": "t", "name": "T", "floor": 0.05, "max_open": 2}
+    quotes = [{"ticker": "A-1", "event": "A", "side": "yes", "fair": 0.70, "ask": 0.50, "bid": 0.48, "label": "A1"}]
+    engine.run_tower(spec, str(tmp_path), None, now=NOW, fetch=lambda t: {}, quotes=quotes)
+    assert "SIGNAL: BUY A1 YES" in capsys.readouterr().out
+    state = json.loads((tmp_path / "paper_account.json").read_text())
+    assert len(state["open"]) == 1 and state["cash"] < 500
