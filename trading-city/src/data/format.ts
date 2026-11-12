@@ -53,6 +53,7 @@ export const BOT_BEAM_COLORS: Record<string, string> = {
   'weather-high': '#5ec8ff',
   'gas-weekly': '#ffb347',
   'crypto-ladder': '#f7931a',
+  'nasdaq': '#4d8bff',
   'wall-street': '#c6a15b',
 }
 

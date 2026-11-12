@@ -122,6 +122,43 @@ TOWERS = (
         "office": "Crypto ladder",
         "color": "#f7931a",
     },
+    {
+        "id": "nasdaq",
+        "name": "Nasdaq",
+        "folder": "nasdaq-paper",
+        "venue": "kalshi_inx",
+        "floor": 0.02,
+        "kind": "index",
+        "every_sec": 300,
+        "timeout": 60,
+        "max_open": 2,
+        "blurb": (
+            "Shadow Kalshi end-of-day Nasdaq 100 strikes and ranges. Prices each from the live "
+            "index and the Nasdaq volatility index, regular hours only, and buys only when edge "
+            "after fee clears 0.02. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXNASDAQ100U strikes and KXNASDAQ100 ranges for today's 4pm ET close",
+            "Fair = lognormal from live ^NDX and ^VXN over the trading minutes left (252 x 390 a year)",
+            "Window: regular hours, more than 10 minutes before the close; index quote under 5 minutes old",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked index 0.02 and ≤ 0.15 trust cap",
+            "Fixed $25 ticket in whole contracts; max 2 open, one per event, one new buy per check",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Index floor 0.02 cannot be lowered in config",
+            "Market closed, stale or missing index quote → skip; nothing invented",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("nasdaq", "ndx", "nasdaq 100"),
+        "office": "Nasdaq",
+        "color": "#4d8bff",
+    },
 )
 
 BY_ID = {row["id"]: row for row in TOWERS}
