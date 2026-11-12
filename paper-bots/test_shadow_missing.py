@@ -243,8 +243,18 @@ class ShadowMissingTests(unittest.TestCase):
             self.assertFalse(state["live_orders"])
             self.assertEqual(state["series"], ["mention-markets"])
 
+    def test_paused_towers_are_off_the_timer_and_the_city(self):
+        self.assertEqual(
+            {spec["id"] for spec in shadow_missing.ACTIVE}, {"point-spread", "game-total"})
+        bot_ids = {row["id"] for row in pimp_desk.BOTS}
+        slot_ids = {slot["id"] for slot in pimp_desk.AUTO}
+        for tower in shadow_missing.PAUSED:
+            self.assertIn(tower, shadow_missing.BY_ID)  # code kept
+            self.assertNotIn(tower, bot_ids)
+            self.assertNotIn(tower, slot_ids)
+
     def test_desk_rows_are_shadows_without_a_stake(self):
-        for spec in shadow_missing.TOWERS:
+        for spec in shadow_missing.ACTIVE:
             with self.subTest(spec["id"]):
                 bot_id = spec["id"]
                 row = next(item for item in pimp_desk.BOTS if item["id"] == bot_id)
@@ -279,7 +289,7 @@ class ShadowMissingTests(unittest.TestCase):
     def test_snapshot_is_flat(self):
         snap = pimp_desk.snapshot(HERE)
         desk_ids = [bot["id"] for bot in snap["bots"] if not bot.get("shadow_only")]
-        for spec in shadow_missing.TOWERS:
+        for spec in shadow_missing.ACTIVE:
             row = next(bot for bot in snap["bots"] if bot["id"] == spec["id"])
             self.assertTrue(row["shadow_only"])
             self.assertEqual(row["cash"], 0.0)

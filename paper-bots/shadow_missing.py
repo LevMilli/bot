@@ -192,6 +192,13 @@ TOWERS = (
 
 BY_ID = {row["id"]: row for row in TOWERS}
 
+# Paused: no fair-price source, so these can never find an edge. Code stays;
+# remove an id here to bring that tower back on the timer and the city.
+PAUSED = frozenset({
+    "player-props", "period-winner", "champions-league", "polymarket-mentions", "esports-match",
+})
+ACTIVE = tuple(row for row in TOWERS if row["id"] not in PAUSED)
+
 
 def spec_for(tower_id: str) -> dict:
     row = BY_ID.get(tower_id)

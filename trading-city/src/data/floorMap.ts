@@ -74,11 +74,6 @@ export const FLOORS: FloorDef[] = [
       { officeId: 'exclusive-set', botId: 'exclusive-set', label: 'Exclusive set' },
       { officeId: 'point-spread', botId: 'point-spread', label: 'Point spread' },
       { officeId: 'game-total', botId: 'game-total', label: 'Game total' },
-      { officeId: 'player-props', botId: 'player-props', label: 'Player props' },
-      { officeId: 'period-winner', botId: 'period-winner', label: 'Period winner' },
-      { officeId: 'champions-league', botId: 'champions-league', label: 'Champions League' },
-      { officeId: 'polymarket-mentions', botId: 'polymarket-mentions', label: 'Polymarket mentions' },
-      { officeId: 'esports-match', botId: 'esports-match', label: 'Esports match' },
     ],
   },
   {
