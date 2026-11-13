@@ -1318,8 +1318,39 @@ def _fmt_epoch(stamp) -> str:
     return when.strftime("%Y-%m-%d %H:%M UTC")
 
 
+def _ct_date(text) -> dt.date | None:
+    """The Central-time date of a stored timestamp (the desk's day runs midnight to midnight CT).
+
+    Timestamps are stored in UTC (with +00:00, Z, " UTC", or no zone at all on the desk's UTC
+    server), so their first ten characters are the UTC date. Comparing those to the CT date
+    started the day at 6 PM CT and kept the evening's trades in "today" until 6 AM.
+    A bare date (YYYY-MM-DD) is already a day and is used as is.
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    if len(raw) == 10:
+        try:
+            return dt.date.fromisoformat(raw)
+        except ValueError:
+            return None
+    try:
+        when = dt.datetime.fromtimestamp(float(raw), dt.timezone.utc)
+    except (TypeError, ValueError, OverflowError, OSError):
+        try:
+            when = dt.datetime.fromisoformat(raw.replace(" UTC", "+00:00").replace("Z", "+00:00"))
+        except ValueError:
+            try:
+                return dt.date.fromisoformat(raw[:10])
+            except ValueError:
+                return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=dt.timezone.utc)
+    return when.astimezone(CT).date()
+
+
 def _day_hit(text: str, day: dt.date) -> bool:
-    return str(text or "")[:10] == day.isoformat()
+    return _ct_date(text) == day
 
 
 def config_path(root: str | None = None) -> str:
@@ -6932,12 +6963,8 @@ def _week_pnl(bots: list, day: dt.date) -> tuple:
         pnl = _num(row.get("pnl"))
         if pnl is None or row.get("state") != "settled":
             continue
-        when = str(row.get("when") or "")[:10]
-        try:
-            stamp = dt.date.fromisoformat(when)
-        except ValueError:
-            continue
-        if not (start <= stamp <= end):
+        stamp = _ct_date(row.get("when"))
+        if stamp is None or not (start <= stamp <= end):
             continue
         total += pnl
         if pnl > 0:
