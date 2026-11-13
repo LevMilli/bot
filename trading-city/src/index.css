@@ -805,8 +805,12 @@ a {
   box-shadow: 0 0 24px rgba(249, 200, 14, 0.32);
   cursor: default;
   min-width: 16rem;
-  max-width: 22rem;
+  max-width: 36rem;
   pointer-events: none;
+}
+
+.holo.html-holo.vault-holo .vault-lines {
+  width: max-content;
 }
 
 .vault-holo strong {
@@ -1791,4 +1795,46 @@ a {
 
 .tower-tab-offcity {
   color: #7d8599;
+}
+
+/* Vault: one row per book so desk, practice and the combined total sit side by side. */
+.vault-lines {
+  display: grid;
+  gap: 0.12rem;
+  margin: 0.2rem 0 0.15rem;
+}
+
+.vault-line {
+  display: grid;
+  grid-template-columns: 12.4rem repeat(3, 6.4rem);
+  gap: 0.5rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.vault-line > span:not(:first-child) {
+  text-align: right;
+}
+
+.vault-line em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+.vault-line-head {
+  color: var(--muted);
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.vault-line-shadow {
+  opacity: 0.82;
+}
+
+.vault-line-total {
+  border-top: 1px solid rgba(249, 200, 14, 0.35);
+  padding-top: 0.12rem;
+  font-weight: 700;
 }

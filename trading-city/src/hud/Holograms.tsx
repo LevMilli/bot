@@ -82,9 +82,20 @@ export function TowerHologram({
 }
 
 /** Desk vault card — world-anchored above the pad, always screen-facing. */
+/** Add two money figures; null only when both are missing. */
+function sum(a: unknown, b: unknown): number | null {
+  const x = a == null || a === '' ? null : Number(a)
+  const y = b == null || b === '' ? null : Number(b)
+  if ((x == null || !Number.isFinite(x)) && (y == null || !Number.isFinite(y))) return null
+  return Math.round(((Number.isFinite(x) ? x! : 0) + (Number.isFinite(y) ? y! : 0)) * 100) / 100
+}
+
 export function VaultHologram({ desk, workers }: { desk?: Desk; workers: number }) {
-  const todayTone = pnlTone(desk?.today)
-  const realizedTone = pnlTone(desk?.realized)
+  const deskCash = desk?.bankroll?.cash ?? desk?.cash
+  const deskRealized = desk?.bankroll?.realized ?? desk?.realized
+  const deskToday = desk?.bankroll?.today ?? desk?.today
+  const todayTone = pnlTone(deskToday)
+  const realizedTone = pnlTone(deskRealized)
   const skips = desk?.more?.skip_leaderboard?.top?.slice(0, 3) || []
   const budgets = desk?.more?.tower_budgets || {}
   const budgetEntries = Object.entries(budgets)
@@ -111,26 +122,49 @@ export function VaultHologram({ desk, workers }: { desk?: Desk; workers: number 
     >
       <div className="holo html-holo vault-holo">
         <strong>THE VAULT · click to enter</strong>
-        <span className="holo-pnl">
-          <span className={`tone-${realizedTone}`}>realized {money(desk?.realized, true)}</span>
-          {' · '}
-          <span className={`tone-${todayTone}`}>today {money(desk?.today, true)}</span>
-        </span>
-        <span>
-          cash {money(desk?.cash)}
-          {deskTowers != null
-            ? ` · ${deskTowers} tower${deskTowers === 1 ? '' : 's'} in this cash`
-            : ''}
-          {' · '}
-          {workers} on shift
-        </span>
-        {shadowTowers != null && shadowTowers > 0 && (
-          <span className="vault-books">
-            {shadowTowers} shadow tower{shadowTowers === 1 ? '' : 's'} on their own books
-            {roll?.shadow_today != null ? ` · today ${money(roll.shadow_today, true)}` : ''}
-            {' · not added to this cash'}
+        <span className="vault-lines" role="table" aria-label="Paper money by book">
+          <span className="vault-line vault-line-head" role="row">
+            <span role="columnheader">book</span>
+            <span role="columnheader">cash</span>
+            <span role="columnheader">realized</span>
+            <span role="columnheader">today</span>
           </span>
-        )}
+          <span className="vault-line" role="row">
+            <span role="cell">
+              Desk{deskTowers != null ? ` (${deskTowers})` : ''} <em>counts</em>
+            </span>
+            <span role="cell">{money(deskCash)}</span>
+            <span role="cell" className={`tone-${realizedTone}`}>{money(deskRealized, true)}</span>
+            <span role="cell" className={`tone-${todayTone}`}>{money(deskToday, true)}</span>
+          </span>
+          {shadowTowers != null && shadowTowers > 0 && (
+            <span className="vault-line vault-line-shadow" role="row">
+              <span role="cell">
+                Practice ({shadowTowers}) <em>not counted</em>
+              </span>
+              <span role="cell">{money(roll?.shadow_cash)}</span>
+              <span role="cell" className={`tone-${pnlTone(roll?.shadow_realized)}`}>
+                {money(roll?.shadow_realized, true)}
+              </span>
+              <span role="cell" className={`tone-${pnlTone(roll?.shadow_today)}`}>
+                {money(roll?.shadow_today, true)}
+              </span>
+            </span>
+          )}
+          {shadowTowers != null && shadowTowers > 0 && (
+            <span className="vault-line vault-line-total" role="row">
+              <span role="cell">All paper</span>
+              <span role="cell">{money(sum(deskCash, roll?.shadow_cash))}</span>
+              <span role="cell" className={`tone-${pnlTone(sum(deskRealized, roll?.shadow_realized))}`}>
+                {money(sum(deskRealized, roll?.shadow_realized), true)}
+              </span>
+              <span role="cell" className={`tone-${pnlTone(sum(deskToday, roll?.shadow_today))}`}>
+                {money(sum(deskToday, roll?.shadow_today), true)}
+              </span>
+            </span>
+          )}
+        </span>
+        <span>{workers} on shift</span>
         {missing.length > 0 && (
           <span className="vault-books">missing book: {missing.join(', ')}</span>
         )}
