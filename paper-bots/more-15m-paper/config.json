@@ -1,0 +1,10 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "venue_min_edge": 0.05,
+  "stake_usd": 25,
+  "starter_cash": 500,
+  "max_open": 4,
+  "note": "Kalshi 15-minute up/down: SOL, XRP, DOGE, BNB, HYPE, S&P 500, EUR/USD, USD/JPY. Floor 0.05 locked (BTC 15m). Fair from live spot vs the window open and the last hour's 1-minute moves."
+}

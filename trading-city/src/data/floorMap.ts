@@ -45,6 +45,7 @@ export const FLOORS: FloorDef[] = [
       { officeId: 'gas-weekly', botId: 'gas-weekly', label: 'Gas weekly' },
       { officeId: 'crypto-ladder', botId: 'crypto-ladder', label: 'Crypto ladder' },
       { officeId: 'nasdaq', botId: 'nasdaq', label: 'Nasdaq' },
+      { officeId: 'more-15m', botId: 'more-15m', label: 'More 15m' },
       { officeId: 'poly-sports-lean', botId: 'poly-sports-lean', label: 'Poly sports lean' },
       { officeId: 'soccer-tennis-lean', botId: 'soccer-tennis-lean', label: 'Soccer & tennis lean' },
       { officeId: 'qqq-momentum', botId: 'qqq-momentum', label: 'QQQ momentum' },

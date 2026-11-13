@@ -165,6 +165,48 @@ TOWERS = (
         "color": "#4d8bff",
     },
     {
+        "id": "more-15m",
+        "name": "More 15m",
+        "folder": "more-15m-paper",
+        "venue": "kalshi_btc15m",
+        "floor": 0.05,
+        "kind": "crypto",
+        "every_sec": 60,
+        "timeout": 50,
+        "max_open": 4,
+        "blurb": (
+            "Shadow Kalshi 15-minute up/down windows no other tower reads: Solana, XRP, Dogecoin, "
+            "BNB, Hyperliquid, the S&P 500, EUR/USD and USD/JPY. Prices each window from the live "
+            "price against the window open, and buys only when edge after fee clears 0.05. "
+            "Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXSOL15M / KXXRP15M / KXDOGE15M / KXBNB15M / KXHYPE15M (CF Benchmarks 60-second average), "
+            "KXINX15M (S&P 500), KXEURUSD15M / KXUSDJPY15M (Pyth)",
+            "Fair = N(ln(live / open) / (1-minute move x sqrt(minutes left))); 1-minute move from the last hour x1.25",
+            "Live price: Coinbase mid for coins (Kraken backup); Hyperliquid oracle for the S&P 500 and FX, "
+            "shifted by the offset learned at each window open (needs 3 opens before any buy)",
+            "Window: 3 to 14 minutes left",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked BTC 0.05 and ≤ 0.20 trust cap",
+            "Fixed $25 ticket in whole contracts; max 4 open, one per window, one new buy per check",
+            "Extra slots: up to 2 more past max open, only when edge ≥ 2× the floor (still under the trust cap); tagged extra",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "BTC floor 0.05 cannot be lowered in config",
+            "Missing live price, short candle history or no open price → that market skips; nothing invented",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("more 15m", "alt 15m", "sol 15m", "fx 15m"),
+        "office": "More 15m",
+        "color": "#14f195",
+    },
+    {
         "id": "poly-sports-lean",
         "name": "Poly sports lean",
         "folder": "poly-sports-lean-paper",
