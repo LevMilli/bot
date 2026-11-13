@@ -33,6 +33,8 @@ log = logging.getLogger("desk_service")
 
 INTERVAL_S = 60
 WARMUP_S = 20
+OPEN_LOG_EVERY_S = 300   # "desk open" line for the evening report's daily high
+_last_open_log = [0.0]
 
 
 def timer_mode() -> str:
@@ -53,6 +55,7 @@ def one_pass(desk) -> dict:
     if health.get("alert"):
         out["audit"].append(str(health["alert"]))
     desk.run_scheduled()
+    log_desk_open(desk)
     watchdog = getattr(desk, "tower_watchdog", None)
     if callable(watchdog):
         try:
@@ -68,6 +71,27 @@ def one_pass(desk) -> dict:
     if recap:
         out["recap"].append(str(recap))
     return out
+
+
+def log_desk_open(desk, now: float | None = None) -> str:
+    """Every 5 minutes, log how many vault bets are open (out of the max-open limit).
+
+    The evening report reads these lines to show the day's highest open count.
+    Never stops a pass.
+    """
+    fn = getattr(desk, "desk_open_summary", None)
+    now = time.time() if now is None else now
+    if not callable(fn) or now - _last_open_log[0] < OPEN_LOG_EVERY_S:
+        return ""
+    _last_open_log[0] = now
+    try:
+        s = fn()
+        line = "desk open " + json.dumps(s, sort_keys=True)
+    except Exception:  # noqa: BLE001
+        log.exception("Desk open count failed")
+        return ""
+    log.info(line)
+    return line
 
 
 def _webhook(url: str, text: str, limit: int) -> bool:
