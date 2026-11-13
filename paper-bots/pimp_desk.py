@@ -4170,6 +4170,9 @@ def run_scheduled(now: dt.datetime | None = None, root: str | None = None) -> li
             "summary": result.get("summary") or "",
         }
         head = _clean(row["summary"] or row["error"], 180)
+        tail = traceback_tail(row["summary"])
+        if tail and not row["ok"]:
+            head = _clean(tail, 300)
         if result.get("error") == _BUSY:
             log.info("paper timer %s %s still running", bot_id, action)
         elif row["blocked"]:
@@ -5945,11 +5948,32 @@ def _btc_card(text: str) -> str:
     return ""
 
 
+def traceback_tail(text: str) -> str:
+    """The real error at the end of a Python traceback ("ValueError: ..."), or ""."""
+    raw = str(text or "")
+    if "Traceback (most recent call last)" not in raw:
+        return ""
+    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    for line in reversed(lines):
+        if line.startswith(("File ", "^", "~", "raise ", "Traceback")):
+            continue
+        name = line.split(":", 1)[0]
+        if name.replace(".", "").replace("_", "").isalnum() and (name.endswith(("Error", "Exception", "Exit", "Timeout"))
+                                                                  or "." in name):
+            return line
+    return lines[-1] if lines else ""
+
+
 def card_copy(text: str) -> str:
     """One or two plain sentences for a bot card. No run id and no ISO timestamp."""
     raw = str(text or "")
     if not raw.strip():
         return ""
+    tail = traceback_tail(raw)
+    if tail:
+        kind = tail.split(":", 1)[0].rsplit(".", 1)[-1]
+        return _clean(f"The last check hit an error ({kind}) and stopped without trading. "
+                      "The next check tries again.", 220)
     for line in raw.splitlines():
         stripped = line.strip()
         if stripped.startswith("CARD: "):
