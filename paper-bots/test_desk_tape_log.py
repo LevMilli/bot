@@ -81,3 +81,32 @@ def test_commodity_anchor_learns_open_offset(tmp_path, monkeypatch):
     late = {"ticker": "KXNATGAS15M-B", "target": 3.9, "close_time": now + dt.timedelta(minutes=5)}
     cmd.anchored_spot("KXNATGAS15M", 3.665, late, now)
     assert json.load(open(tmp_path / "index_basis.json"))["KXNATGAS15M"]["n"] == 1
+
+def test_blocked_rules_and_trade_lines(tmp_path):
+    root = str(tmp_path)
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    snaps = [
+        {"at": now, "ticker": "KXGOLD15M-W", "side": "NO", "yes_ask": 0.7, "no_ask": 0.30, "minutes_left": 8,
+         "model_p": 0.6, "note": "min left 8.0; spread 0.090 > 0.06"},
+        {"at": now, "ticker": "KXGOLD15M-W", "side": "NO", "yes_ask": 0.8, "no_ask": 0.20, "minutes_left": 5,
+         "note": "min left 5.0; spread 0.110 > 0.06"},
+        {"at": now, "ticker": "KXGOLD15M-W", "side": "YES", "yes_ask": 0.9, "no_ask": 0.1, "note": "depth 0 < 2"},
+    ]
+    _w(os.path.join(root, "kalshi_crypto_history.json"), {
+        "snapshots": snaps,
+        "settles": [{"at": now, "ticker": "KXGOLD15M-W", "series": "KXGOLD15M", "result": "no"}]})
+    t.reset_seen()
+    rec = json.loads(t.window_lines(root)[0].split(" ", 2)[2])
+    top = rec["blocked"][0]
+    assert top["rule"] == "spread # > #" and top["n"] == 2 and top["won_side"] == 2
+    assert top["best_ask"] == 0.2 and top["missed_25"] == 100.0
+    assert rec["blocked"][1]["won_side"] == 0
+    iso = time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())
+    _w(os.path.join(root, "more-15m-paper", "paper_account.json"), {
+        "cash": 480, "open": [],
+        "closed": [{"ticker": "KXDOGE15M-A", "side": "no", "ask": 0.18, "cost": 24.84, "pnl": 113.16,
+                    "closed": iso, "exit": "settled"}]})
+    lines = t.trade_lines(root)
+    assert len(lines) == 1 and json.loads(lines[0][len("trade closed "):])["bot"] == "more-15m"
+    assert t.trade_lines(root) == []
+    assert "tally more-15m: cash $480.00" in t.tally_line(root, "more-15m")

@@ -3781,6 +3781,8 @@ def _log_tape(root: str | None, bot_id: str) -> None:
         log.info("%s", desk_tape_log.tally_line(base, bot_id))
         for line in desk_tape_log.window_lines(base):
             log.info("%s", line)
+        for line in desk_tape_log.trade_lines(base):
+            log.info("%s", line)
     except Exception as exc:  # noqa: BLE001 - logging must never stop the timer
         log.info("tape log skipped for %s: %s", bot_id, type(exc).__name__)
 
