@@ -7,13 +7,15 @@ This is a practice bot. It **never places real orders**. It has no API key, no w
 2. Finds the matching Kalshi game-winner market. The series are `KXNFLGAME`, `KXNCAAFGAME`, `KXNBAGAME`, `KXWNBAGAME`, `KXMLBGAME` and `KXNHLGAME`. A market only counts as a match if it has the same date and both teams.
 3. Gets a "fair" win probability:
    - **NFL, NCAAF, NBA, WNBA, MLB:** ESPN's live win probability, taken from `summary?event=ID` → `winprobability`.
-   - **NHL:** ESPN doesn't publish one, so the bot uses its own simple model. It treats goals as random (Poisson), uses the time left and the score, and gets team strength from the pre-game betting line. Because this model is cruder, its saved gap is 2 points higher than the other sports (6 points when the saved bar is 4).
+   - **NHL:** ESPN doesn't publish one, so the bot uses its own simple model. It treats goals as random (Poisson), uses the time left and the score, and gets team strength from the pre-game betting line. Because this model is cruder, its saved gap is 2 points higher than the other sports (8 points at the locked 6-point bar).
 4. Works out the **gap**: fair probability − Kalshi YES ask − Kalshi taker fee. The fee is `ceil(0.07 × P × (1−P) × 100) / 100` per contract.
 5. Makes a **paper buy** only if all of these are true:
-   - the gap is **4 points or more** after the fee (6 for the NHL model). The old bar was 8 points (10 for NHL).
+   - the gap is **6 points or more** after the fee (8 for the NHL model). 6 points is the locked sports floor (0.06); it can be raised, never lowered.
    - the desk pace line (6–12 trades/hour) is **display only** — it does **not** waive the edge bar or the close-game filter (`edge_for_hour` keeps the saved min_edge).
    - the bid/ask spread is 5¢ or less
-   - the price is between 5¢ and 95¢
+   - the price is between 5¢ and **92¢** (the 92¢ cap)
+   - at most **4 buys per check**
+   - games are watched from **3 hours** before the start (pre-game books)
    - fewer than 12 positions are open (the old cap was 3 in this script and 4 on the desk), and the bot doesn't already hold this game
    - there is enough paper cash
    - the paper learning log is not skipping that sport and probability bucket

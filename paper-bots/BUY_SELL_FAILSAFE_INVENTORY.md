@@ -61,12 +61,16 @@ Buy when all pass:
 - Not already holding `game_key`
 - Home fair **outside** close-game band **[0.40, 0.60]**
 - Spread `ask−bid` ≤ **0.05**
-- Ask in **[0.05, 0.95]**
+- Ask in **[0.05, 0.92]** (`PRICE_BOUNDS`, 92¢ cap)
+- Up to **4** buys per check (`MAX_BUYS_PER_CHECK`)
+- Pre-game books watched from **3 hours** (180 min, `PREGAME_WINDOW_MIN`) before start
 - Open positions &lt; desk `max_open_positions` (fallback 12)
 - Enough paper cash; contracts via desk `paper_stake_dollars` / `contracts_for_stake` (fallback: &lt;80% → $20, else scale $20–$100)
 - Bot-local daily loss stop: closed PnL today ≤ −desk `daily_loss_stop` ($150) → entries off
 - Desk `learning_skip` for league + fair bucket
 - Red-day caps: `min(today, realized)` &lt; 0 → max 2 buys + speed off; ≤ −$10 → max 1
+
+Re-synced to the code on Nov 13, 2026 (plan step 458). `test_plan_docs.py` pins the 92¢ cap, 4 buys and 3-hour pre-game window to `gap_bot.py`.
 
 ### Exit / SELL
 1. **Hard-stop shadow:** bid ≤ entry − **12¢** → log would-have; live sell staff-gated (`SPORTS_HARD_STOP_LIVE=False`)
@@ -143,16 +147,20 @@ Nearest open `KXBTC15M`. Side = YES if spot &gt; target else NO. `p = Φ(cushion
 Hard skips if any fail:
 | Check | Threshold |
 |---|---|
-| Minutes left | ≥ **10** |
-| Edge buffer | **0.05** over ask+fee |
-| Cushion | ≥ **$40** |
-| z = cushion/σ | ≥ **0.5** (0.6 if Coinbase-only spot) |
-| Ask band | **[0.65, 0.85]** |
-| Spread | ≤ **0.03** |
-| Depth at/below ask | ≥ **5** contracts |
+| Minutes left | ≥ **10** (`MIN_MINUTES_LEFT`) |
+| Model chance | ≥ **0.80** accurate lane / **0.72** speed lane with +**0.02** extra edge |
+| Edge buffer | **0.05** over ask+fee (locked `kalshi_btc15m` floor) |
+| Cushion | ≥ **$35** BTC (`MIN_CUSHION_USD`), ≥ **$1.50** ETH (`MIN_CUSHION_ETH`) |
+| z = cushion/σ | ≥ **0.60** (0.55 speed lane; **0.75** if Coinbase-only spot) |
+| Ask band | **[0.70, 0.92]** (`ASK_MIN`, `ASK_MAX`) |
+| Spread | ≤ **0.04** (`MAX_SPREAD`) |
+| Depth at/below ask | ≥ **3** contracts (`MIN_DEPTH`) |
+| Buys per check | up to **3** (`MAX_BUYS_PER_CHECK`) |
 | Last 5×1m candles | must **not** move toward target; unknown → skip |
 | USD High news | ForexFactory ±**30** min of block → skip; calendar **fail-closed** if unavailable |
 | Paper ask | **[0.05, 0.95]**; one open per ticker; open count &lt; **12** (hardcoded); cash; desk stake; learning_skip("BTC", …) |
+
+Re-synced to the code on Nov 13, 2026 (plan step 482). `test_plan_docs.py` pins these numbers to `btc15m_signal.py`.
 
 σ = max(DVOL-implied, realized); if DVOL fails → realized × **1.2**.
 

@@ -992,6 +992,113 @@ TOWERS = (
         "office": "Meme price check",
         "color": "#d4a5ff",
     },
+    {
+        "id": "result-splits",
+        "name": "Result splits",
+        "folder": "result-splits-paper",
+        "keep": ("splits.json",),
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "research",
+        "research": True,
+        "every_sec": 21600,
+        "timeout": 180,
+        "max_open": 0,
+        "blurb": (
+            "Research building. Every 6 hours it splits each tower's closed paper trades by market, "
+            "by why the trade closed, by the hour it was bought and by side, so you can see which "
+            "leagues, coins, metals or scan times earn their keep. Losses stay in. Buys nothing."
+        ),
+        "buy": [
+            "Never buys. Zero cash, zero stake, no tower risk share",
+            "P&L per trade is after fees and after the desk's 1 cent a contract fill tax",
+            "Each group: trades, wins, losses, total, average, win rate, average win vs average loss, 95% low end",
+        ],
+        "sell": [
+            "Nothing to sell",
+            "Flags 'clearly losing' (50+ trades, even the high end below $0) and 'wins often, loses money'",
+            "Writes splits.json. Suggests only: it never pauses a market or a tower",
+        ],
+        "failsafes": [
+            "No network reads; it only reads the desk's own state files",
+            "Trades with no stored result are counted and listed, never dropped",
+            "Read-only on other bots' books",
+        ],
+        "aliases": ("result splits", "splits", "breakdown"),
+        "office": "Result splits",
+        "color": "#a3d977",
+    },
+    {
+        "id": "risk-room",
+        "name": "Risk room",
+        "folder": "risk-room-paper",
+        "keep": ("risk_room.json",),
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "research",
+        "research": True,
+        "every_sec": 900,
+        "timeout": 120,
+        "max_open": 0,
+        "blurb": (
+            "Support building. Every 15 minutes it lists the whole city's open paper bets by what "
+            "they ride on (Bitcoin, the S&P, one game...) and flags when several towers hold the "
+            "same bet. Display only. Buys nothing."
+        ),
+        "buy": [
+            "Never buys. Zero cash, zero stake, no tower risk share",
+            "Groups every open position by underlying: coin, index, metal, weather city or single game",
+            "Shows open cost per group, its share of all open cost, and which towers hold it on which side",
+        ],
+        "sell": [
+            "Nothing to sell",
+            "Flags 'stacked' (2+ towers), 'same side, same game' and 'heavy' (40%+ of open cost)",
+            "Writes risk_room.json. Display only: it never blocks, sizes or sells a trade",
+        ],
+        "failsafes": [
+            "No network reads; it only reads the desk's own state files",
+            "Unknown tickers keep their own series name, so nothing is dropped",
+            "Read-only on other bots' books",
+        ],
+        "aliases": ("risk room", "exposure"),
+        "office": "Risk room",
+        "color": "#ff7a7a",
+    },
+    {
+        "id": "freshness-inspector",
+        "name": "Freshness inspector",
+        "folder": "freshness-inspector-paper",
+        "keep": ("freshness.json",),
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "research",
+        "research": True,
+        "every_sec": 900,
+        "timeout": 120,
+        "max_open": 0,
+        "blurb": (
+            "Support building. Every 15 minutes it checks that every building ran on time, shows "
+            "each one's last and next run, and measures how old the price was behind each paper "
+            "buy. Display only. Buys nothing."
+        ),
+        "buy": [
+            "Never buys. Zero cash, zero stake, no tower risk share",
+            "Late = a timer building whose last run is older than 3 gaps (at least gap + 30 minutes)",
+            "Price age = buy time minus the time the price was read; over 60 seconds is flagged stale",
+        ],
+        "sell": [
+            "Nothing to sell",
+            "Writes freshness.json: every building's status, last run, next run and price ages",
+        ],
+        "failsafes": [
+            "No network reads; it only reads the desk's own run and state files",
+            "Display only: it never blocks a buy or restarts a tower",
+            "Trades that did not store a separate price time are counted, not guessed",
+        ],
+        "aliases": ("freshness", "freshness inspector", "stale data"),
+        "office": "Freshness inspector",
+        "color": "#ffd166",
+    },
 )
 
 BY_ID = {row["id"]: row for row in TOWERS}
