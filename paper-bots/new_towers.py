@@ -204,6 +204,7 @@ TOWERS = (
             "Incubation n≥50 settles before any desk share. No auto-promote",
         ],
         "aliases": ("more 15m", "alt 15m", "sol 15m", "fx 15m"),
+        "keep": ("index_basis.json",),  # learned open offsets survive redeploys
         "office": "More 15m",
         "color": "#14f195",
     },
