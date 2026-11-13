@@ -1,0 +1,10 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "venue_min_edge": 0.06,
+  "stake_usd": 25,
+  "starter_cash": 500,
+  "max_open": 4,
+  "note": "Sports gap twin: NBA, NFL, NHL winners. Buys only when ESPN's chance and Polymarket's live mid both clear the Kalshi ask plus fee plus 0.06. Sports floor 0.06 locked."
+}

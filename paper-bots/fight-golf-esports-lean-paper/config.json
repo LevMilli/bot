@@ -1,0 +1,10 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "venue_min_edge": 0.06,
+  "stake_usd": 25,
+  "starter_cash": 500,
+  "max_open": 6,
+  "note": "Kalshi UFC fights, esports matches (LoL, CS2, Valorant, Dota 2) and PGA Tour winners. Fair = Polymarket mid for the same fight, match or golfer. Sports floor 0.06 locked."
+}

@@ -734,6 +734,264 @@ TOWERS = (
         "office": "Model lab",
         "color": "#f5a3c7",
     },
+    {
+        "id": "ncaab-gap",
+        "name": "NCAAB gap",
+        "folder": "ncaab-gap-paper",
+        "venue": "kalshi_sports",
+        "floor": 0.06,
+        "kind": "sports",
+        "every_sec": 180,
+        "timeout": 120,
+        "max_open": 6,
+        "blurb": (
+            "Shadow Kalshi men's college basketball game winners. Prices each side from ESPN's "
+            "sportsbook line and live win chance, and buys only when edge after fee clears the "
+            "sports floor 0.06. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXNCAAMBGAME game winners matched to ESPN's Division I scoreboard by date and team name",
+            "Fair = ESPN live win chance during the game, the sportsbook moneyline (no-vig) before it",
+            "Window: live games, or tip-off within 3 hours; Kalshi spread no wider than 5¢",
+            "Sides with fair under 0.72 are logged only; 0.72 to 0.80 need edge ≥ 0.08",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked sports 0.06 and ≤ 0.20 trust cap",
+            "Fixed $25 ticket in whole contracts; max 6 open, one per game, one new buy per check",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Sports floor 0.06 cannot be lowered in config",
+            "No ESPN line, no match or an ambiguous team name → that game skips",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("ncaab gap", "college basketball", "ncaab"),
+        "office": "NCAAB gap",
+        "color": "#f2a65a",
+    },
+    {
+        "id": "sports-gap-poly",
+        "name": "Sports gap + Polymarket",
+        "folder": "sports-gap-poly-paper",
+        "venue": "kalshi_sports",
+        "floor": 0.06,
+        "kind": "sports",
+        "every_sec": 180,
+        "timeout": 120,
+        "max_open": 4,
+        "blurb": (
+            "Shadow twin of the sports gap idea with a second opinion. NBA, NFL and NHL sides "
+            "are priced from ESPN and from Polymarket, and bought only when both agree and the "
+            "lower of the two still clears the sports floor 0.06. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXNBAGAME / KXNFLGAME / KXNHLGAME winners matched to ESPN and to the Polymarket moneyline",
+            "Fair = the lower of ESPN's chance and the Polymarket mid for that side",
+            "Logged only if the two differ by more than 0.15, Polymarket's spread is over 4¢ or its liquidity under $5k",
+            "Sides with fair under 0.72 are logged only; 0.72 to 0.80 need edge ≥ 0.08",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked sports 0.06 and ≤ 0.15 trust cap",
+            "Fixed $25 ticket in whole contracts; max 4 open, one per game, one new buy per check",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Sports floor 0.06 cannot be lowered in config",
+            "Polymarket missing or unmatched → that game is logged only, never bought on ESPN alone",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("sports gap poly", "polymarket check"),
+        "office": "Sports gap + Polymarket",
+        "color": "#7fd1ae",
+    },
+    {
+        "id": "fight-golf-esports-lean",
+        "name": "UFC, golf & esports lean",
+        "folder": "fight-golf-esports-lean-paper",
+        "venue": "kalshi_sports",
+        "floor": 0.06,
+        "kind": "sports",
+        "every_sec": 600,
+        "timeout": 150,
+        "max_open": 6,
+        "blurb": (
+            "Shadow Kalshi UFC fights, golf tournament winners and esports matches (League of "
+            "Legends, CS2, Valorant, Dota 2). Fair is Polymarket's price for the same outcome; "
+            "buys only when edge after fee clears the sports floor 0.06. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXUFCFIGHT, KXPGATOUR, KXLOLGAME, KXCS2GAME, KXVALORANTGAME, KXDOTA2GAME",
+            "Fair = Polymarket mid for the same fighter, golfer or team, matched by name",
+            "Pre-event only: 10 minutes to 48 hours before start; Polymarket spread ≤ 3¢ and liquidity ≥ $5k",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked sports 0.06 and ≤ 0.15 trust cap",
+            "Fixed $25 ticket in whole contracts; max 6 open, one per event, one new buy per check",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Sports floor 0.06 cannot be lowered in config",
+            "Ambiguous or missing name match → skipped; nothing invented",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("ufc golf esports", "fight golf esports", "ufc lean"),
+        "office": "UFC, golf & esports lean",
+        "color": "#e88fb4",
+    },
+    {
+        "id": "sp500-model",
+        "name": "S&P model",
+        "folder": "sp500-model-paper",
+        "venue": "kalshi_inx",
+        "floor": 0.02,
+        "kind": "index",
+        "every_sec": 300,
+        "timeout": 60,
+        "max_open": 2,
+        "blurb": (
+            "Shadow twin that gives the Kalshi S&P 500 markets a real fair price: the chance "
+            "the index closes above each strike, from the live S&P and the VIX. Buys only when "
+            "edge after fee clears the index floor 0.02. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXINXU strikes and KXINX ranges for today's 4pm ET close",
+            "Fair = lognormal chance from the live S&P 500 and the VIX over the trading minutes left",
+            "Regular hours only, more than 10 minutes before the close, index quote under 5 minutes old",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked index 0.02 and ≤ 0.15 trust cap",
+            "Rows in the 80–90¢ band the Kalshi S&P tower uses are tagged for side-by-side comparison",
+            "Fixed $25 ticket in whole contracts; max 2 open, one per event, one new buy per check",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Index floor 0.02 cannot be lowered in config",
+            "Stale or missing index quote → no buys that check",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("s&p model", "sp500 model", "spx model"),
+        "office": "S&P model",
+        "color": "#9fb8ff",
+    },
+    {
+        "id": "fed-curve",
+        "name": "Fed curve",
+        "folder": "fed-curve-paper",
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "macro",
+        "every_sec": 1800,
+        "timeout": 120,
+        "max_open": 2,
+        "blurb": (
+            "Shadow Kalshi Fed decision markets with two independent reads: the fed funds "
+            "futures curve and Polymarket. Buys only when both agree and the lower one still "
+            "clears the economics floor 0.05. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXFEDDECISION hold / cut / hike outcomes for the next two meetings",
+            "Curve = 30-day fed funds futures chained month by month (the CME FedWatch method)",
+            "Fair = the lower of the curve chance and the Polymarket mid; logged only if they differ by more than 0.15",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked econ 0.05 and ≤ 0.15 trust cap",
+            "Fixed $25 ticket in whole contracts; max 2 open, one per meeting, one new buy per check",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Econ floor 0.05 cannot be lowered in config",
+            "Missing or stale futures, or no Polymarket price → logged only",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("fed curve", "fed futures"),
+        "office": "Fed curve",
+        "color": "#c9b06b",
+    },
+    {
+        "id": "coinbase-maker",
+        "name": "Coinbase maker",
+        "folder": "coinbase-maker-paper",
+        "venue": "coinbase_spot",
+        "floor": 0.05,
+        "kind": "crypto",
+        "every_sec": 300,
+        "timeout": 60,
+        "max_open": 1,
+        "blurb": (
+            "Shadow twin of Coinbase spot that assumes limit orders at the lower maker fee and "
+            "only fills when a later candle trades through our price. Same ETH and SOL signal "
+            "and the same 0.05 floor. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "ETH-USD and SOL-USD 15-minute Coinbase candles (public, no key)",
+            "Signal: up bar with z ≥ 2 and 25% of the move minus the 1.0% maker round trip ≥ locked 0.05",
+            "Limit buy at the signal close; fills only if a later bar's low trades below it; cancelled after 2 bars",
+            "Fixed $25 paper ticket, one order or position at a time",
+        ],
+        "sell": [
+            "Take-profit: resting limit sell at entry + 6%, maker fee, fills only if a bar trades above it",
+            "Stop −1.5%, a z ≤ −2 bar, or 24 hours: market sell at 0.90% taker plus 0.10% slippage",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new orders; exits still run",
+            "Floor 0.05 is locked; a bar must move about 24% before it can buy",
+            "No back-dated orders: only a signal bar from the last 20 minutes places an order",
+            "Incubation n≥50 before any desk share. No auto-promote",
+        ],
+        "aliases": ("coinbase maker", "maker fee"),
+        "office": "Coinbase maker",
+        "color": "#6fa8ff",
+    },
+    {
+        "id": "meme-price-check",
+        "name": "Meme price check",
+        "folder": "meme-price-check-paper",
+        "keep": ("price_check.json",),  # the would-block tally must survive a deploy
+        "venue": "solana_dex",
+        "floor": 0.02,
+        "kind": "research",
+        "research": True,
+        "every_sec": 900,
+        "timeout": 120,
+        "max_open": 0,
+        "blurb": (
+            "Support building for the Memecoin tower. Every 15 minutes it compares DexScreener's "
+            "price with Jupiter's for each coin Memecoin holds or just checked, and counts how "
+            "often a 2% gap would have stopped a trade. Buys nothing."
+        ),
+        "buy": [
+            "Never buys. Zero cash, zero stake, no tower risk share",
+            "Reads Memecoin's open positions and recent checks (read-only), up to 30 coins",
+            "Would block when the two prices differ by more than 2% or either is missing",
+        ],
+        "sell": [
+            "Nothing to sell",
+            "Saves the running tally and the last 200 would-block rows in price_check.json",
+        ],
+        "failsafes": [
+            "Fails closed: a missing price counts as a block, never as agreement",
+            "Memecoin's own buys and sales are not changed",
+        ],
+        "aliases": ("meme price check", "jupiter check"),
+        "office": "Meme price check",
+        "color": "#d4a5ff",
+    },
 )
 
 BY_ID = {row["id"]: row for row in TOWERS}
