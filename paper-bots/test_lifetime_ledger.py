@@ -42,26 +42,27 @@ class LifetimeLedgerTests(unittest.TestCase):
     def test_lifetime_file_is_on_the_saved_list(self):
         self.assertIn("pimp-lifetime.json", pimp_desk.SETTLEMENT_FILES)
 
-    def test_midnight_refill_keeps_the_loss_on_the_lifetime_record(self):
+    def _wipe_meme(self):
+        view = self._meme(pimp_desk.snapshot(self.root))
+        return pimp_desk.reload_broke_tower(self.root, view, "2026-11-02")
+
+    def test_midnight_leaves_the_loss_on_the_book(self):
         self._broke_meme()
         rows = pimp_desk.run_midnight_broke_reload(self.root, NIGHT)
-        self.assertTrue(any(r.get("bot") == "memecoin" and r.get("action") == "midnight-reload" for r in rows))
+        self.assertFalse(any(r.get("bot") == "memecoin" for r in rows))
         snap = pimp_desk.snapshot(self.root)
         meme = self._meme(snap)
-        self.assertEqual(float(meme["realized"] or 0), 0.0)  # today's book is fresh
+        self.assertEqual(meme["realized"], -55.0)
         life = meme["lifetime"]
         self.assertEqual(life["realized"], -55.0)
-        self.assertEqual(life["resets"], 1)
-        self.assertEqual(life["wiped_losses"], 55.0)
+        self.assertEqual(life["resets"], 0)
+        self.assertEqual(life["current"], -55.0)
         self.assertEqual((life["trades"], life["wins"], life["losses"]), (3, 1, 2))
-        # Peak +0 → -25 → -15 → -55: worst drop is 55 from the start.
-        self.assertEqual(life["max_drawdown"], 55.0)
-        self.assertEqual(snap["desk"]["lifetime"]["realized"], -55.0)
-        self.assertEqual(snap["desk"]["lifetime"]["wiped_losses"], 55.0)
+        self.assertEqual(snap["desk"]["realized"], -55.0)
 
     def test_lifetime_is_banked_plus_the_current_book(self):
         self._broke_meme()
-        pimp_desk.run_midnight_broke_reload(self.root, NIGHT)
+        self._wipe_meme()
         meme = os.path.join(self.root, "memecoin-paper")
         _write(os.path.join(meme, "trades.csv"), "ts,side,pnl_usd\n2026-11-02T15:00:00,SELL,7.5\n")
         life = self._meme(pimp_desk.snapshot(self.root))["lifetime"]
@@ -83,7 +84,7 @@ class LifetimeLedgerTests(unittest.TestCase):
     def test_the_record_survives_a_redeploy(self):
         self._broke_meme()
         pimp_desk.keep_closed_settlements(self.root, durable=self.volume)
-        pimp_desk.run_midnight_broke_reload(self.root, NIGHT)
+        self._wipe_meme()
         self.assertTrue(os.path.isfile(os.path.join(self.volume, "pimp-lifetime.json")))
         # New image: desk files are gone from the app folder.
         for rel in pimp_desk.SETTLEMENT_FILES:
@@ -97,7 +98,7 @@ class LifetimeLedgerTests(unittest.TestCase):
 
     def test_old_wipes_are_rebuilt_from_the_archive_once(self):
         self._broke_meme()
-        pimp_desk.run_midnight_broke_reload(self.root, NIGHT)
+        self._wipe_meme()
         # Pretend the wipe happened before this ledger existed.
         os.remove(desk_lifetime.ledger_path(self.root))
         _write(pimp_desk.audit_path(self.root), json.dumps({"rows": []}))
@@ -112,7 +113,7 @@ class LifetimeLedgerTests(unittest.TestCase):
 
     def test_audit_row_fills_in_when_no_archive_copy_is_left(self):
         self._broke_meme()
-        pimp_desk.run_midnight_broke_reload(self.root, NIGHT)
+        self._wipe_meme()
         os.remove(desk_lifetime.ledger_path(self.root))
         shutil.rmtree(os.path.join(self.root, "midnight-archive"))
         self.assertEqual(desk_lifetime.backfill(self.root), 1)
@@ -127,6 +128,26 @@ class LifetimeLedgerTests(unittest.TestCase):
         self.assertTrue(desk_lifetime.bank_before_reset(self.root, bot, "2026-11-02"))
         self.assertFalse(desk_lifetime.bank_before_reset(self.root, bot, "2026-11-02"))
         self.assertEqual(len(desk_lifetime.load_ledger(self.root)["bots"]["memecoin"]["resets"]), 1)
+
+    def test_undo_puts_the_wiped_loss_back_on_the_live_book(self):
+        self._broke_meme()
+        view = self._meme(pimp_desk.snapshot(self.root))
+        pimp_desk.reload_broke_tower(self.root, view, pimp_desk.UNDO_WIPE_DAY)
+        live = os.path.join(self.root, "memecoin-paper", "positions.json")
+        wiped = json.loads(open(live, encoding="utf-8").read())
+        self.assertEqual(wiped["cash_usd"], 100.0)
+        self.assertEqual(wiped["realized_pnl_usd"], 0.0)
+        restored = pimp_desk.undo_midnight_wipe(self.root)
+        self.assertEqual(restored, ["memecoin"])
+        back = json.loads(open(live, encoding="utf-8").read())
+        self.assertEqual(back["cash_usd"], 5.09)
+        self.assertEqual(back["realized_pnl_usd"], -94.91)
+        self.assertIn("-25", open(os.path.join(self.root, "memecoin-paper", "trades.csv"), encoding="utf-8").read())
+        life = self._meme(pimp_desk.snapshot(self.root))["lifetime"]
+        self.assertEqual(life["realized"], -55.0)
+        self.assertEqual(life["resets"], 0)
+        # A second pass does not apply the archive again.
+        self.assertEqual(pimp_desk.undo_midnight_wipe(self.root), [])
 
     def test_staff_reset_keeps_the_record(self):
         self._broke_meme()

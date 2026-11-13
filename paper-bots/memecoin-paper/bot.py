@@ -1384,10 +1384,11 @@ def apply_entry_cuts(ticket: float, st, lane: str, pnl_today: float) -> float:
 
 
 def maybe_reload_broke_cash(st) -> bool:
-    """Paper-desk reload when cash cannot fund a minimum ticket and nothing is open.
+    """Do not mint paper cash when the book is low. The loss stays.
 
-    Does not invent trades or erase realized PnL — only restores buy capacity.
+    Levi, 2026-11-13: a refill that appears on its own is a fake number.
     """
+    return False
     if st.get("open"):
         return False
     cash = float(st.get("cash_usd") or 0)

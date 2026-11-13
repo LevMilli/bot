@@ -880,7 +880,7 @@ ROI_POLICY = {
         {"id": "R15", "text": "Model-flip exits fire before hard stops / settle-only waits."},
         {"id": "R16", "text": "Expectancy starve throttles losers after enough settles."},
         {"id": "R17", "text": "Shadow bots spend no desk cash; promote only after expectancy gates."},
-        {"id": "R18", "text": "Midnight (CT): out-of-ammo flat towers reload cash + reset P&L + log/learn; winners untouched."},
+        {"id": "R18", "text": "Midnight (CT) does not refill cash or clear P&L. Traded numbers stay on the book."},
     ],
     "risk": {
         "daily_loss_stop": DEFAULTS["daily_loss_stop"],
@@ -4775,10 +4775,11 @@ def lift_sports_starter(state: dict) -> bool:
 
 
 def lift_memecoin_broke(state: dict) -> bool:
-    """Restore memecoin paper cash when it cannot fund a min ticket and nothing is open.
+    """Do not mint meme cash. A low balance is the real result, not a reason to refill.
 
-    Keeps closed history / realized_pnl. Does not invent fills.
+    Levi, 2026-11-13: pretend cash that appears on its own hides the loss.
     """
+    return False
     if not isinstance(state, dict):
         return False
     if state.get("open"):
@@ -5031,7 +5032,12 @@ def tower_doing_good(bot: dict) -> bool:
 
 
 def tower_needs_midnight_reload(bot: dict) -> bool:
-    """Out of ammo and/or blew the paper book — flat towers only."""
+    """Never. A midnight refill hides a real loss and mints pretend cash.
+
+    Levi, 2026-11-13: the traded book stays. Out of ammo means it cannot buy, not that
+    the scoreboard goes back to zero.
+    """
+    return False
     if not isinstance(bot, dict) or not bot.get("present"):
         return False
     bot_id = str(bot.get("id") or "")
@@ -5206,8 +5212,94 @@ def reload_broke_tower(root: str, bot: dict, day: str, who: str = "midnight") ->
     }
 
 
+# The 2026-11-13 midnight pass cleared real losses and wrote starter cash.
+# Put that night's archived books back. Later nights do not wipe, so this is once.
+UNDO_WIPE_DAY = "2026-11-13"
+_WIPE_EXTRAS = {
+    "sports-gap": ("paper_trades.md",),
+    "kalshi-sp": ("Trade_Ledger.md",),
+    "kalshi-sized": ("Trade_Ledger.md",),
+    "memecoin": ("trades.csv", "checks.csv"),
+}
+
+
+def _put_archived_file(src: str, dest: str) -> None:
+    """Copy an archived book onto the live path, including through a volume link."""
+    if os.path.islink(dest):
+        real = os.path.realpath(dest)
+        os.makedirs(os.path.dirname(real), exist_ok=True)
+        shutil.copy2(src, real)
+        return
+    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+    shutil.copy2(src, dest)
+
+
+def _wipe_was_fresh(state: dict, day: str) -> bool:
+    if not isinstance(state, dict):
+        return False
+    if str(state.get("midnight_reloaded_day") or "") != day:
+        return False
+    if state.get("open"):
+        return False
+    closed = state.get("closed")
+    return not (isinstance(closed, list) and closed)
+
+
+def undo_midnight_wipe(root: str | None = None, day: str = UNDO_WIPE_DAY) -> list:
+    """Put the archived books back over the one wipe that cleared them.
+
+    Does not invent a number. If the live file is not that wipe, it is left alone.
+    """
+    root = _root(root)
+    restored = []
+    try:
+        import desk_lifetime
+    except Exception:  # noqa: BLE001
+        desk_lifetime = None
+    for spec in BOTS:
+        bot_id = spec["id"]
+        state_name = ACCOUNT_FILES.get(bot_id) or spec.get("state") or ""
+        if not state_name:
+            continue
+        folder = spec["folder"]
+        safe = folder.replace(os.sep, "_")
+        names = [state_name, *_WIPE_EXTRAS.get(bot_id, ())]
+        found = {}
+        for base in (root, _allowed_durable(root)):
+            if not base:
+                continue
+            day_dir = os.path.join(base, "midnight-archive", day)
+            for name in names:
+                path = os.path.join(day_dir, f"{safe}__{name}")
+                if os.path.isfile(path) and name not in found:
+                    found[name] = path
+        if state_name not in found:
+            continue
+        live = _under(root, folder, state_name)
+        state, problem = _read_state(live)
+        if problem or not _wipe_was_fresh(state, day):
+            continue
+        # A new closed trade after the wipe means the book moved. A scan log does not.
+        trade_log = _under(root, folder, "trades.csv")
+        if os.path.isfile(trade_log):
+            lines = [ln for ln in open(trade_log, encoding="utf-8").read().splitlines() if ln.strip()]
+            if len(lines) > 1:
+                log.info("undo wipe %s skipped: new trades after the reset", bot_id)
+                continue
+        for name, src in found.items():
+            _put_archived_file(src, _under(root, folder, name))
+        if desk_lifetime is not None:
+            desk_lifetime.mark_wipe_restored(root, bot_id, day)
+        restored.append(bot_id)
+        log.info("undo wipe %s: archived %s book put back", bot_id, day)
+    if restored:
+        audit(root, "undo-wipe", f"Put {day} books back: {', '.join(restored)}"[:120],
+              before={"day": day}, after={"restored": restored})
+    return restored
+
+
 def run_midnight_broke_reload(root: str | None = None, now: dt.datetime | None = None) -> list:
-    """Once per Chicago day (00:00–06:00 CT): reload broke towers only; leave winners alone."""
+    """Once per Chicago day (00:00–06:00 CT): leave every book as traded."""
     root = _root(root)
     if now is None:
         now = dt.datetime.now(dt.timezone.utc)
@@ -5274,8 +5366,9 @@ def run_midnight_broke_reload(root: str | None = None, now: dt.datetime | None =
             "entries_blocked": False,
             "error": "",
             "summary": (
-                f"Midnight pass {day}: no broke towers to reload "
-                f"(left alone {len(left_alone)}; waiting open {len(waiting_open)})."
+                f"Midnight pass {day}: books left as traded "
+                f"(left alone {len(left_alone)}; waiting open {len(waiting_open)}). "
+                f"No cash added, no P&L cleared."
             ),
         })
     return rows
@@ -5359,10 +5452,16 @@ def _account_body(bot_id: str) -> dict:
 def ensure_paper_accounts(root: str | None = None) -> list:
     """Write each bot's starting paper account once. Never invent trades.
 
+    Also puts back the 2026-11-13 wipe, once, so that loss stays on the total.
+
     An existing account is left alone, except the empty $14 sports starter,
     which is raised to $100 so a paper buy can land near $20.
     """
     root = _root(root)
+    try:
+        undo_midnight_wipe(root)
+    except Exception:  # noqa: BLE001 - a restore miss must not block the timer
+        log.exception("undo midnight wipe failed")
     made = []
     for spec in BOTS:
         name = ACCOUNT_FILES.get(spec["id"])

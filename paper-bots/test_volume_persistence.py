@@ -90,27 +90,20 @@ class VolumePersistenceTests(unittest.TestCase):
 
         night = dt.datetime(2026, 11, 2, 0, 15, tzinfo=pimp_desk.CT)
         rows = pimp_desk.run_midnight_broke_reload(self.root, night)
-        self.assertTrue(any(r.get("bot") == "memecoin" and r.get("action") == "midnight-reload" for r in rows))
+        self.assertFalse(any(r.get("bot") == "memecoin" for r in rows))
 
-        # The next timer pass rebinds the volume. The fresh account must stay.
+        # The next timer pass rebinds the volume. The real loss must stay.
         self._bind()
         after = json.loads(_read(os.path.join(meme, "positions.json")))
-        self.assertEqual(after["cash_usd"], 100.0)
+        self.assertEqual(after["cash_usd"], 5.09)
+        self.assertEqual(after["realized_pnl_usd"], -94.91)
         on_volume = json.loads(_read(os.path.join(self.volume, "memecoin-paper", "positions.json")))
-        self.assertEqual(on_volume["cash_usd"], 100.0)
+        self.assertEqual(on_volume["cash_usd"], 5.09)
         trades = os.path.join(meme, "trades.csv")
-        self.assertFalse(os.path.isfile(trades) and "-25" in _read(trades))
-
-        # The archived loss is a real file on the volume, not a link back to the live book.
-        arch = os.path.join(self.volume, "midnight-archive", "2026-11-02")
-        archived = os.path.join(arch, "memecoin-paper__positions.json")
-        self.assertTrue(os.path.isfile(archived))
-        self.assertFalse(os.path.islink(archived))
-        self.assertEqual(json.loads(_read(archived))["realized_pnl_usd"], -94.91)
-        self.assertIn("-25", _read(os.path.join(arch, "memecoin-paper__trades.csv")))
+        self.assertIn("-25", _read(trades))
 
         # The midnight marker is on the volume too, so a redeploy in the
-        # early window does not reload the same tower twice.
+        # early window does not run the pass twice.
         self._redeploy()
         self._bind()
         self.assertEqual(pimp_desk.run_midnight_broke_reload(self.root, night), [])
@@ -125,10 +118,10 @@ class VolumePersistenceTests(unittest.TestCase):
         night = dt.datetime(2026, 11, 2, 0, 15, tzinfo=pimp_desk.CT)
         pimp_desk.run_midnight_broke_reload(self.root, night)
         archived = os.path.join(self.root, "midnight-archive", "2026-11-02", "memecoin-paper__positions.json")
-        self.assertEqual(json.loads(_read(archived))["realized_pnl_usd"], -94.91)
+        self.assertFalse(os.path.isfile(archived))
         after = json.loads(_read(os.path.join(meme, "positions.json")))
-        self.assertEqual(after["cash_usd"], 100.0)
-        self.assertEqual(after.get("realized_pnl_usd"), 0.0)
+        self.assertEqual(after["cash_usd"], 5.09)
+        self.assertEqual(after.get("realized_pnl_usd"), -94.91)
 
 
 if __name__ == "__main__":
