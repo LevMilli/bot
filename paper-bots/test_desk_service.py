@@ -81,3 +81,48 @@ class DeskServiceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeskOpenLogTests(unittest.TestCase):
+    def setUp(self):
+        desk_service._last_open_log[0] = 0.0
+
+    def test_logs_open_count_every_five_minutes(self):
+        class D:
+            n = 0
+            def desk_open_summary(self):
+                D.n += 1
+                return {"open": 3, "max_open": 12, "open_risk": 21.5, "max_open_risk": 100.0, "by_bot": {"btc15m": 3}}
+        d = D()
+        line = desk_service.log_desk_open(d, now=1000.0)
+        self.assertTrue(line.startswith("desk open "))
+        self.assertIn('"open": 3', line)
+        self.assertEqual(desk_service.log_desk_open(d, now=1100.0), "")
+        self.assertTrue(desk_service.log_desk_open(d, now=1301.0))
+        self.assertEqual(D.n, 2)
+
+    def test_a_failing_count_never_stops_the_pass(self):
+        class D:
+            def desk_open_summary(self):
+                raise RuntimeError("boom")
+        self.assertEqual(desk_service.log_desk_open(D(), now=5000.0), "")
+
+    def test_desk_without_the_helper_is_fine(self):
+        self.assertEqual(desk_service.log_desk_open(FakeDesk(), now=9000.0), "")
+
+
+class DeskOpenSummaryTests(unittest.TestCase):
+    def test_counts_like_the_entry_gate(self):
+        import tempfile
+        import pimp_desk
+        bots = [
+            {"id": "btc15m", "open_count": 2, "open_risk": 30},
+            {"id": "sports-gap", "open_count": 1, "open_risk": 20},
+            {"id": "more-15m", "open_count": 4, "open_risk": 50, "shadow_only": True},
+        ]
+        with tempfile.TemporaryDirectory() as root:
+            s = pimp_desk.desk_open_summary(root, bots=bots)
+        self.assertEqual(s["open"], 3)
+        self.assertEqual(s["max_open"], 12)
+        self.assertEqual(s["open_risk"], 50.0)
+        self.assertEqual(s["by_bot"], {"btc15m": 2, "sports-gap": 1})

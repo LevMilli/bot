@@ -2515,6 +2515,30 @@ def entry_gate(root: str | None = None, bots: list | None = None) -> str:
     return ""
 
 
+def desk_open_summary(root: str | None = None, bots: list | None = None) -> dict:
+    """How many vault bets are open right now, counted the same way as ``entry_gate``.
+
+    Used for the "desk open" log line so the evening report can show the day's
+    highest open count against the max-open-positions limit. Read only.
+    """
+    cfg = load_settings(root)
+    rows = bots
+    if rows is None:
+        base = _root(root)
+        runs = _load_runs(base)
+        day = _today()
+        rows = [_bot_view(spec, base, runs, day) for spec in BOTS]
+    live = [b for b in rows if not b.get("shadow_only")]
+    by_bot = {str(b.get("id")): int(b.get("open_count") or 0) for b in live if int(b.get("open_count") or 0)}
+    return {
+        "open": int(sum(int(b.get("open_count") or 0) for b in live)),
+        "max_open": int(cfg["max_open_positions"]),
+        "open_risk": round(sum(float(b.get("open_risk") or 0) for b in live), 2),
+        "max_open_risk": float(cfg["max_open_risk"]),
+        "by_bot": by_bot,
+    }
+
+
 def venue_min_edge(venue: str, cfg: dict | None = None) -> float:
     return desk_profit.venue_min_edge(venue, cfg or load_settings(), DEFAULTS["min_edge"])
 
