@@ -33,6 +33,7 @@ _ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 import desk_profit
+from snapshot_schema import SCHEMA_VERSION as SNAPSHOT_SCHEMA_VERSION
 
 log = logging.getLogger("pimpdesk")
 
@@ -3729,6 +3730,8 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
     }
     return {
         "paper_only": True,
+        # City snapshot schema version (snapshot_schema.py). New keys are fine; a renamed key bumps it.
+        "schema_version": SNAPSHOT_SCHEMA_VERSION,
         "banner": "PAPER ONLY. This desk does not trade real money. No Kalshi API key, no wallet, no live order. The same paper checks also run on a timer.",
         "roi_system": roi,
         "limits": cfg,

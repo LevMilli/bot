@@ -760,3 +760,28 @@ living-graduation-capture:
 
 living-promote-sla:
 	python3 tools/staff_living_status.py promote-sla
+
+# Replay lab (time machine) and chaos tests. Paper only, read only. See REPLAY.md.
+.PHONY: replay-more15m replay-btc15m replay-commodity replay-idea replay-chaos replay-tests replay-fixture
+replay-more15m:
+	python3 replay_lab.py more-15m
+
+replay-btc15m:
+	python3 replay_lab.py btc15m
+
+replay-commodity:
+	python3 replay_lab.py commodity-15m
+
+# make replay-idea IDEA=btc15m-tp-10   (names: python3 -c "import replay_lab; print(*replay_lab.IDEAS)")
+replay-idea:
+	python3 replay_lab.py $(IDEA)
+
+# Weekly: the chaos tests on their own (garbage, timeouts, 429, disk full, clock jumps, overlap).
+replay-chaos:
+	python3 -m pytest -q -p no:cacheprovider test_chaos_replay.py
+
+replay-tests:
+	python3 -m pytest -q -p no:cacheprovider test_replay_lab.py test_model_edges.py test_model_properties.py test_chaos_replay.py test_city_snapshot.py
+
+replay-fixture:
+	python3 fixtures/replay/make_more15m_day.py
