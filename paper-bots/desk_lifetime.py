@@ -346,10 +346,45 @@ def _drawdown(values: list) -> float | None:
     return round(worst, 2)
 
 
+def mark_wipe_restored(root: str | None, bot_id: str, day: str) -> None:
+    """The wiped book was put back. Do not count that loss a second time."""
+    key = f"{bot_id}:{day}"
+    ledger = load_ledger(root)
+    if key not in ledger["keys"]:
+        ledger["keys"].append(key)
+    book = ledger["bots"].setdefault(bot_id, {"resets": [], "trades": []})
+    book.setdefault("resets", [])
+    book.setdefault("trades", [])
+    found = False
+    for row in book["resets"]:
+        if not isinstance(row, dict):
+            continue
+        if row.get("key") == key or (row.get("day") == day and row.get("source") in ("midnight", "archive", "audit")):
+            row["restored"] = True
+            row["key"] = key
+            found = True
+    if not found:
+        book["resets"].append({
+            "key": key,
+            "day": day,
+            "source": "restored",
+            "restored": True,
+            "realized": 0.0,
+            "note": "Book put back. The loss stays on the live account.",
+        })
+    book["trades"] = [t for t in book["trades"] if not (isinstance(t, dict) and t.get("reset") == key)]
+    _save(_desk()._root(root), ledger)
+
+
 def _bot_lifetime(bot: dict, book: dict) -> dict:
     desk = _desk()
     resets = [r for r in (book.get("resets") or []) if isinstance(r, dict)]
-    banked_trades = [t for t in (book.get("trades") or []) if isinstance(t, dict)]
+    restored_keys = {r.get("key") for r in resets if r.get("restored")}
+    resets = [r for r in resets if not r.get("restored")]
+    banked_trades = [
+        t for t in (book.get("trades") or [])
+        if isinstance(t, dict) and t.get("reset") not in restored_keys
+    ]
     current = _closed_rows(bot)
     banked = 0.0
     banked_known = True

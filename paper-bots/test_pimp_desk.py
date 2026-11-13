@@ -1956,7 +1956,7 @@ class PimpDeskTests(unittest.TestCase):
             "id": "kalshi-sp", "present": True, "open_count": 1,
             "cash": 5.0, "today": -10.0, "realized": -40.0, "history": [],
         }
-        self.assertTrue(pimp_desk.tower_needs_midnight_reload(broke))
+        self.assertFalse(pimp_desk.tower_needs_midnight_reload(broke))
         self.assertFalse(pimp_desk.tower_needs_midnight_reload(winner))
         self.assertTrue(pimp_desk.tower_doing_good(winner))
         self.assertTrue(pimp_desk.tower_doing_good(armed))
@@ -2000,19 +2000,21 @@ class PimpDeskTests(unittest.TestCase):
                 json.dump({"cash": 120.0, "open": [], "closed": [], "paper_only": True}, handle)
             night = dt.datetime(2026, 11, 2, 0, 15, tzinfo=pimp_desk.CT)
             rows = pimp_desk.run_midnight_broke_reload(tmp, night)
-            self.assertTrue(any(r.get("bot") == "memecoin" and r.get("action") == "midnight-reload" for r in rows))
+            self.assertTrue(any(r.get("action") == "midnight-reload" and "left as traded" in r.get("summary", "") for r in rows))
+            self.assertFalse(any(r.get("bot") == "memecoin" for r in rows))
             with open(os.path.join(meme, "positions.json"), encoding="utf-8") as handle:
                 after = json.load(handle)
-            self.assertEqual(after["cash_usd"], 100.0)
-            self.assertEqual(after.get("realized_pnl_usd"), 0.0)
-            self.assertFalse(os.path.exists(os.path.join(meme, "trades.csv")))
+            self.assertEqual(after["cash_usd"], 5.09)
+            self.assertEqual(after.get("realized_pnl_usd"), -94.91)
+            self.assertTrue(os.path.exists(os.path.join(meme, "trades.csv")))
             with open(os.path.join(btc, "paper_account.json"), encoding="utf-8") as handle:
                 btc_after = json.load(handle)
             self.assertEqual(btc_after["cash"], 120.0)
             with open(pimp_desk.midnight_path(tmp), encoding="utf-8") as handle:
                 marker = json.load(handle)
             self.assertEqual(marker["day"], "2026-11-02")
-            self.assertIn("memecoin", marker["reloaded"])
+            self.assertEqual(marker["reloaded"], [])
+            self.assertIn("memecoin", marker["left_alone"])
             self.assertIn("btc15m", marker["left_alone"])
             # Second pass same day is a no-op.
             self.assertEqual(pimp_desk.run_midnight_broke_reload(tmp, night), [])
