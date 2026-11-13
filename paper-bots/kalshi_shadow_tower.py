@@ -88,6 +88,60 @@ def fee(price: float) -> float:
     return math.ceil(round(0.07 * p * (1.0 - p) * 100, 6)) / 100.0
 
 
+def order_fee(contracts: int, price: float) -> float:
+    """Kalshi taker fee for one whole order: 0.07 x C x P x (1 - P), rounded up once to the cent."""
+    p, c = float(price), int(contracts)
+    if c < 1 or not (0.0 < p < 1.0) or not math.isfinite(p):
+        return 0.0
+    return math.ceil(round(0.07 * c * p * (1.0 - p) * 100, 6)) / 100.0
+
+
+def size_order(stake: float, ask: float, per_order_fee: bool) -> tuple[int, float, float]:
+    """(contracts, fee, cost) for one ticket. Per-contract mode keeps the old rounding."""
+    per = float(ask) + fee(ask)
+    contracts = int(stake // per) if per > 0 else 0
+    if not per_order_fee:
+        return contracts, round(contracts * fee(ask), 2), round(contracts * per, 2)
+    while contracts >= 0 and (contracts + 1) * ask + order_fee(contracts + 1, ask) <= stake + 1e-9:
+        contracts += 1
+    cost_fee = order_fee(contracts, ask)
+    return contracts, cost_fee, round(contracts * ask + cost_fee, 2)
+
+
+TAPE_LOOKBACK_SEC = 300
+TAPE_MAX_READS = 3
+
+
+def kalshi_tape(ticker: str, now: dt.datetime, lookback_sec: int = TAPE_LOOKBACK_SEC) -> list[dict]:
+    """Real Kalshi trades on one market over the last ``lookback_sec`` seconds."""
+    out, cursor = [], ""
+    min_ts = int(now.timestamp()) - int(lookback_sec)
+    for _ in range(3):
+        url = f"{KALSHI}/markets/trades?ticker={ticker}&min_ts={min_ts}&limit=1000"
+        data = public_json(url + (f"&cursor={cursor}" if cursor else ""), timeout=10) or {}
+        out.extend(row for row in data.get("trades") or [] if isinstance(row, dict))
+        cursor = str(data.get("cursor") or "")
+        if not cursor:
+            break
+    return out
+
+
+def tape_volume(trades: list[dict], side: str, ask: float) -> float:
+    """Contracts that really traded at or better than ``ask`` on ``side``."""
+    total = 0.0
+    for row in trades or []:
+        yes = num(row.get("yes_price_dollars"))
+        if yes is None:
+            cents = num(row.get("yes_price"))
+            yes = None if cents is None else cents / 100.0
+        if yes is None:
+            continue
+        price = yes if side == "yes" else round(1.0 - yes, 4)
+        if price <= float(ask) + 1e-9:
+            total += num(row.get("count_fp")) or num(row.get("count")) or 0.0
+    return total
+
+
 def num(value):
     try:
         n = float(value)
@@ -243,7 +297,8 @@ def settle_open(state: dict, now: dt.datetime, fetch=None) -> list[dict]:
     return closed
 
 
-def model_flips(state: dict, quotes: list[dict], now: dt.datetime, margin: float) -> list[dict]:
+def model_flips(state: dict, quotes: list[dict], now: dt.datetime, margin: float,
+                per_order_fee: bool = False) -> list[dict]:
     """Sell a held side at the bid when bid − fee beats the model's fair by ``margin``."""
     by_key = {(q.get("ticker"), q.get("side")): q for q in quotes}
     sold, keep = [], []
@@ -259,7 +314,10 @@ def model_flips(state: dict, quotes: list[dict], now: dt.datetime, margin: float
             keep.append(pos)
             continue
         contracts = int(pos.get("contracts") or 0)
-        proceeds = round(contracts * net, 2)
+        if per_order_fee:
+            proceeds = round(contracts * bid - order_fee(contracts, bid), 2)
+        else:
+            proceeds = round(contracts * net, 2)
         row = dict(pos, exit="model-flip", exit_bid=bid, exit_fair=round(fair, 4),
                    payout=proceeds, pnl=round(proceeds - float(pos.get("cost") or 0), 2),
                    closed=now.isoformat(timespec="seconds"))
@@ -289,7 +347,7 @@ def _append_research(tower: str, now: dt.datetime, decisions: list[dict], note: 
 
 # ------------------------------------------------------------------ one check
 def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
-              fetch=None, quotes: list | None = None) -> int:
+              fetch=None, quotes: list | None = None, tape=None) -> int:
     """One check. ``model(cfg, now) -> (quotes, note)``. Returns 0 (a skip is not a failure)."""
     os.makedirs(tower, exist_ok=True)
     cfg = locked_cfg(spec, read_json(os.path.join(tower, "config.json")))
@@ -310,7 +368,14 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
         except Exception as exc:  # noqa: BLE001 - a failed read is a skip, never a guess
             quotes, note = [], f"read failed ({type(exc).__name__}); waiting"
     quotes = list(quotes or [])
-    flipped = model_flips(state, quotes, now, cfg["flip_margin"])
+    per_order_fee = bool(spec.get("fee_per_order"))
+    flipped = model_flips(state, quotes, now, cfg["flip_margin"], per_order_fee)
+    # One buy per window: a market already traded (even if sold) is never bought again.
+    traded_tickers = ({p.get("ticker") for p in state["closed"]} | {p.get("ticker") for p in state["open"]}
+                      if spec.get("one_per_window") else set())
+    tape_check = bool(spec.get("tape_check"))
+    tape = tape or kalshi_tape
+    tape_reads = 0
     decisions = [decide(q, cfg) for q in quotes]
     held_tickers = {p.get("ticker") for p in state["open"]}
     held_events = {p.get("event") for p in state["open"] if p.get("event")}
@@ -328,6 +393,8 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
             why = "already holding this market"
         elif d["event"] and d["event"] in held_events:
             why = "already holding this event"
+        elif d["ticker"] in traded_tickers:
+            why = "already traded this window (one buy per window, no switching sides)"
         elif d.get("group") and spec.get("group_cap") and sum(
                 1 for p in state["open"] if p.get("group") == d["group"]) >= int(spec["group_cap"]):
             why = f"same-direction cap ({int(spec['group_cap'])} per window: {d['group']})"
@@ -339,13 +406,25 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
                 why = f"max open; extra slot needs edge {cfg['extra_min_edge']:g}+"
             else:
                 extra = True
-        per = float(d["ask"]) + float(d["fee"] or 0)
-        contracts = int(cfg["stake_usd"] // per) if per > 0 else 0
+        contracts, order_cost_fee, cost = size_order(cfg["stake_usd"], float(d["ask"]), per_order_fee)
         if not why and contracts < 1:
             why = "ticket buys no contract"
-        cost = round(contracts * per, 2)
         if not why and float(state.get("cash") or 0) + 1e-9 < cost:
             why = "shadow cash below ticket"
+        if not why and tape_check:
+            if tape_reads >= TAPE_MAX_READS:
+                why = "tape check limit this check"
+            else:
+                tape_reads += 1
+                try:
+                    vol = tape_volume(tape(d["ticker"], now), d["side"], float(d["ask"]))
+                except Exception as exc:  # noqa: BLE001 - no tape, no buy
+                    vol, why = None, f"Kalshi tape read failed ({type(exc).__name__}); no buy"
+                if vol is not None:
+                    d["tape_volume"] = round(vol, 2)
+                    if vol + 1e-9 < contracts:
+                        why = (f"Kalshi tape: {vol:g} contracts traded at {float(d['ask']):.2f} or better "
+                               f"in the last {TAPE_LOOKBACK_SEC // 60} min; need {contracts}")
         if why:
             d["action"], d["reason"] = "skip", why
             continue
@@ -353,6 +432,8 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
         state["open"].append({
             "ticker": d["ticker"], "event": d["event"], "side": d["side"], "label": d["label"],
             "contracts": contracts, "ask": d["ask"], "fee": d["fee"], "cost": cost,
+            **({"order_fee": order_cost_fee} if per_order_fee else {}),
+            **({"tape_volume": d["tape_volume"]} if "tape_volume" in d else {}),
             "fair": d["fair"], "edge": d["edge"], "why": d["why"],
             **({"group": d["group"]} if d.get("group") else {}),
             "opened": now.isoformat(timespec="seconds"),
