@@ -832,6 +832,8 @@ export type TimerHealth = {
 }
 
 export type Snapshot = {
+  /** City snapshot schema version (paper-bots/snapshot_schema.py). Missing on old desk builds. */
+  schema_version?: number
   paper_only?: boolean
   banner?: string
   desk?: Desk
