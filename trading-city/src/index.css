@@ -744,11 +744,13 @@ a {
   color: #8b95ad;
 }
 
-.vault-holo {
+.vault-holo,
+.holo.html-holo.vault-holo {
   border-color: var(--amber);
   box-shadow: 0 0 24px rgba(249, 200, 14, 0.32);
   cursor: default;
-  min-width: 14rem;
+  min-width: 16rem;
+  max-width: 22rem;
   pointer-events: none;
 }
 
@@ -886,6 +888,7 @@ a {
 
 .vault-holo .vault-skips,
 .vault-holo .vault-budgets,
+.vault-holo .vault-books,
 .vault-holo .vault-adapt,
 .vault-holo .vault-tax {
   display: block;

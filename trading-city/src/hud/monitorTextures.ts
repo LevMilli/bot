@@ -291,24 +291,30 @@ export function vaultLedgerTexture(desk?: Desk, bots: BotRow[] = []): THREE.Canv
   ctx.font = 'bold 36px monospace'
   ctx.fillText(`open risk ${money(desk?.open_risk)} · positions ${desk?.open_count ?? 0}`, 40, 224)
 
-  let y = 300
-  for (const bot of bots.slice(0, 5)) {
+  const deskBots = bots.filter((b) => !b.shadow_only)
+  const shadowBots = bots.filter((b) => b.shadow_only)
+  const shadowToday = shadowBots.reduce((sum, b) => sum + Number(b.today || 0), 0)
+  let y = 278
+  for (const bot of deskBots.slice(0, 6)) {
     const offline = bot.present === false
     ctx.fillStyle = offline ? '#9a88aa' : '#ffffff'
-    ctx.font = 'bold 48px monospace'
+    ctx.font = 'bold 40px monospace'
     ctx.fillText(String(bot.name || bot.id).slice(0, 18), 40, y)
     ctx.fillStyle = offline ? '#9a88aa' : Number(bot.today || 0) >= 0 ? '#39ff14' : '#ff2a6d'
-    ctx.font = 'bold 48px monospace'
-    const figure = offline ? 'offline' : money(bot.today != null && bot.today !== 0 ? bot.today : bot.realized, true)
+    ctx.font = 'bold 40px monospace'
+    const figure = offline ? 'offline' : `cash ${money(bot.cash)} · ${money(bot.today != null && bot.today !== 0 ? bot.today : bot.realized, true)}`
     ctx.fillText(figure, w - 40 - ctx.measureText(figure).width, y)
-    y += 82
+    y += 68
     ctx.fillStyle = '#4a5568'
-    ctx.fillRect(40, y - 54, w - 80, 3)
+    ctx.fillRect(40, y - 46, w - 80, 3)
   }
 
-  ctx.fillStyle = '#7ef9ff'
-  ctx.font = 'bold 32px monospace'
-  wrapText(ctx, desk?.status_line || desk?.pace_line || 'Paper reserve synced to snapshot.', 40, h - 64, w - 80, 36, 2)
+  ctx.fillStyle = '#b9a7e8'
+  ctx.font = 'bold 30px monospace'
+  const shadowLine = shadowBots.length
+    ? `${shadowBots.length} shadow towers on their own books · today ${money(shadowToday, true)} · not in this cash`
+    : 'Every desk tower is on this board.'
+  wrapText(ctx, shadowLine, 40, h - 64, w - 80, 34, 2)
 
   return screenTexture(canvas)
 }
