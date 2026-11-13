@@ -455,6 +455,56 @@ a {
   background: #243044;
 }
 
+/* Same face as "open N" in the row meta. */
+.tower-menu-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.tower-menu-live,
+.tower-tab-shut .tower-tab-open {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.tower-menu-subheading {
+  margin: 0;
+  padding: 0.3rem 0.6rem 0;
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  font-weight: 400;
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+.tower-tab-shut {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  margin-left: 0.5rem;
+}
+
+.tower-tab-shut-word {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: normal;
+  color: #7d8599;
+}
+
+.tower-tab.market-shut .tower-tab-beam {
+  background: #3a4152;
+  box-shadow: none;
+}
+
+.tower-tab.market-shut .tower-tab-name {
+  color: #b8bfd0;
+}
+
 .tower-holo-compact {
   min-width: 6.8rem !important;
   max-width: 9.5rem !important;
@@ -1727,4 +1777,9 @@ a {
   .holo {
     animation: none;
   }
+}
+
+.tower-holo-shut {
+  color: #7d8599;
+  font-weight: 400;
 }
