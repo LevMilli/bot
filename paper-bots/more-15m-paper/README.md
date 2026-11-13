@@ -6,7 +6,8 @@ Shadow paper tower for Kalshi 15-minute "up or down" markets that no older tower
 1. **Open price:** Kalshi posts the price at the start of the window as the target.
 2. **Live price:** Coinbase mid for the coins (Kraken backup). Hyperliquid's live oracle for the S&P 500 and the currencies.
 3. **Offset check:** for the S&P 500 and currencies the live feed is a different print from Kalshi's source, so the bot measures the gap at each window open and only buys once it has seen 3 opens.
-4. **Typical move:** the last hour's 1-minute moves (from Hyperliquid), times 1.25 for surprise jumps, with a minimum per market.
+4. **Typical move:** the last hour's 1-minute moves (from Hyperliquid), with a minimum per market. No extra cushion (checked against 88 real windows per market, the raw move was right); USD/JPY gets x1.3 because it moved more than its recent history.
+5. **Coins move together:** at most 2 open bets in the same direction (all up or all down) across the five coins in one window.
 5. **Fair value:** the chance the price finishes at or above the open.
 
 ## When it buys

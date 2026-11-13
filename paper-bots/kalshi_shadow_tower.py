@@ -115,6 +115,8 @@ def decide(quote: dict, cfg: dict) -> dict:
         "reason": "",
         "why": str(quote.get("why") or ""),
     }
+    if quote.get("group"):
+        row["group"] = str(quote["group"])
     if fair is None or ask is None:
         row["reason"] = "need fair + ask"
         return row
@@ -326,6 +328,9 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
             why = "already holding this market"
         elif d["event"] and d["event"] in held_events:
             why = "already holding this event"
+        elif d.get("group") and spec.get("group_cap") and sum(
+                1 for p in state["open"] if p.get("group") == d["group"]) >= int(spec["group_cap"]):
+            why = f"same-direction cap ({int(spec['group_cap'])} per window: {d['group']})"
         extra = False
         if not why and len(state["open"]) >= cfg["max_open"]:
             if len(state["open"]) >= cfg["max_open"] + cfg["extra_slots"]:
@@ -349,6 +354,7 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
             "ticker": d["ticker"], "event": d["event"], "side": d["side"], "label": d["label"],
             "contracts": contracts, "ask": d["ask"], "fee": d["fee"], "cost": cost,
             "fair": d["fair"], "edge": d["edge"], "why": d["why"],
+            **({"group": d["group"]} if d.get("group") else {}),
             "opened": now.isoformat(timespec="seconds"),
             "paper_only": True, "shadow_only": True,
             "exit_plan": {"kind": "model-flip+settle", "flip_margin": cfg["flip_margin"]},

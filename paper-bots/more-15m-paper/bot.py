@@ -8,7 +8,7 @@ the price at the close is at least the price at the open; Kalshi posts that
 open price as ``floor_strike``.
 
 Fair = N(ln(spot / open) / (sigma * sqrt(minutes left))), with sigma the
-realized 1-minute move over the last hour (x1.25 for fat tails, floored per
+realized 1-minute move over the last hour (x1.0; USD/JPY x1.3 from calibration; floored per
 asset). Spot: Coinbase mid for the coins (Kraken backup), Hyperliquid's live
 oracle for the S&P and FX. For those three the oracle is a different print from
 Kalshi's source, so the bot learns the open offset at each fresh window and
@@ -37,7 +37,8 @@ for path in (DESK_ROOT, HERE):
 
 import kalshi_shadow_tower as engine  # noqa: E402
 
-SPEC = {"id": "more-15m", "name": "More 15m", "floor": 0.05, "max_open": 4, "max_edge": 0.20}
+SPEC = {"id": "more-15m", "name": "More 15m", "floor": 0.05, "max_open": 4, "max_edge": 0.20,
+        "group_cap": 2}
 
 # series -> (label, spot kind, spot symbol, Hyperliquid candle coin, sigma floor per minute)
 SERIES = {
@@ -55,7 +56,16 @@ BASIS_MIN_OPENS = 3
 BASIS_LEARN_MIN = 1.5     # learn only within 1.5 minutes of the open
 BASIS_WEIGHT = 0.3
 BASIS_FILE = "index_basis.json"
-SIGMA_MULT = 1.25
+# Swing multiplier per market, checked Nov 12 against 88 settled windows each
+# (S&P: 25): with the raw last-hour 1-minute move, real 15-minute outcomes had a
+# z-score spread of 0.95-1.09 for the coins and EUR/USD (so 1.0 is right; the old
+# x1.25 overstated swings and made long shots look cheap), 1.31 for USD/JPY.
+SIGMA_MULT = {"KXUSDJPY15M": 1.3}
+SIGMA_MULT_DEFAULT = 1.0
+# Coins move together. At most this many open bets on the same direction
+# (all up or all down) across the five coins in one 15-minute window.
+COINS = {"KXSOL15M", "KXXRP15M", "KXDOGE15M", "KXBNB15M", "KXHYPE15M"}
+SAME_WAY_CAP = 2
 MIN_MINUTES, MAX_MINUTES = 3.0, 14.0
 HYPERLIQUID = "https://api.hyperliquid.xyz/info"
 COINBASE = "https://api.exchange.coinbase.com/products/{sym}-USD/ticker"
@@ -84,7 +94,7 @@ def hl_oracles() -> dict[str, float]:
     return out
 
 
-def sigma_per_min(coin: str, floor: float, now: dt.datetime) -> float:
+def sigma_per_min(coin: str, floor: float, now: dt.datetime, mult: float = SIGMA_MULT_DEFAULT) -> float:
     end = int(now.timestamp() * 1000)
     rows = hl_post({"type": "candleSnapshot",
                     "req": {"coin": coin, "interval": "1m", "startTime": end - 65 * 60000, "endTime": end}})
@@ -93,7 +103,7 @@ def sigma_per_min(coin: str, floor: float, now: dt.datetime) -> float:
     rets = [math.log(b / a) for a, b in zip(closes, closes[1:])]
     if len(rets) < 20:
         raise ValueError("short candle history")
-    return max(floor, SIGMA_MULT * statistics.pstdev(rets))
+    return max(floor, mult * statistics.pstdev(rets))
 
 
 def coin_spot(sym: str) -> float:
@@ -172,6 +182,9 @@ def window_quotes(series: str, markets: list[dict], spot: float, sigma: float, n
             side["fair"] = p_yes if side["side"] == "yes" else 1.0 - p_yes
             side["label"] = f"{label} 15m up by {close.strftime('%H:%M')} UTC"
             side["why"] = why
+            if series in COINS:
+                up = side["side"] == "yes"
+                side["group"] = f"coins {'up' if up else 'down'} {close.strftime('%H:%M')}"
             if log_reason:
                 side["log_only"] = True
                 side["log_reason"] = log_reason
@@ -193,7 +206,7 @@ def model(cfg: dict, now: dt.datetime):
             spot = coin_spot(sym) if kind == "coin" else oracles.get(sym)
             if not spot:
                 raise ValueError("no spot")
-            sigma = sigma_per_min(candle, floor, now)
+            sigma = sigma_per_min(candle, floor, now, SIGMA_MULT.get(series, SIGMA_MULT_DEFAULT))
             quotes.extend(window_quotes(series, markets, spot, sigma, now))
         except Exception as exc:  # noqa: BLE001 - one market's read failing skips that market
             failed.append(f"{label} ({type(exc).__name__})")

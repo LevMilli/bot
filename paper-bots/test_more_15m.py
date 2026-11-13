@@ -76,3 +76,27 @@ def test_registry_and_desk_wiring():
     sys.path.insert(0, os.path.join(HERE, "tools"))
     import new_tower
     assert new_tower.check_tower("more-15m")["ok"]
+
+
+def test_same_direction_cap(tmp_path, monkeypatch):
+    bot = _bot()
+    import kalshi_shadow_tower as engine
+    monkeypatch.setattr(bot, "HERE", str(tmp_path))
+    close = NOW + dt.timedelta(minutes=9)
+    quotes = []
+    for s in ("KXSOL15M", "KXXRP15M", "KXDOGE15M"):
+        m = _market(s, 100.0, close, yes_ask=0.75, no_ask=0.27)
+        m["ticker"], m["event_ticker"] = f"{s}-W", f"{s}-E"
+        quotes += bot.window_quotes(s, [m], 100.3, 0.001, NOW)   # fair up ~0.87 vs ask 0.40
+    assert {q["group"] for q in quotes if q["side"] == "yes"} == {f"coins up {close.strftime('%H:%M')}"}
+    tower = str(tmp_path / "t")
+    for _ in range(3):
+        engine.run_tower(bot.SPEC, tower, None, now=NOW, fetch=lambda t: {}, quotes=quotes)
+    import json
+    acct = json.load(open(os.path.join(tower, "paper_account.json")))
+    assert len(acct["open"]) == 2 and all(p["group"].startswith("coins up") for p in acct["open"])
+
+
+def test_swing_multiplier_calibrated():
+    bot = _bot()
+    assert bot.SIGMA_MULT_DEFAULT == 1.0 and bot.SIGMA_MULT["KXUSDJPY15M"] == 1.3

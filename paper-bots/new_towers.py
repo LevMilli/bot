@@ -184,7 +184,8 @@ TOWERS = (
             "Shadow sleeve only — spends no desk cash and takes no tower risk share",
             "KXSOL15M / KXXRP15M / KXDOGE15M / KXBNB15M / KXHYPE15M (CF Benchmarks 60-second average), "
             "KXINX15M (S&P 500), KXEURUSD15M / KXUSDJPY15M (Pyth)",
-            "Fair = N(ln(live / open) / (1-minute move x sqrt(minutes left))); 1-minute move from the last hour x1.25",
+            "Fair = N(ln(live / open) / (1-minute move x sqrt(minutes left))); 1-minute move from the last hour (x1.0; USD/JPY x1.3, from calibration)",
+            "Coins move together: at most 2 open bets the same direction across the five coins per window",
             "Live price: Coinbase mid for coins (Kraken backup); Hyperliquid oracle for the S&P 500 and FX, "
             "shifted by the offset learned at each window open (needs 3 opens before any buy)",
             "Window: 3 to 14 minutes left",
