@@ -23,12 +23,15 @@ function WindowInstances({
   width,
   seed,
   offline,
+  dark = false,
   sparse = false,
 }: {
   height: number
   width: number
   seed: number
   offline: boolean
+  /** Market closed: lights out, panes nearly black. */
+  dark?: boolean
   /** Filler towers: fewer rows/faces so the plaza stays interactive. */
   sparse?: boolean
 }) {
@@ -84,7 +87,7 @@ function WindowInstances({
   return (
     <instancedMesh ref={mesh} args={[undefined, undefined, count]}>
       <boxGeometry args={[0.08, 0.1, 0.04]} />
-      <meshBasicMaterial color={offline ? '#2a3348' : '#f4f0d4'} />
+      <meshBasicMaterial color={dark ? '#0b0b14' : offline ? '#2a3348' : '#f4f0d4'} />
     </instancedMesh>
   )
 }
@@ -167,15 +170,15 @@ function TradeTower({ bot, index, position, selected, onSelect, vista = false }:
       >
         <boxGeometry args={[width, height, width]} />
         <meshStandardMaterial
-          color={shut ? '#5a5e6a' : offline ? '#06050c' : '#05040c'}
-          emissive={shut ? '#6a6e7a' : selected ? color : '#080814'}
-          emissiveIntensity={shut ? (selected ? 0.3 : 0.16) : selected ? 0.32 : offline ? 0.03 : 0.06}
+          color={offline ? '#06050c' : '#05040c'}
+          emissive={selected ? (shut ? '#3a4152' : color) : '#080814'}
+          emissiveIntensity={selected ? 0.32 : offline || shut ? 0.03 : 0.06}
           roughness={0.88}
           metalness={0.12}
         />
       </mesh>
 
-      <WindowInstances height={height} width={width} seed={index + 3} offline={closed} sparse />
+      <WindowInstances height={height} width={width} seed={index + 3} offline={closed} dark={shut} sparse />
 
       {/* roof cap */}
       <mesh position={[0, height + 0.08, 0]}>

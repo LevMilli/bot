@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Line } from '@react-three/drei'
 import type { BotRow, Desk } from '../types'
-import { workersOnShift } from '../data/format'
+import { towerInCity, workersOnShift } from '../data/format'
 import { GridFloor } from './GridFloor'
 import {
   clearFromBackRoad,
@@ -304,7 +304,9 @@ export function CityContents({
   onSelect: (id: string) => void
   onOpenVault?: () => void
 }) {
-  const { slots, fillers } = useMemo(() => layoutCity(bots), [bots])
+  // Practice towers appear once they start trading; until then they live in the dropdown only.
+  const standing = useMemo(() => bots.filter(towerInCity), [bots])
+  const { slots, fillers } = useMemo(() => layoutCity(standing), [standing])
   const workers = workersOnShift(bots)
   return (
     <>
