@@ -167,6 +167,7 @@ SETTLEMENT_FILES = (
     "sports-gap-paper/paper_trades.md",
     "btc15m-signal/paper_account.json",
     "commodity-15m-paper/paper_account.json",
+    "commodity-15m-paper/index_basis.json",  # learned open offsets survive redeploys
     "kalshi-sp500-paper/paper_state.json",
     "kalshi-sp500-paper/Trade_Ledger.md",
     "kalshi-sp500-paper/Learning.md",

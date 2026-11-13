@@ -100,3 +100,9 @@ def test_same_direction_cap(tmp_path, monkeypatch):
 def test_swing_multiplier_calibrated():
     bot = _bot()
     assert bot.SIGMA_MULT_DEFAULT == 1.0 and bot.SIGMA_MULT["KXUSDJPY15M"] == 1.3
+
+
+def test_open_offsets_survive_redeploys():
+    import pimp_desk
+    assert "more-15m-paper/index_basis.json" in pimp_desk.SETTLEMENT_FILES
+    assert "commodity-15m-paper/index_basis.json" in pimp_desk.SETTLEMENT_FILES

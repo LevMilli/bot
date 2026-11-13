@@ -381,10 +381,11 @@ def anchored_spot(series: str, spot: float, m: dict, now: dt.datetime | None = N
         frac = seen if "frac" not in row else (1 - BASIS_WEIGHT) * frac + BASIS_WEIGHT * seen
         state[series] = {"frac": round(frac, 6), "last": ticker, "n": int(row.get("n") or 0) + 1}
         try:
-            tmp = os.path.join(HERE, BASIS_FILE + ".tmp")
+            target = os.path.realpath(os.path.join(HERE, BASIS_FILE))  # follow the volume link
+            tmp = target + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump(state, fh)
-            os.replace(tmp, os.path.join(HERE, BASIS_FILE))
+            os.replace(tmp, target)
         except OSError:
             pass
     return spot * (1.0 + frac)
