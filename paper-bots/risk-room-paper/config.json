@@ -1,0 +1,8 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "research": true,
+  "stake_usd": 0,
+  "note": "Research building. Shows the city's open paper bets grouped by what they ride on, and flags the same bet in several towers. Display only."
+}
