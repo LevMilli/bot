@@ -370,9 +370,6 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
     quotes = list(quotes or [])
     per_order_fee = bool(spec.get("fee_per_order"))
     flipped = model_flips(state, quotes, now, cfg["flip_margin"], per_order_fee)
-    # One buy per window: a market already traded (even if sold) is never bought again.
-    traded_tickers = ({p.get("ticker") for p in state["closed"]} | {p.get("ticker") for p in state["open"]}
-                      if spec.get("one_per_window") else set())
     tape_check = bool(spec.get("tape_check"))
     tape = tape or kalshi_tape
     tape_reads = 0
@@ -393,8 +390,6 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
             why = "already holding this market"
         elif d["event"] and d["event"] in held_events:
             why = "already holding this event"
-        elif d["ticker"] in traded_tickers:
-            why = "already traded this window (one buy per window, no switching sides)"
         elif d.get("group") and spec.get("group_cap") and sum(
                 1 for p in state["open"] if p.get("group") == d["group"]) >= int(spec["group_cap"]):
             why = f"same-direction cap ({int(spec['group_cap'])} per window: {d['group']})"
