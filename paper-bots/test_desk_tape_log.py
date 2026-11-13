@@ -105,8 +105,11 @@ def test_blocked_rules_and_trade_lines(tmp_path):
     _w(os.path.join(root, "more-15m-paper", "paper_account.json"), {
         "cash": 480, "open": [],
         "closed": [{"ticker": "KXDOGE15M-A", "side": "no", "ask": 0.18, "cost": 24.84, "pnl": 113.16,
-                    "closed": iso, "exit": "settled"}]})
+                    "closed": iso, "exit": "settled", "contracts": 138, "order_fee": 1.43,
+                    "tape_volume": 900}]})
     lines = t.trade_lines(root)
-    assert len(lines) == 1 and json.loads(lines[0][len("trade closed "):])["bot"] == "more-15m"
+    row = json.loads(lines[0][len("trade closed "):])
+    assert len(lines) == 1 and row["bot"] == "more-15m"
+    assert row["contracts"] == 138 and row["order_fee"] == 1.43 and row["tape_volume"] == 900
     assert t.trade_lines(root) == []
     assert "tally more-15m: cash $480.00" in t.tally_line(root, "more-15m")
