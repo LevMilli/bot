@@ -1399,6 +1399,43 @@ TOWERS = (
         "office": "Freshness inspector",
         "color": "#ffd166",
     },
+    {
+        "id": "window-history",
+        "name": "Window history",
+        "folder": "window-history-paper",
+        "keep": ("history_state.json",),  # open windows and results still owed survive a deploy
+        "venue": "kalshi_btc15m",
+        "floor": 0.05,
+        "kind": "research",
+        "research": True,
+        "every_sec": 60,
+        "timeout": 45,
+        "max_open": 0,
+        "blurb": (
+            "Support building. Once a minute it records the last 14 minutes of every Kalshi "
+            "15-minute window the towers trade: top 5 book levels, the open price and the result, "
+            "so ideas can be tested on what really happened. Buys nothing."
+        ),
+        "buy": [
+            "Never buys. Zero cash, zero stake, no tower risk share",
+            "18 series: BTC and ETH 15m, eight commodity 15m, the eight More 15m markets",
+            "Top 5 book levels each minute with 14 or fewer minutes left; open price and settlement value",
+        ],
+        "sell": [
+            "Nothing to sell",
+            "Saves recordings/YYYY-MM-DD.jsonl.gz on the /data volume, kept 180 days",
+            "Daily report: data gaps, 15-minute calibration, decision summary",
+        ],
+        "failsafes": [
+            "At most 30 Kalshi reads and 20 seconds a run; sits out while the Kalshi door backs off",
+            "Its reads never use or fill the shared cache, so towers always see their own fresh books",
+            "Size cap 300 MB: the oldest days are deleted first",
+            "One series failing does not stop the rest",
+        ],
+        "aliases": ("window history", "15m recordings", "window recordings"),
+        "office": "Window history",
+        "color": "#9ad0ff",
+    },
 )
 
 BY_ID = {row["id"]: row for row in TOWERS}

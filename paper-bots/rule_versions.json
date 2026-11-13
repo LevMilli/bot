@@ -1,0 +1,1119 @@
+{
+ "paper_only": true,
+ "about": "When each rule change went live, so results can be split before and after. Start = the merge time of the change (the desk redeploys right after). Add a row whenever a tower's buy, sell or sizing rules change.",
+ "versions": [
+  {
+   "tower": "more-15m",
+   "version": "v1",
+   "start": "2026-11-13T01:15:58+00:00",
+   "pr": 692,
+   "note": "Add More 15m shadow tower"
+  },
+  {
+   "tower": "more-15m",
+   "version": "v2",
+   "start": "2026-11-13T02:31:59+00:00",
+   "pr": 694,
+   "note": "More 15m: calibrated swing size, same-direction cap"
+  },
+  {
+   "tower": "more-15m",
+   "version": "v3",
+   "start": "2026-11-13T08:30:07+00:00",
+   "pr": 703,
+   "note": "More 15m: buy only on real Kalshi trading, one buy per window, fee once per order"
+  },
+  {
+   "tower": "more-15m",
+   "version": "v4",
+   "start": "2026-11-13T08:42:39+00:00",
+   "pr": 704,
+   "note": "More 15m: may buy again after an early sale when the edge clears"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v1",
+   "start": "2026-11-02T06:24:03+00:00",
+   "pr": null,
+   "note": "Ship top-10 adapt stack: CI sizing, commodity tower, tax, queue, Gate A."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v2",
+   "start": "2026-11-02T07:21:18+00:00",
+   "pr": null,
+   "note": "Ship Top 25 desk shortlist: Gate B, playbooks, vault board, doctor."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v3",
+   "start": "2026-11-02T14:25:49+00:00",
+   "pr": null,
+   "note": "Add accuracy/speed lanes and raise per-tower fill throughput."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v4",
+   "start": "2026-11-02T15:01:34+00:00",
+   "pr": null,
+   "note": "Merge main into tower lanes; keep dual-lane throughput."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v5",
+   "start": "2026-11-02T15:31:03+00:00",
+   "pr": null,
+   "note": "Fix sports UnboundLocalError and open fee-aware margin fills."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v6",
+   "start": "2026-11-02T16:13:59+00:00",
+   "pr": null,
+   "note": "Start APEX 1000-step plan: helpers, BTC soft gates, floors stub."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v7",
+   "start": "2026-11-02T18:26:03+00:00",
+   "pr": null,
+   "note": "Advance E1/E6 slice: ETH early singles, EIA blackout, teller memory."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v8",
+   "start": "2026-11-03T19:01:59+00:00",
+   "pr": 100,
+   "note": "Selective volume after starve: lock venue floors, feed fee-clear."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v9",
+   "start": "2026-11-03T19:04:57+00:00",
+   "pr": null,
+   "note": "Merge origin/main into apex-plan-slice-e1e6"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v10",
+   "start": "2026-11-03T19:29:15+00:00",
+   "pr": null,
+   "note": "Ship positive-ROI plan slice: M3/M4, exits, firm metrics"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v11",
+   "start": "2026-11-03T20:07:52+00:00",
+   "pr": null,
+   "note": "Add daily R budgets with settle-only after target"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v12",
+   "start": "2026-11-03T20:10:13+00:00",
+   "pr": null,
+   "note": "Add anti-revenge cool after stop/flip exits"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v13",
+   "start": "2026-11-03T20:15:56+00:00",
+   "pr": null,
+   "note": "Add firm correlation matrix and WTI\u2194Brent stake haircut"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v14",
+   "start": "2026-11-03T20:17:52+00:00",
+   "pr": null,
+   "note": "Add incubation lane for new series (n\u226550 staff graduate)"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v15",
+   "start": "2026-11-03T20:24:29+00:00",
+   "pr": null,
+   "note": "Add tax/fee ledger completeness for true ROI"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v16",
+   "start": "2026-11-03T20:26:08+00:00",
+   "pr": null,
+   "note": "Add clock-skew / stale-world entry skip"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v17",
+   "start": "2026-11-03T20:28:53+00:00",
+   "pr": null,
+   "note": "Add helper Gate A taxed EV autonomy gate"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v18",
+   "start": "2026-11-03T21:01:59+00:00",
+   "pr": null,
+   "note": "Add cross-tower firm rank queue for fee-clear bots"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v19",
+   "start": "2026-11-03T21:05:37+00:00",
+   "pr": null,
+   "note": "Add commodity book prefetch and empty CARD bar"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v20",
+   "start": "2026-11-03T21:10:50+00:00",
+   "pr": null,
+   "note": "Add near-miss soft-gate staff promote path"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v21",
+   "start": "2026-11-06T07:11:32+00:00",
+   "pr": null,
+   "note": "Ship living trading upgrade: P0 correctness, data spine, insight helpers."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v22",
+   "start": "2026-11-06T07:14:58+00:00",
+   "pr": null,
+   "note": "Wire feature-store on fee-clear evaluates; add CLV/injury insight helpers."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v23",
+   "start": "2026-11-07T06:39:53+00:00",
+   "pr": null,
+   "note": "Positive ROI: stamp exit_plan on fee-clear paper buys."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v24",
+   "start": "2026-11-07T07:29:14+00:00",
+   "pr": 330,
+   "note": "Positive ROI: sticky-open SLA blocks red-day speculative entries."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v25",
+   "start": "2026-11-07T08:07:39+00:00",
+   "pr": 347,
+   "note": "Positive ROI: commodity time-stop shadow (Phase 3 P0)."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v26",
+   "start": "2026-11-07T08:55:18+00:00",
+   "pr": 354,
+   "note": "Positive ROI: bulk E3\u2013E4 selective/tip funnel/schema/opp-cost"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v27",
+   "start": "2026-11-07T08:55:26+00:00",
+   "pr": 355,
+   "note": "Positive ROI: bulk autopsy CLV/latency/adverse/graduation money-path."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v28",
+   "start": "2026-11-07T08:55:29+00:00",
+   "pr": 356,
+   "note": "Positive ROI: bulk tip-warm prefetch + empty-CARD series board"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v29",
+   "start": "2026-11-07T09:08:45+00:00",
+   "pr": 358,
+   "note": "Positive ROI: post-E3E7 money-path boards (SERIES, depth-need, latency, speed KPIs)."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v30",
+   "start": "2026-11-07T10:13:02+00:00",
+   "pr": 368,
+   "note": "Positive ROI: timer auto shadow densify + DESK_SHADOW journals + sports smoke."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v31",
+   "start": "2026-11-07T10:24:55+00:00",
+   "pr": 369,
+   "note": "Positive ROI: settle-retro bid/t-stop densify + commodity shadow tick."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v32",
+   "start": "2026-11-07T10:40:58+00:00",
+   "pr": 370,
+   "note": "Positive ROI: rest-we-can evidence/ops densify (1\u20138)."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v33",
+   "start": "2026-11-08T12:07:33+00:00",
+   "pr": 379,
+   "note": "Positive ROI: close gap_bot/commodity settle-retro poison paths"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v34",
+   "start": "2026-11-08T12:30:49+00:00",
+   "pr": null,
+   "note": "Commodity: skip frac cushion veto when z already clears."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v35",
+   "start": "2026-11-08T12:51:36+00:00",
+   "pr": 391,
+   "note": "Positive ROI: commodity time-stop catchup + densify before flip."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v36",
+   "start": "2026-11-08T18:46:15+00:00",
+   "pr": null,
+   "note": "Positive ROI: densify BTC/commodity evaluate skips into CARD."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v37",
+   "start": "2026-11-08T19:45:27+00:00",
+   "pr": null,
+   "note": "Positive ROI: densify commodity evaluate skips into desk_brain."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v38",
+   "start": "2026-11-08T20:21:30+00:00",
+   "pr": null,
+   "note": "Positive ROI: densify BTC/commodity max-buys skips into desk_brain."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v39",
+   "start": "2026-11-08T20:22:00+00:00",
+   "pr": 408,
+   "note": "Positive ROI: pass ask on BTC/ETH/commodity near-miss records."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v40",
+   "start": "2026-11-08T20:26:57+00:00",
+   "pr": null,
+   "note": "Positive ROI: densify desk/account blocked fills into desk_brain."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v41",
+   "start": "2026-11-08T20:34:48+00:00",
+   "pr": null,
+   "note": "Positive ROI: densify commodity firm/sticky skips into CARD."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v42",
+   "start": "2026-11-08T21:03:38+00:00",
+   "pr": 422,
+   "note": "Positive ROI: commodity NM ask invert only with stored edge_buf."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v43",
+   "start": "2026-11-08T21:41:29+00:00",
+   "pr": 432,
+   "note": "Positive ROI: densify commodity prefetch orderbook fails into CARD/brain."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v44",
+   "start": "2026-11-08T21:49:22+00:00",
+   "pr": 434,
+   "note": "Positive ROI: densify commodity all-spot Yahoo fails into CARD/brain."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v45",
+   "start": "2026-11-08T21:53:26+00:00",
+   "pr": 435,
+   "note": "Positive ROI: densify commodity Kalshi list fails into CARD/brain."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v46",
+   "start": "2026-11-08T22:25:32+00:00",
+   "pr": 439,
+   "note": "Positive ROI: densify commodity partial Yahoo spot-fail empty windows"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v47",
+   "start": "2026-11-08T23:26:43+00:00",
+   "pr": 441,
+   "note": "Positive ROI: densify commodity partial Kalshi list-fail empty windows."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v48",
+   "start": "2026-11-09T03:10:57+00:00",
+   "pr": 453,
+   "note": "Tower[commodity]: read Kalshi orderbook_fp so depth is not invent-0"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v49",
+   "start": "2026-11-09T04:00:22+00:00",
+   "pr": 458,
+   "note": "Tower[commodity]: align depth window with MAX_SPREAD."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v50",
+   "start": "2026-11-09T05:02:56+00:00",
+   "pr": 462,
+   "note": "Tower[commodity]: stamp binary settle exit_price for t-stop catchup."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v51",
+   "start": "2026-11-09T05:10:28+00:00",
+   "pr": 463,
+   "note": "Tower[commodity]: mark t-stop/flip exits at held-side bid."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v52",
+   "start": "2026-11-09T12:50:23+00:00",
+   "pr": null,
+   "note": "Densify daily-R settle-only into commodity/BTC CARD why."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v53",
+   "start": "2026-11-09T22:45:33+00:00",
+   "pr": 519,
+   "note": "Densify daily-R settle-only into desk_brain (not max-buys invent)."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v54",
+   "start": "2026-11-09T22:57:45+00:00",
+   "pr": 522,
+   "note": "Densify commodity adverse cool/stale \u2014 refuse max-buys invent."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v55",
+   "start": "2026-11-09T23:22:50+00:00",
+   "pr": 531,
+   "note": "Densify entry-gate DESK_BLOCK_REASON \u2014 refuse bland invent."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v56",
+   "start": "2026-11-10T02:19:27+00:00",
+   "pr": 550,
+   "note": "Refuse max-buys invent when ruin drill zeros the buy cap."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v57",
+   "start": "2026-11-10T06:30:49+00:00",
+   "pr": 555,
+   "note": "Lift commodity buy-ins to $8 while the sleeve is ahead."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v58",
+   "start": "2026-11-10T16:56:12+00:00",
+   "pr": 562,
+   "note": "Revert \"Lift commodity buy-ins to $8 while the sleeve is ahead. (#555)\""
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v59",
+   "start": "2026-11-10T17:31:14+00:00",
+   "pr": 565,
+   "note": "Size commodity buy-ins by model confidence."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v60",
+   "start": "2026-11-11T08:22:05+00:00",
+   "pr": 573,
+   "note": "Count the commodity 2.0R day in America/Chicago."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v61",
+   "start": "2026-11-11T08:57:13+00:00",
+   "pr": 574,
+   "note": "Teach commodity learning from closes and watch dropping marks."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v62",
+   "start": "2026-11-11T14:12:37+00:00",
+   "pr": 576,
+   "note": "Stop commodity buys when the Chicago day is down 2.0R."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v63",
+   "start": "2026-11-11T14:16:44+00:00",
+   "pr": 577,
+   "note": "Let a red commodity day trade smaller and skip what already lost."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v64",
+   "start": "2026-11-11T18:29:45+00:00",
+   "pr": 601,
+   "note": "Skip a commodity series that has no book of its own."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v65",
+   "start": "2026-11-11T18:33:58+00:00",
+   "pr": 602,
+   "note": "Cap a commodity ticket after the red-day cut."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v66",
+   "start": "2026-11-11T18:36:30+00:00",
+   "pr": 603,
+   "note": "Write the commodity buy intent before cash moves."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v67",
+   "start": "2026-11-11T18:39:31+00:00",
+   "pr": 604,
+   "note": "Mark each open commodity ticket at the held-side bid."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v68",
+   "start": "2026-11-11T18:41:34+00:00",
+   "pr": 605,
+   "note": "Sell a commodity contract only on a real model-flip."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v69",
+   "start": "2026-11-11T18:43:16+00:00",
+   "pr": 606,
+   "note": "Record a commodity close without retyping the book."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v70",
+   "start": "2026-11-11T18:44:43+00:00",
+   "pr": 607,
+   "note": "Keep one commodity learning row per fill, keyed by series."
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v71",
+   "start": "2026-11-12T06:28:14+00:00",
+   "pr": 648,
+   "note": "Kalshi paper buys re-check the book before filling"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v72",
+   "start": "2026-11-12T06:51:57+00:00",
+   "pr": 650,
+   "note": "Retry Kalshi public reads on 429 instead of skipping"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v73",
+   "start": "2026-11-12T08:46:08+00:00",
+   "pr": 657,
+   "note": "Give the Kalshi tape a time budget; skip closed commodity windows"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v74",
+   "start": "2026-11-12T20:35:52+00:00",
+   "pr": 691,
+   "note": "Commodity 15m: live index prices; history keeps whole 15m windows"
+  },
+  {
+   "tower": "commodity-15m",
+   "version": "v75",
+   "start": "2026-11-13T02:40:46+00:00",
+   "pr": 695,
+   "note": "Keep learned open offsets across redeploys"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v1",
+   "start": "2026-10-27T05:36:02+00:00",
+   "pr": 3,
+   "note": "Add paper-only trading starter pack"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v2",
+   "start": "2026-10-30T19:54:19+00:00",
+   "pr": 8,
+   "note": "Expand the paper PIMP-TRADING desk."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v3",
+   "start": "2026-10-30T20:39:52+00:00",
+   "pr": 9,
+   "note": "Fix the PIMP-TRADING desk layout."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v4",
+   "start": "2026-10-30T21:36:54+00:00",
+   "pr": 15,
+   "note": "Take more paper trades and log risk."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v5",
+   "start": "2026-10-30T21:56:18+00:00",
+   "pr": 17,
+   "note": "Raise paper stakes to $20\u2013$100."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v6",
+   "start": "2026-10-31T15:33:55+00:00",
+   "pr": 23,
+   "note": "Require the saved edge after fees on paper buys."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v7",
+   "start": "2026-10-31T17:03:31+00:00",
+   "pr": 21,
+   "note": "Keep closed paper settlements when the image updates."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v8",
+   "start": "2026-11-01T19:54:06+00:00",
+   "pr": null,
+   "note": "Harden paper bots so trade decisions stay logical under ROI rules"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v9",
+   "start": "2026-11-01T20:07:29+00:00",
+   "pr": null,
+   "note": "Keep sell/manage running when desk entry_gate blocks buys"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v10",
+   "start": "2026-11-01T21:49:51+00:00",
+   "pr": null,
+   "note": "Raise entry bars to \u226580% confidence and color PnL red/green."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v11",
+   "start": "2026-11-02T02:25:46+00:00",
+   "pr": null,
+   "note": "Ship desk profit six: venue edges, correlation, Kelly, flips, starve, shadow."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v12",
+   "start": "2026-11-02T03:35:51+00:00",
+   "pr": 53,
+   "note": "Land Sized Kalshi tower and tighten desk for profit."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v13",
+   "start": "2026-11-02T03:56:02+00:00",
+   "pr": 55,
+   "note": "Open more fee-aware paper fills without dropping the margin bar."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v14",
+   "start": "2026-11-02T04:57:42+00:00",
+   "pr": null,
+   "note": "Track Kalshi desk tape and bid every BTC window that fits."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v15",
+   "start": "2026-11-02T05:19:24+00:00",
+   "pr": null,
+   "note": "Add desk brain: rank-then-buy, parallel books, decision journal."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v16",
+   "start": "2026-11-02T05:47:55+00:00",
+   "pr": null,
+   "note": "Fix sports 75s kill by capping Kalshi tape sync scope."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v17",
+   "start": "2026-11-02T05:58:52+00:00",
+   "pr": null,
+   "note": "Track BTC/ETH 15m and BTCD ladder; early single or \u22645m parlay."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v18",
+   "start": "2026-11-02T06:04:23+00:00",
+   "pr": null,
+   "note": "Add shared vol/learn adapt: safe on high vol, size up on \u226580% records."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v19",
+   "start": "2026-11-02T06:24:03+00:00",
+   "pr": null,
+   "note": "Ship top-10 adapt stack: CI sizing, commodity tower, tax, queue, Gate A."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v20",
+   "start": "2026-11-02T06:59:22+00:00",
+   "pr": null,
+   "note": "Ship desk trade-more Phase 0/1: budgets, skips, depth rank, CLV."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v21",
+   "start": "2026-11-02T07:21:18+00:00",
+   "pr": null,
+   "note": "Ship Top 25 desk shortlist: Gate B, playbooks, vault board, doctor."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v22",
+   "start": "2026-11-02T14:25:49+00:00",
+   "pr": null,
+   "note": "Add accuracy/speed lanes and raise per-tower fill throughput."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v23",
+   "start": "2026-11-02T15:01:34+00:00",
+   "pr": null,
+   "note": "Merge main into tower lanes; keep dual-lane throughput."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v24",
+   "start": "2026-11-02T15:02:13+00:00",
+   "pr": null,
+   "note": "Ship Phase 3: KXBTCD ladder companion + parlay joint EV."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v25",
+   "start": "2026-11-02T15:31:03+00:00",
+   "pr": null,
+   "note": "Fix sports UnboundLocalError and open fee-aware margin fills."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v26",
+   "start": "2026-11-02T16:13:59+00:00",
+   "pr": null,
+   "note": "Start APEX 1000-step plan: helpers, BTC soft gates, floors stub."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v27",
+   "start": "2026-11-02T18:26:03+00:00",
+   "pr": null,
+   "note": "Advance E1/E6 slice: ETH early singles, EIA blackout, teller memory."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v28",
+   "start": "2026-11-03T19:01:59+00:00",
+   "pr": 100,
+   "note": "Selective volume after starve: lock venue floors, feed fee-clear."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v29",
+   "start": "2026-11-03T19:04:57+00:00",
+   "pr": null,
+   "note": "Merge origin/main into apex-plan-slice-e1e6"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v30",
+   "start": "2026-11-03T19:05:45+00:00",
+   "pr": null,
+   "note": "Merge origin/main into desk-phase3-expand"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v31",
+   "start": "2026-11-03T19:13:35+00:00",
+   "pr": null,
+   "note": "Merge origin/main into apex-plan-slice-e1e6"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v32",
+   "start": "2026-11-03T19:29:15+00:00",
+   "pr": null,
+   "note": "Ship positive-ROI plan slice: M3/M4, exits, firm metrics"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v33",
+   "start": "2026-11-03T19:50:00+00:00",
+   "pr": null,
+   "note": "Learn v2 + adverse cool-off + weekly scorecard"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v34",
+   "start": "2026-11-03T20:07:52+00:00",
+   "pr": null,
+   "note": "Add daily R budgets with settle-only after target"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v35",
+   "start": "2026-11-03T20:10:13+00:00",
+   "pr": null,
+   "note": "Add anti-revenge cool after stop/flip exits"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v36",
+   "start": "2026-11-03T20:17:52+00:00",
+   "pr": null,
+   "note": "Add incubation lane for new series (n\u226550 staff graduate)"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v37",
+   "start": "2026-11-03T20:24:29+00:00",
+   "pr": null,
+   "note": "Add tax/fee ledger completeness for true ROI"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v38",
+   "start": "2026-11-03T20:26:08+00:00",
+   "pr": null,
+   "note": "Add clock-skew / stale-world entry skip"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v39",
+   "start": "2026-11-03T20:28:53+00:00",
+   "pr": null,
+   "note": "Add helper Gate A taxed EV autonomy gate"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v40",
+   "start": "2026-11-03T21:01:59+00:00",
+   "pr": null,
+   "note": "Add cross-tower firm rank queue for fee-clear bots"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v41",
+   "start": "2026-11-03T21:05:37+00:00",
+   "pr": null,
+   "note": "Add commodity book prefetch and empty CARD bar"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v42",
+   "start": "2026-11-03T21:10:50+00:00",
+   "pr": null,
+   "note": "Add near-miss soft-gate staff promote path"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v43",
+   "start": "2026-11-06T07:11:32+00:00",
+   "pr": null,
+   "note": "Ship living trading upgrade: P0 correctness, data spine, insight helpers."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v44",
+   "start": "2026-11-06T07:14:58+00:00",
+   "pr": null,
+   "note": "Wire feature-store on fee-clear evaluates; add CLV/injury insight helpers."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v45",
+   "start": "2026-11-07T06:39:53+00:00",
+   "pr": null,
+   "note": "Positive ROI: stamp exit_plan on fee-clear paper buys."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v46",
+   "start": "2026-11-07T07:29:14+00:00",
+   "pr": 330,
+   "note": "Positive ROI: sticky-open SLA blocks red-day speculative entries."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v47",
+   "start": "2026-11-07T08:55:18+00:00",
+   "pr": 354,
+   "note": "Positive ROI: bulk E3\u2013E4 selective/tip funnel/schema/opp-cost"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v48",
+   "start": "2026-11-07T08:55:26+00:00",
+   "pr": 355,
+   "note": "Positive ROI: bulk autopsy CLV/latency/adverse/graduation money-path."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v49",
+   "start": "2026-11-07T08:55:29+00:00",
+   "pr": 356,
+   "note": "Positive ROI: bulk tip-warm prefetch + empty-CARD series board"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v50",
+   "start": "2026-11-07T09:08:45+00:00",
+   "pr": 358,
+   "note": "Positive ROI: post-E3E7 money-path boards (SERIES, depth-need, latency, speed KPIs)."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v51",
+   "start": "2026-11-07T09:39:43+00:00",
+   "pr": 363,
+   "note": "Densify shadow evidence capture toward promote n\u226530."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v52",
+   "start": "2026-11-07T10:02:34+00:00",
+   "pr": 366,
+   "note": "Positive ROI: ungate BTC near-miss logging under DESK_SHADOW."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v53",
+   "start": "2026-11-07T10:13:02+00:00",
+   "pr": 368,
+   "note": "Positive ROI: timer auto shadow densify + DESK_SHADOW journals + sports smoke."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v54",
+   "start": "2026-11-08T12:05:55+00:00",
+   "pr": null,
+   "note": "Unlock fee-clear volume: line CLV for green_boost, BTC cushion when z clears."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v55",
+   "start": "2026-11-08T12:10:31+00:00",
+   "pr": null,
+   "note": "BTC: skip toward-target veto when p already fee-clears."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v56",
+   "start": "2026-11-08T12:44:13+00:00",
+   "pr": null,
+   "note": "BTC/ETH: stop volatile_hold from re-vetoing fee-clear early singles."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v57",
+   "start": "2026-11-08T18:46:15+00:00",
+   "pr": null,
+   "note": "Positive ROI: densify BTC/commodity evaluate skips into CARD."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v58",
+   "start": "2026-11-08T20:04:33+00:00",
+   "pr": null,
+   "note": "Positive ROI: densify BTC sticky-open skips into desk_brain."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v59",
+   "start": "2026-11-08T20:21:30+00:00",
+   "pr": null,
+   "note": "Positive ROI: densify BTC/commodity max-buys skips into desk_brain."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v60",
+   "start": "2026-11-08T20:22:00+00:00",
+   "pr": 408,
+   "note": "Positive ROI: pass ask on BTC/ETH/commodity near-miss records."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v61",
+   "start": "2026-11-08T20:26:57+00:00",
+   "pr": null,
+   "note": "Positive ROI: densify desk/account blocked fills into desk_brain."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v62",
+   "start": "2026-11-08T20:33:06+00:00",
+   "pr": null,
+   "note": "Positive ROI: densify ETH desk-block/delay/volatile skips into desk_brain."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v63",
+   "start": "2026-11-08T21:38:15+00:00",
+   "pr": 431,
+   "note": "Positive ROI: densify ETH prefetch orderbook fails into CARD/brain."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v64",
+   "start": "2026-11-08T21:59:10+00:00",
+   "pr": 436,
+   "note": "Positive ROI: densify BTC early no-spot into CARD/brain."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v65",
+   "start": "2026-11-08T22:03:34+00:00",
+   "pr": 437,
+   "note": "Positive ROI: densify ETH open-window spot-fail into CARD/brain."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v66",
+   "start": "2026-11-09T03:13:02+00:00",
+   "pr": 456,
+   "note": "Tower[btc15m]: mark TP/flip exits at held-side bid"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v67",
+   "start": "2026-11-09T12:50:23+00:00",
+   "pr": null,
+   "note": "Densify daily-R settle-only into commodity/BTC CARD why."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v68",
+   "start": "2026-11-09T22:45:33+00:00",
+   "pr": 519,
+   "note": "Densify daily-R settle-only into desk_brain (not max-buys invent)."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v69",
+   "start": "2026-11-09T22:59:16+00:00",
+   "pr": 524,
+   "note": "Densify BTC adverse cool/stale \u2014 refuse max-buys invent."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v70",
+   "start": "2026-11-09T23:22:50+00:00",
+   "pr": 531,
+   "note": "Densify entry-gate DESK_BLOCK_REASON \u2014 refuse bland invent."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v71",
+   "start": "2026-11-10T02:19:27+00:00",
+   "pr": 550,
+   "note": "Refuse max-buys invent when ruin drill zeros the buy cap."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v72",
+   "start": "2026-11-11T18:12:41+00:00",
+   "pr": 594,
+   "note": "Drop a BTC 15-minute scan that is too late, off band, or thin."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v73",
+   "start": "2026-11-11T18:15:58+00:00",
+   "pr": 595,
+   "note": "Keep a BTC 15-minute decide at 0.05 after the fee."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v74",
+   "start": "2026-11-11T18:18:28+00:00",
+   "pr": 596,
+   "note": "Write the BTC 15-minute buy intent before cash moves."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v75",
+   "start": "2026-11-11T18:20:20+00:00",
+   "pr": 597,
+   "note": "Mark a BTC 15-minute contract at the held-side bid."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v76",
+   "start": "2026-11-11T18:22:56+00:00",
+   "pr": 598,
+   "note": "Sell a BTC 15-minute contract only at the held-side bid."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v77",
+   "start": "2026-11-11T18:26:02+00:00",
+   "pr": 599,
+   "note": "Record the BTC 15-minute fill, bid, fee, and exit."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v78",
+   "start": "2026-11-11T18:27:31+00:00",
+   "pr": 600,
+   "note": "Key a BTC 15-minute settle to its own series."
+  },
+  {
+   "tower": "btc15m",
+   "version": "v79",
+   "start": "2026-11-12T06:28:14+00:00",
+   "pr": 648,
+   "note": "Kalshi paper buys re-check the book before filling"
+  },
+  {
+   "tower": "btc15m",
+   "version": "v80",
+   "start": "2026-11-12T09:16:28+00:00",
+   "pr": 660,
+   "note": "Kalshi gateway: one shared pace, back-off and cache for every tower"
+  }
+ ]
+}
