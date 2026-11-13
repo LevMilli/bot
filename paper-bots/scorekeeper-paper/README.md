@@ -16,6 +16,16 @@ Every 6 hours it grades each trading bot on its whole paper record and writes `s
 | pause | the average is $0 or worse, but it could still be positive |
 | retire | even the high end is below $0: clearly losing |
 
+## Promotion card (50 results)
+For every practice tower in `../new_towers.py` (every row that is not a research building, so new shadow twins join on their own) it shows:
+
+- the count toward 50 results (closed trades), and how many to go
+- the average result per trade after fees and the fill tax, with losses counted
+- a cautious low end (the 95% range's low end)
+- a clear "ready to review" flag at 50, with a plain verdict: looks good (low end above $0), mixed (average above $0) or not good
+
+Ready to review only means Levi can now look. Promotion still needs his OK and is never automatic. The card is saved under `promotion` in `scorecard.json` and leads the building's card.
+
 ## Details
 - Research buildings (calibration lab, auditor, itself) are not graded.
 - No network reads. It only reads the desk's own state files, through the same views the dashboard uses.

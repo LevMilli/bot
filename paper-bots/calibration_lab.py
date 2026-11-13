@@ -15,6 +15,14 @@ the price after costs.
 It also keeps a scorecard for the new shadow towers: the Brier score of the
 last fair each tower logged for a contract before it settled, next to the
 Brier score of the ask it saw. Lower is better.
+
+15-minute families (B13). Kalshi's 15-minute crypto, commodity, FX and index
+windows settle about 1,500 times a day, so their cells reach 50 in days. They
+are kept apart from the daily families on purpose: their own rows file
+(``calibration_rows_15m.jsonl``), their own horizons (1, 2, 5 and 10 minutes
+before close, from 1-minute candles) and their own ``table_15m`` in
+``calibration.json``. ``FAMILIES`` and ``table`` are unchanged, so towers that
+read the daily table (favorite harvest) see exactly what they saw before.
 """
 from __future__ import annotations
 
@@ -41,6 +49,21 @@ FAMILIES = {
     "sp": ("KXINXU", "KXINX"),
 }
 HORIZONS = (1, 3, 6)
+# B13: 15-minute families. Separate from FAMILIES so nothing that reads the daily
+# table changes. Horizons here are minutes before close.
+ROWS_15M = "calibration_rows_15m.jsonl"
+FAMILIES_15M = {
+    "crypto_15m": ("KXBTC15M", "KXETH15M", "KXSOL15M", "KXXRP15M", "KXDOGE15M", "KXBNB15M", "KXHYPE15M"),
+    "commodity_15m": ("KXWTI15M", "KXBRENT15M", "KXNATGAS15M", "KXGOLD15M", "KXSILVER15M",
+                      "KXCOPPER15M", "KXPLATINUM15M", "KXPALLADIUM15M"),
+    "fx_15m": ("KXEURUSD15M", "KXUSDJPY15M"),
+    "index_15m": ("KXINX15M",),
+}
+HORIZONS_15M = (1, 2, 5, 10)
+LOOKBACK_15M_DAYS = 2      # about 190 windows per series: one listing page
+KEEP_15M_DAYS = 45
+MAX_BATCHES_15M = 12       # 1-minute candle calls per run; each covers about an hour of every series
+CHUNK_15M_MIN = 60         # closes inside one call span at most this many minutes (10,000-candle cap)
 BAND = 0.05
 Z = 1.96
 LOOKBACK_DAYS = 14
@@ -66,8 +89,8 @@ def band_of(price: float) -> str:
     return f"{lo:.2f}-{lo + BAND:.2f}"
 
 
-def family_of(series: str) -> str | None:
-    for family, members in FAMILIES.items():
+def family_of(series: str, families: dict | None = None) -> str | None:
+    for family, members in (FAMILIES if families is None else families).items():
         if series in members:
             return family
     return None
@@ -94,18 +117,20 @@ def quote_at(candles: list[dict], when: int):
     return [round(bid, 4), round(ask, 4)]
 
 
-def make_row(market: dict, series: str, candles: list[dict]) -> dict | None:
+def make_row(market: dict, series: str, candles: list[dict], horizons=HORIZONS, unit: int = 3600,
+             families: dict | None = None) -> dict | None:
+    """``unit`` is seconds per horizon step: 3600 for the daily families, 60 for 15m."""
     result = str(market.get("result") or "").lower()
     if result not in ("yes", "no"):
         return None
     close = _ts(market["close_time"])
     quotes = {}
-    for h in HORIZONS:
-        q = quote_at(candles, close - h * 3600)
+    for h in horizons:
+        q = quote_at(candles, close - h * unit)
         if q:
             quotes[str(h)] = q
     # A market with no quotes is still kept (empty q) so it is not fetched again.
-    return {"ticker": market["ticker"], "series": series, "family": family_of(series),
+    return {"ticker": market["ticker"], "series": series, "family": family_of(series, families),
             "close": market["close_time"], "result": result, "q": quotes}
 
 
@@ -123,13 +148,13 @@ def side_prices(row: dict, horizon: int):
     return out
 
 
-def build_table(rows: list[dict]) -> dict:
+def build_table(rows: list[dict], horizons=HORIZONS) -> dict:
     cells: dict = {}
     for row in rows:
         fam = row.get("family")
         if not fam:
             continue
-        for h in HORIZONS:
+        for h in horizons:
             for _side, price, won in side_prices(row, h):
                 if not 0.05 <= price < 0.95:
                     continue
@@ -158,9 +183,16 @@ def lookup(family: str, horizon: int, price: float, table: dict | None = None) -
     return ((table.get(family) or {}).get(str(horizon)) or {}).get(band_of(price))
 
 
+def lookup_15m(family: str, minutes: int, price: float, table: dict | None = None) -> dict | None:
+    """The 15-minute cell for a side priced ``price`` about ``minutes`` minutes before close."""
+    if table is None:
+        table = (engine.read_json(os.path.join(LAB_DIR, TABLE)) or {}).get("table_15m") or {}
+    return ((table.get(family) or {}).get(str(minutes)) or {}).get(band_of(price))
+
+
 # ------------------------------------------------------------------ storage
-def load_rows(lab_dir: str = LAB_DIR) -> list[dict]:
-    path = os.path.join(lab_dir, ROWS)
+def load_rows(lab_dir: str = LAB_DIR, name: str = ROWS) -> list[dict]:
+    path = os.path.join(lab_dir, name)
     out = []
     if not os.path.exists(path):
         return out
@@ -173,8 +205,9 @@ def load_rows(lab_dir: str = LAB_DIR) -> list[dict]:
     return out
 
 
-def save_rows(rows: list[dict], now: dt.datetime, lab_dir: str = LAB_DIR) -> list[dict]:
-    cutoff = now - dt.timedelta(days=KEEP_DAYS)
+def save_rows(rows: list[dict], now: dt.datetime, lab_dir: str = LAB_DIR, name: str = ROWS,
+              keep_days: int = KEEP_DAYS) -> list[dict]:
+    cutoff = now - dt.timedelta(days=keep_days)
     keep, seen = [], set()
     for row in rows:
         try:
@@ -186,7 +219,7 @@ def save_rows(rows: list[dict], now: dt.datetime, lab_dir: str = LAB_DIR) -> lis
             continue
         seen.add(row["ticker"])
         keep.append(row)
-    path = os.path.join(lab_dir, ROWS)
+    path = os.path.join(lab_dir, name)
     if os.path.islink(path):  # kept on the volume: save through the link
         path = os.path.realpath(path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -285,6 +318,66 @@ def collect(now: dt.datetime, known: set, get=None) -> tuple[list[dict], list[st
     return new, notes
 
 
+# ------------------------------------------------------------------ 15-minute families (B13)
+def settled_15m(series: str, now: dt.datetime, get=None) -> list[dict]:
+    """Settled 15-minute windows of one series from the last LOOKBACK_15M_DAYS (newest first)."""
+    get = get or engine.public_json
+    since = int((now - dt.timedelta(days=LOOKBACK_15M_DAYS)).timestamp())
+    data = get(f"{engine.KALSHI}/markets?series_ticker={series}&status=settled"
+               f"&min_settled_ts={since}&limit=1000") or {}
+    return [m for m in data.get("markets") or [] if isinstance(m, dict)]
+
+
+def candles_15m(markets: list[dict], get=None) -> dict:
+    get = get or engine.public_json
+    closes = [_ts(m["close_time"]) for m in markets]
+    start, end = min(closes) - (max(HORIZONS_15M) + 1) * 60, max(closes)
+    tickers = ",".join(m["ticker"] for m in markets)
+    data = get(f"{engine.KALSHI}/markets/candlesticks?market_tickers={tickers}"
+               f"&start_ts={start}&end_ts={end}&period_interval=1") or {}
+    return {str(m.get("market_ticker") or m.get("ticker")): m.get("candlesticks") or []
+            for m in data.get("markets") or []}
+
+
+def collect_15m(now: dt.datetime, known: set, get=None) -> tuple[list[dict], list[str]]:
+    """New 15m rows. Every family is pooled into one call per hour of closes, newest first.
+
+    One call holds up to 100 windows whose closes sit within CHUNK_15M_MIN minutes,
+    so it stays under Kalshi's 10,000-candle cap (100 × ~72 one-minute candles).
+    """
+    todo, series_of, notes = [], {}, []
+    for members in FAMILIES_15M.values():
+        for series in members:
+            try:
+                got = settled_15m(series, now, get)
+            except Exception as exc:  # noqa: BLE001 - one series failing skips it
+                notes.append(f"{series} skipped ({type(exc).__name__})")
+                continue
+            for m in got:
+                if (m.get("ticker") not in known and m.get("close_time")
+                        and str(m.get("result") or "").lower() in ("yes", "no")):
+                    todo.append(m)
+                    series_of[m["ticker"]] = series
+    new, batches = [], 0
+    for chunk in chunks(todo, size=100, span_h=CHUNK_15M_MIN / 60):
+        if batches >= MAX_BATCHES_15M:
+            notes.append("15m batch budget used; the rest waits for the next run")
+            break
+        batches += 1
+        try:
+            candles = candles_15m(chunk, get)
+        except Exception as exc:  # noqa: BLE001
+            notes.append(f"15m candles skipped ({type(exc).__name__})")
+            continue
+        for m in chunk:
+            row = make_row(m, series_of[m["ticker"]], candles.get(m["ticker"]) or [],
+                           HORIZONS_15M, 60, FAMILIES_15M)
+            known.add(m["ticker"])
+            if row:
+                new.append(row)
+    return new, notes
+
+
 # ------------------------------------------------------------------ scorecard
 def _research_fairs(folder: str) -> dict:
     """{(ticker, side): (fair, ask)} — the last logged fair per contract."""
@@ -365,6 +458,15 @@ def run(desk_root: str = HERE, lab_dir: str = LAB_DIR, now: dt.datetime | None =
     saved = engine.read_json(os.path.join(lab_dir, TABLE)) or {}
     results = {row["ticker"]: row["result"] for row in rows}
     results.update({k: v for k, v in (saved.get("results_cache") or {}).items() if k not in results})
+    # B13: the 15-minute families, kept in their own rows file and table.
+    rows15 = load_rows(lab_dir, ROWS_15M)
+    known15 = {row["ticker"] for row in rows15}
+    try:
+        new15, notes15 = collect_15m(now, known15, get)
+    except Exception as exc:  # noqa: BLE001 - the 15m add-on must never stop the daily lab
+        new15, notes15 = [], [f"15m families skipped ({type(exc).__name__})"]
+    notes = notes + notes15
+    rows15 = save_rows(rows15 + new15, now, lab_dir, ROWS_15M, KEEP_15M_DAYS)
     cards = scorecard(desk_root, results, market_get)
     cache = {k: v for k, v in results.items() if k not in {r["ticker"] for r in rows}}
     body = {
@@ -374,6 +476,11 @@ def run(desk_root: str = HERE, lab_dir: str = LAB_DIR, now: dt.datetime | None =
         "new_rows": len(new),
         "families": {fam: sum(1 for r in rows if r.get("family") == fam) for fam in FAMILIES},
         "table": table,
+        "rows_15m": len(rows15),
+        "new_rows_15m": len(new15),
+        "families_15m": {fam: sum(1 for r in rows15 if r.get("family") == fam) for fam in FAMILIES_15M},
+        "horizons_15m_minutes": list(HORIZONS_15M),
+        "table_15m": build_table(rows15, HORIZONS_15M),
         "scorecard": cards,
         "results_cache": dict(list(cache.items())[-5000:]),
         "notes": notes,
@@ -390,6 +497,13 @@ def card(body: dict) -> str:
         edge, fam, h, band, c = best[0]
         line += (f" Best band: {fam} {h}h before close at {band}: n {c['n']}, won {c['win_rate']:.0%}, "
                  f"cautious edge {edge:+.3f}.")
+    if body.get("rows_15m"):
+        line += f" 15m families: {body['rows_15m']:,} windows ({body.get('new_rows_15m', 0)} new)"
+        best15 = best_cells(body.get("table_15m") or {}, min_n=50)
+        if best15:
+            edge, fam, h, band, c = best15[0]
+            line += f", best {fam} {h}m before close at {band}: n {c['n']}, cautious edge {edge:+.3f}"
+        line += "."
     scored = [f"{k} {v['brier_model']:.3f} vs ask {v['brier_ask']:.3f}"
               for k, v in (body.get("scorecard") or {}).items() if v.get("n")]
     if scored:

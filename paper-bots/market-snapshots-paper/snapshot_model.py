@@ -9,6 +9,14 @@ Rows go to ``recordings/YYYY-MM-DD.jsonl.gz`` (one gzip member per snapshot,
 so a crash loses at most one snapshot). On the desk the folder lives on the
 /data volume. When the folder passes ``MAX_BYTES`` the oldest days are
 deleted. Only the best bid/ask and their sizes are kept, not the full book.
+
+Faster recordings for the 15-minute markets (B19). The building now wakes
+every minute. The full snapshot above still runs only once every 15 minutes.
+On the other minutes it records just the open 15-minute windows
+(``SERIES_15M``) during the last 14 minutes of each window, with one batched
+``/markets?tickers=`` read for all of them. A series is listed again (one read)
+only when its known window has closed, so a minute costs about two reads.
+Fast rows are saved the same way with ``"fast": true``.
 """
 from __future__ import annotations
 
@@ -26,6 +34,14 @@ SERIES = (
     # sports game winners
     "KXNBAGAME", "KXNFLGAME", "KXNHLGAME", "KXEPLGAME", "KXUCLGAME", "KXATPMATCH", "KXWTAMATCH",
 )
+# B19: the 15-minute windows, recorded every minute for the last 14 minutes of each window.
+SERIES_15M = (
+    "KXBTC15M", "KXETH15M", "KXSOL15M", "KXXRP15M", "KXDOGE15M", "KXBNB15M", "KXHYPE15M",
+    "KXWTI15M", "KXBRENT15M", "KXNATGAS15M", "KXGOLD15M", "KXSILVER15M", "KXCOPPER15M",
+    "KXPLATINUM15M", "KXPALLADIUM15M", "KXEURUSD15M", "KXUSDJPY15M", "KXINX15M",
+)
+FULL_EVERY_SEC = 900       # the original full snapshot keeps its 15-minute pace
+FAST_LAST_MIN = 14         # record a window only in its last 14 minutes
 MAX_BYTES = 150 * 1024 * 1024
 PER_SERIES = 200
 
@@ -61,6 +77,96 @@ def snapshot(list_open, now: dt.datetime, series=SERIES) -> tuple[dict, list[str
             rows[s] = got
     return {"at": now.isoformat(timespec="seconds"), "cols": ["ticker", "yes_bid", "yes_ask", "bid_size",
             "ask_size", "last", "volume", "oi"], "series": rows}, notes
+
+
+def _close(market: dict) -> dt.datetime | None:
+    try:
+        return dt.datetime.fromisoformat(str(market.get("close_time") or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def full_due(state: dict, now: dt.datetime, every: int = FULL_EVERY_SEC) -> bool:
+    """True when the 15-minute full snapshot is due (or has never run). Allows 30s of drift."""
+    try:
+        last = dt.datetime.fromisoformat(str(state.get("last_full") or ""))
+    except ValueError:
+        return True
+    return (now - last).total_seconds() >= every - 30
+
+
+def learn_windows(windows: dict, series: str, markets: list[dict], now: dt.datetime) -> None:
+    """Remember the open 15m tickers of one series: {series: {ticker: close iso}}."""
+    keep = {}
+    for m in markets or []:
+        close = _close(m)
+        if m.get("ticker") and close and close > now:
+            keep[str(m["ticker"])] = close.isoformat(timespec="seconds")
+    windows[series] = keep
+
+
+def live_tickers(windows: dict, now: dt.datetime, last_min: int = FAST_LAST_MIN) -> list[str]:
+    """Known 15m tickers inside the last ``last_min`` minutes of their window."""
+    out = []
+    for by_ticker in windows.values():
+        for ticker, close_iso in by_ticker.items():
+            try:
+                close = dt.datetime.fromisoformat(close_iso)
+            except ValueError:
+                continue
+            left = (close - now).total_seconds()
+            if 0 < left <= last_min * 60:
+                out.append(ticker)
+    return sorted(out)
+
+
+def stale_series(windows: dict, now: dt.datetime, series=SERIES_15M) -> list[str]:
+    """Series with no known window still open: they need one listing read."""
+    out = []
+    for s in series:
+        alive = False
+        for close_iso in (windows.get(s) or {}).values():
+            try:
+                alive = alive or dt.datetime.fromisoformat(close_iso) > now
+            except ValueError:
+                continue
+        if not alive:
+            out.append(s)
+    return out
+
+
+def fast_snapshot(list_open, read_tickers, windows: dict, now: dt.datetime,
+                  series=SERIES_15M) -> tuple[dict, list[str], int]:
+    """One minute's 15m recording. Returns (snapshot, notes, reads). ``windows`` is updated in place.
+
+    list_open(series, limit) lists a series; read_tickers(tickers) -> markets reads
+    them all at once.
+    """
+    notes, reads = [], 0
+    for s in stale_series(windows, now, series):
+        reads += 1
+        try:
+            learn_windows(windows, s, list_open(s, PER_SERIES), now)
+        except Exception as exc:  # noqa: BLE001 - one series failing must not stop the rest
+            notes.append(f"{s} read failed ({type(exc).__name__})")
+    tickers = live_tickers(windows, now)
+    rows: dict = {}
+    if tickers:
+        reads += 1
+        try:
+            markets = read_tickers(tickers)
+        except Exception as exc:  # noqa: BLE001
+            markets = []
+            notes.append(f"15m batch read failed ({type(exc).__name__})")
+        series_of = {t: s for s, by in windows.items() for t in by}
+        for m in markets or []:
+            row = compact(m)
+            if row and row[0] in series_of:
+                rows.setdefault(series_of[row[0]], []).append(row)
+    snap = {"at": now.isoformat(timespec="seconds"), "fast": True,
+            "cols": ["ticker", "yes_bid", "yes_ask", "bid_size", "ask_size", "last", "volume", "oi"],
+            "series": rows}
+    return snap, notes, reads
 
 
 def save(folder: str, snap: dict, now: dt.datetime) -> str:

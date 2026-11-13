@@ -481,22 +481,25 @@ TOWERS = (
         "id": "calibration-lab",
         "name": "Calibration lab",
         "folder": "calibration-lab-paper",
-        "keep": ("calibration.json", "calibration_rows.jsonl"),
+        "keep": ("calibration.json", "calibration_rows.jsonl", "calibration_rows_15m.jsonl"),
         "venue": "kalshi_econ",
         "floor": 0.05,
         "kind": "research",
         "research": True,
         "every_sec": 21600,
-        "timeout": 180,
+        "timeout": 300,
         "max_open": 0,
         "blurb": (
             "Research building. Every 6 hours it looks at Kalshi markets that settled in the last "
             "14 days and counts how often each price band actually won 1, 3 and 6 hours before close. "
-            "It also scores each new tower's fair prices against the market. Buys nothing, holds no cash."
+            "It also counts the 15-minute crypto, commodity, FX and S&P windows 1, 2, 5 and 10 minutes "
+            "before close in a separate table, and scores each new tower's fair prices against the market. "
+            "Buys nothing, holds no cash."
         ),
         "buy": [
             "Never buys. Zero cash, zero stake, no tower risk share",
             "Families: weather highs, gas weekly, BTC/ETH daily, Nasdaq, S&P (scheduled closes only)",
+            "15-minute families (kept separate): crypto, commodities, FX and S&P 15m windows, 1/2/5/10 minutes before close",
             "Win rate per 5¢ band with a Wilson 95% range; cautious edge = low end − price − fee",
         ],
         "sell": [
@@ -506,6 +509,7 @@ TOWERS = (
         "failsafes": [
             "Public Kalshi data only, through the shared gateway",
             "At most 25 candle calls a run, 5 per family, so no family starves the rest",
+            "15m families: at most 12 one-minute candle calls a run, in their own table_15m; the daily table is unchanged",
             "Markets with no price history are remembered so they are not fetched again",
         ],
         "aliases": ("calibration lab", "calibration"),
@@ -561,7 +565,8 @@ TOWERS = (
         "max_open": 0,
         "blurb": (
             "Support building. Every 6 hours it grades each bot on its paper record after fees: "
-            "promote, keep, pause or retire. It only suggests; it never changes a bot. Buys nothing."
+            "promote, keep, pause or retire, and shows the 50-result promotion card for every practice "
+            "tower. It only suggests; it never changes a bot. Buys nothing."
         ),
         "buy": [
             "Never buys. Zero cash, zero stake, no tower risk share",
@@ -572,6 +577,8 @@ TOWERS = (
             "Nothing to sell",
             "Promote: even the low end of the 95% range is above $0. Keep: average above $0",
             "Pause: average $0 or worse but could still be positive. Retire: clearly losing",
+            "Promotion card: each practice tower's count toward 50 results, average after fees, cautious low end",
+            "Ready to review at 50 results; promotion still needs Levi's OK, never automatic",
         ],
         "failsafes": [
             "Read-only: suggests only, never pauses, funds or edits a bot",
@@ -586,18 +593,19 @@ TOWERS = (
         "id": "whatif-lab",
         "name": "What-if lab",
         "folder": "whatif-lab-paper",
-        "keep": ("whatif.json",),
+        "keep": ("whatif.json", "exits.json"),
         "venue": "kalshi_econ",
         "floor": 0.05,
         "kind": "research",
         "research": True,
         "every_sec": 21600,
-        "timeout": 180,
+        "timeout": 300,
         "max_open": 0,
         "blurb": (
             "Research building. Every 6 hours it checks what the towers' logged-but-not-bought rows "
             "would have made after fees (weather before its window, edges over the trust cap), and how "
-            "long Kalshi vs Polymarket price gaps last. Buys nothing."
+            "long Kalshi vs Polymarket price gaps last. Its exit lab grades every closed Kalshi trade "
+            "under each exit rule (hold, +10c, +15c, model flip, time stop). Buys nothing."
         ),
         "buy": [
             "Never buys. Zero cash, zero stake, no tower risk share",
@@ -608,11 +616,13 @@ TOWERS = (
             "Nothing to sell",
             "Writes whatif.json: missed-trade grades per tower and gap stats for the Polymarket towers",
             "Maker check: would a resting bid 1 cent above the best bid have filled, and beaten taking the ask?",
+            "Exit lab: exits.json grades hold to the end, +10c, +15c, model flip and a half-way time stop on every closed trade",
         ],
         "failsafes": [
             "Reads only the towers' own logs plus Kalshi results through the shared gateway",
             "At most 40 Kalshi reads a run; an open contract is read again after 12 hours",
             "Suggests only: it never turns a window or cap on",
+            "Exit lab uses Kalshi 1-minute candles: at most 6 market and 20 candle reads a run; a graded trade is never read again",
         ],
         "aliases": ("what-if lab", "whatif", "what if", "missed trades", "gap monitor"),
         "office": "What-if lab",
@@ -626,18 +636,19 @@ TOWERS = (
         "floor": 0.05,
         "kind": "research",
         "research": True,
-        "every_sec": 900,
+        "every_sec": 60,
         "timeout": 120,
         "max_open": 0,
         "blurb": (
             "Support building. Every 15 minutes it saves the best bid, ask and sizes of every open "
-            "market in the series the towers watch, so future ideas can be tested on real price "
-            "history. Buys nothing."
+            "market in the series the towers watch, and every minute it records the 15-minute windows "
+            "in their last 14 minutes, so future ideas can be tested on real price history. Buys nothing."
         ),
         "buy": [
             "Never buys. Zero cash, zero stake, no tower risk share",
             "23 series: weather, gas, crypto daily, Nasdaq, S&P, Treasury, CPI, GDP and game winners",
-            "One public Kalshi read per series per run, through the shared gateway",
+            "One public Kalshi read per series per full run (every 15 minutes), through the shared gateway",
+            "15-minute windows every minute in their last 14 minutes: one batched read, plus one listing when a window rolls over",
         ],
         "sell": [
             "Nothing to sell",
