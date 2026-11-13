@@ -183,6 +183,9 @@ def serve() -> None:
 if __name__ == "__main__":
     # stdout: hosts like Railway paint every stderr line red, even INFO.
     logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # Locked floors: log them once and refuse to start if one is missing or lowered.
+    import desk_safety
+    desk_safety.startup_check(log)
     if "--timer-only" in sys.argv:
         run_forever()
     else:
