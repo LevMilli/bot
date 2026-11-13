@@ -478,6 +478,306 @@ TOWERS = (
         "color": "#5ccfe6",
     },
     {
+        "id": "crypto-hourly",
+        "name": "Crypto hourly",
+        "folder": "crypto-hourly-paper",
+        "venue": "kalshi_btc15m",
+        "floor": 0.05,
+        "kind": "crypto",
+        "every_sec": 300,
+        "timeout": 90,
+        "max_open": 3,
+        "blurb": (
+            "Shadow Kalshi hourly SOL, XRP, DOGE and BNB strikes and ranges. Prices each from the "
+            "coin's recent Coinbase moves and buys only when edge after fee clears 0.05. "
+            "Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXSOLD / KXXRPD / KXDOGED / KXBNBD hourly strikes, plus KXSOL / KXXRP / KXDOGE / KXBNB ranges",
+            "Fair = Coinbase spot now, spread by realized volatility (5-minute moves near the close, 1-hour moves further out)",
+            "Only 10 minutes to 30 hours before the close; a series with no open markets is noted and skipped",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked BTC 0.05 and ≤ 0.20 trust cap",
+            "Fixed $25 ticket in whole contracts; max 3 open, one per event, at most 2 the same way in one hour",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "BTC floor 0.05 cannot be lowered in config",
+            "Missing Coinbase candles or Kalshi book → that coin skips; nothing invented",
+            "No option smile for these coins, so fat tails are only partly priced. Incubation n≥50 before any desk share",
+        ],
+        "aliases": ("crypto hourly", "sol hourly", "xrp hourly", "doge hourly", "bnb hourly"),
+        "office": "Crypto hourly",
+        "color": "#9945ff",
+    },
+    {
+        "id": "weather-low",
+        "name": "Weather low",
+        "folder": "weather-low-paper",
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "weather",
+        "every_sec": 600,
+        "timeout": 170,
+        "max_open": 6,
+        "blurb": (
+            "Shadow Kalshi daily low temperature brackets in 24 cities. Uses what the station "
+            "has seen so far, the NWS night low and about 80 ensemble runs. Buys only when edge "
+            "after fee clears 0.05. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXLOWT brackets in 24 cities, settled on the NWS climate report low",
+            "Fair = lowest reading so far, plus each ensemble run for the rest of the day moved onto the NWS night low",
+            "Whole-degree 5-minute readings count only as a bound, not as the exact low",
+            "Before 10:00 local standard time the low can still drop: logged for scoring, no buys",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked econ 0.05 and ≤ 0.25 trust cap",
+            "Fixed $25 ticket in whole contracts; max 6 open, one per city-day, one new buy per check",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Econ floor 0.05 cannot be lowered in config",
+            "Missing station, forecast or book → that city skips; nothing invented",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("weather low", "low temperature", "daily low"),
+        "office": "Weather low",
+        "color": "#7aa7ff",
+    },
+    {
+        "id": "weather-cities",
+        "name": "Weather cities",
+        "folder": "weather-cities-paper",
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "weather",
+        "every_sec": 600,
+        "timeout": 170,
+        "max_open": 6,
+        "blurb": (
+            "Shadow Kalshi daily high temperature brackets in 17 more cities, using the same "
+            "method as Weather high. Buys only when edge after fee clears 0.05. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXHIGHT brackets in Atlanta, Boston, Dallas, DC, Newark, Houston, Las Vegas, Minneapolis, New Orleans, Oklahoma City, Phoenix, San Diego, San Antonio, Louisville, Seattle, San Francisco and Trenton",
+            "Fair = highest reading so far, plus each ensemble run for the rest of the day moved onto the NWS high",
+            "Whole-degree 5-minute readings count only as a bound, not as the exact high",
+            "Before 15:00 local standard time the high can still climb: logged for scoring, no buys",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked econ 0.05 and ≤ 0.25 trust cap",
+            "Fixed $25 ticket in whole contracts; max 6 open, one per city-day, one new buy per check",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Econ floor 0.05 cannot be lowered in config",
+            "Missing station, forecast or book → that city skips; nothing invented",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("weather cities", "more weather", "city highs"),
+        "office": "Weather cities",
+        "color": "#4fd1c5",
+    },
+    {
+        "id": "monthly-precip",
+        "name": "Monthly rain and snow",
+        "folder": "monthly-precip-paper",
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "weather",
+        "every_sec": 1800,
+        "timeout": 150,
+        "max_open": 3,
+        "blurb": (
+            "Shadow Kalshi monthly rain totals in 18 cities and snow totals in 9. Adds the month "
+            "so far to every forecast run that reaches month end. Buys only in the last 14 days, "
+            "when edge after fee clears 0.05. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXRAIN<city>M and KX<city>SNOWM \"more than K inches\" markets, settled on the NWS climate report",
+            "Fair = month-to-date total from the last complete climate report, plus each ensemble run's amount for the rest of the month, widened ±35% (rain) or ±50% (snow)",
+            "Only runs that reach the last day of the month count; under 20 such runs → the city skips",
+            "Buys only with 14 or fewer days left; earlier prices are logged for scoring",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked econ 0.05 and ≤ 0.25 trust cap",
+            "Fixed $25 ticket in whole contracts; max 3 open, one per city-month",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Econ floor 0.05 cannot be lowered in config",
+            "Stale climate report (over 4 days) or short forecast → that city skips; nothing invented",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("monthly rain", "monthly snow", "rain total", "snow total", "precip"),
+        "office": "Monthly rain and snow",
+        "color": "#6fa8dc",
+    },
+    {
+        "id": "gas-monthly",
+        "name": "Gas monthly",
+        "folder": "gas-monthly-paper",
+        "keep": ("aaa_history.json",),  # momentum fit must survive a deploy
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "econ",
+        "every_sec": 900,
+        "timeout": 60,
+        "max_open": 2,
+        "blurb": (
+            "Shadow Kalshi month-end gas strikes on the AAA national average, using the Gas "
+            "weekly model. Buys only within 14 days of settle (3 days until fitted), when edge "
+            "after fee clears 0.05. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXAAAGASM \"greater than $X\" strikes, settled on the AAA US regular average for the settle date",
+            "Fair = AAA today projected with fading momentum (same model as Gas weekly), normal spread",
+            "Fits momentum from its own daily AAA history plus Gas weekly's (read only)",
+            "Never buys more than 14 days out; until 21 days of history, only within 3 days of settle",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked econ 0.05 and ≤ 0.25 trust cap",
+            "Fixed $25 ticket in whole contracts; max 2 open, one per month",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Econ floor 0.05 cannot be lowered in config",
+            "AAA page fails to parse → no prices that check; nothing invented",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("gas monthly", "month end gas", "gas month"),
+        "office": "Gas monthly",
+        "color": "#ff8c42",
+    },
+    {
+        "id": "spy-momentum",
+        "name": "SPY momentum",
+        "folder": "spy-momentum-paper",
+        "venue": "equity_qqq",
+        "floor": 0.02,
+        "kind": "index",
+        "every_sec": 300,
+        "timeout": 60,
+        "max_open": 1,
+        "blurb": (
+            "Shadow paper SPY shares. Same intraday momentum rules as QQQ momentum, on SPY: "
+            "goes long or short on a breakout at a half-hour check, trails a stop, and is always "
+            "flat by the close. No broker is connected. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "Band = max/min(open, yesterday's close) × (1 ± 14-day average move from the open at that time)",
+            "Checks only at HH:00 and HH:30, 10:00 to 15:30 New York; acts only on a bar that closed in the last 10 minutes",
+            "Long above the upper band, short below the lower band, clearing it by 2% of the band width (locked equity_qqq 0.02)",
+            "Fixed $25 ticket (fractional paper shares), one position at a time",
+            "Costs: $0.0035 a share commission plus 1¢ a share slippage each way",
+        ],
+        "sell": [
+            "Trailing stop at the band or VWAP, whichever is tighter, checked at the half-hour checks",
+            "Always flat at the 16:00 close (earlier on half days)",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new entries; exits and the close still run",
+            "No late fills: a missed check is logged, not back-filled",
+            "Public Yahoo bars only, cached 4 minutes. No broker, no keys",
+            "Moves with QQQ most days, so it is close to the same bet. Incubation n≥50 before any desk share",
+        ],
+        "aliases": ("spy", "spy momentum", "s&p etf"),
+        "office": "SPY momentum",
+        "color": "#3d7dd8",
+    },
+    {
+        "id": "iwm-momentum",
+        "name": "IWM momentum",
+        "folder": "iwm-momentum-paper",
+        "venue": "equity_qqq",
+        "floor": 0.02,
+        "kind": "index",
+        "every_sec": 300,
+        "timeout": 60,
+        "max_open": 1,
+        "blurb": (
+            "Shadow paper IWM shares. Same intraday momentum rules as QQQ momentum, on IWM "
+            "(small companies): goes long or short on a breakout at a half-hour check, trails a "
+            "stop, and is always flat by the close. No broker is connected. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "Band = max/min(open, yesterday's close) × (1 ± 14-day average move from the open at that time)",
+            "Checks only at HH:00 and HH:30, 10:00 to 15:30 New York; acts only on a bar that closed in the last 10 minutes",
+            "Long above the upper band, short below the lower band, clearing it by 2% of the band width (locked equity_qqq 0.02)",
+            "Fixed $25 ticket (fractional paper shares), one position at a time",
+            "Costs: $0.0035 a share commission plus 1¢ a share slippage each way",
+        ],
+        "sell": [
+            "Trailing stop at the band or VWAP, whichever is tighter, checked at the half-hour checks",
+            "Always flat at the 16:00 close (earlier on half days)",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new entries; exits and the close still run",
+            "No late fills: a missed check is logged, not back-filled",
+            "Public Yahoo bars only, cached 4 minutes. No broker, no keys",
+            "Often moves with QQQ and SPY, so partly the same bet. Incubation n≥50 before any desk share",
+        ],
+        "aliases": ("iwm", "iwm momentum", "russell etf", "small caps"),
+        "office": "IWM momentum",
+        "color": "#d97706",
+    },
+    {
+        "id": "treasury-tenors",
+        "name": "Treasury tenors",
+        "folder": "treasury-tenors-paper",
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "macro",
+        "every_sec": 600,
+        "timeout": 90,
+        "max_open": 3,
+        "blurb": (
+            "Shadow Kalshi 2-, 5- and 30-year Treasury yield markets, using the 10-year tower's "
+            "method. Prices only on the settlement day and buys only when edge after fee clears "
+            "0.05. Spends no desk cash."
+        ),
+        "buy": [
+            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
+            "KXUST2A / KXUST5A / KXUST30A \"above X%\" markets, settled on the official Treasury par yield for that day",
+            "Fair = live CNBC yield (Yahoo ^FVX / ^TYX backup for 5 and 30 years) + measured gap to the official yield, spread by recent daily moves",
+            "Only on the settlement day, 9:00 ET until 15 minutes before 3:30pm ET, with a quote under 10 minutes old",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked econ 0.05 and ≤ 0.15 trust cap",
+            "Fixed $25 ticket in whole contracts; max 3 open, one per event",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Econ floor 0.05 cannot be lowered in config",
+            "Stale or missing yield quote → that tenor skips; the 2-year has no backup feed",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("treasury tenors", "2 year treasury", "5 year treasury", "30 year treasury"),
+        "office": "Treasury tenors",
+        "color": "#a3c4bc",
+    },
+    {
         "id": "calibration-lab",
         "name": "Calibration lab",
         "folder": "calibration-lab-paper",
