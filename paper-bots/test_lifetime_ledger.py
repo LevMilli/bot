@@ -149,6 +149,34 @@ class LifetimeLedgerTests(unittest.TestCase):
         # A second pass does not apply the archive again.
         self.assertEqual(pimp_desk.undo_midnight_wipe(self.root), [])
 
+    def test_undo_keeps_a_trade_made_after_the_wipe_and_drops_the_minted_cash(self):
+        folder = os.path.join(self.root, "commodity-15m-paper")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "bot.py"), "w", encoding="utf-8") as handle:
+            handle.write("# test\n")
+        real = {
+            "cash": 47.11, "open": [], "paper_only": True,
+            "closed": [{"ticker": "KXGOLD", "opened": "2026-11-12 12:00:00", "closed": "2026-11-12 12:15:00",
+                        "cost": 20, "pnl": -20.0, "fill_id": "old"}],
+        }
+        wiped = {
+            "cash": 99.28, "open": [], "paper_only": True,
+            "midnight_reloaded_day": pimp_desk.UNDO_WIPE_DAY,
+            "midnight_reloaded_from_cash": 47.11,
+            "closed": [{"ticker": "KXGOLD", "opened": "2026-11-13 00:20:00", "closed": "2026-11-13 00:20:29",
+                        "cost": 6.93, "pnl": -0.72, "fill_id": "new"}],
+        }
+        day_dir = os.path.join(self.root, "midnight-archive", pimp_desk.UNDO_WIPE_DAY)
+        os.makedirs(day_dir, exist_ok=True)
+        _write(os.path.join(day_dir, "commodity-15m-paper__paper_account.json"), json.dumps(real))
+        _write(os.path.join(folder, "paper_account.json"), json.dumps(wiped))
+        self.assertEqual(pimp_desk.undo_midnight_wipe(self.root), ["commodity-15m"])
+        back = json.loads(open(os.path.join(folder, "paper_account.json"), encoding="utf-8").read())
+        self.assertEqual(back["cash"], 46.39)
+        self.assertEqual(len(back["closed"]), 2)
+        self.assertNotIn("midnight_reloaded_day", back)
+        self.assertEqual(pimp_desk.undo_midnight_wipe(self.root), [])
+
     def test_staff_reset_keeps_the_record(self):
         self._broke_meme()
         out = pimp_desk.reset_bot("memecoin", root=self.root, who="test")

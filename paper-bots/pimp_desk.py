@@ -5245,6 +5245,56 @@ def _wipe_was_fresh(state: dict, day: str) -> bool:
     return not (isinstance(closed, list) and closed)
 
 
+def _row_key(row: dict) -> tuple:
+    return (
+        str(row.get("fill_id") or ""),
+        str(row.get("ticker") or row.get("mint") or ""),
+        str(row.get("opened") or ""),
+        str(row.get("closed") or ""),
+        str(row.get("cost") or ""),
+    )
+
+
+def _merge_traded_after_wipe(archive: dict, live: dict) -> dict:
+    """Real book, plus any trade that happened after the wipe. The minted cash stays out."""
+    out = dict(archive)
+    for key in ("midnight_reloaded_at", "midnight_reloaded_day", "midnight_reloaded_from_cash"):
+        out.pop(key, None)
+    arch_closed = [p for p in (archive.get("closed") or []) if isinstance(p, dict)]
+    live_closed = [p for p in (live.get("closed") or []) if isinstance(p, dict)]
+    seen = {_row_key(p) for p in arch_closed}
+    new_closed = [p for p in live_closed if _row_key(p) not in seen]
+    if "closed" in archive or new_closed:
+        out["closed"] = arch_closed + new_closed
+    arch_open = [p for p in (archive.get("open") or []) if isinstance(p, dict)]
+    live_open = [p for p in (live.get("open") or []) if isinstance(p, dict)]
+    open_seen = {_row_key(p) for p in arch_open}
+    new_open = [p for p in live_open if _row_key(p) not in open_seen]
+    if "open" in archive or new_open:
+        out["open"] = arch_open + new_open
+    cash_key = "cash_usd" if "cash_usd" in archive else "cash" if "cash" in archive else ""
+    if cash_key:
+        pnl = 0.0
+        for row in new_closed:
+            n = _num(row.get("pnl"))
+            if n is not None:
+                pnl += n
+        spent = 0.0
+        for row in new_open:
+            n = _num(row.get("cost"))
+            if n is not None:
+                spent += n
+        out[cash_key] = round(float(archive.get(cash_key) or 0) + pnl - spent, 2)
+    if "realized_pnl_usd" in archive:
+        extra = 0.0
+        for row in new_closed:
+            n = _num(row.get("pnl"))
+            if n is not None:
+                extra += n
+        out["realized_pnl_usd"] = round(float(archive.get("realized_pnl_usd") or 0) + extra, 2)
+    return out
+
+
 def undo_midnight_wipe(root: str | None = None, day: str = UNDO_WIPE_DAY) -> list:
     """Put the archived books back over the one wipe that cleared them.
 
@@ -5277,17 +5327,39 @@ def undo_midnight_wipe(root: str | None = None, day: str = UNDO_WIPE_DAY) -> lis
             continue
         live = _under(root, folder, state_name)
         state, problem = _read_state(live)
-        if problem or not _wipe_was_fresh(state, day):
+        if problem or str((state or {}).get("midnight_reloaded_day") or "") != day:
             continue
-        # A new closed trade after the wipe means the book moved. A scan log does not.
+        archive_state, archive_problem = _read_state(found[state_name])
+        if archive_problem or not isinstance(archive_state, dict):
+            continue
+        # A new closed trade after the wipe is real. Keep it. Do not keep the minted cash.
         trade_log = _under(root, folder, "trades.csv")
+        new_trade_lines = []
         if os.path.isfile(trade_log):
-            lines = [ln for ln in open(trade_log, encoding="utf-8").read().splitlines() if ln.strip()]
-            if len(lines) > 1:
-                log.info("undo wipe %s skipped: new trades after the reset", bot_id)
-                continue
-        for name, src in found.items():
-            _put_archived_file(src, _under(root, folder, name))
+            new_trade_lines = [ln for ln in open(trade_log, encoding="utf-8").read().splitlines() if ln.strip()]
+        if _wipe_was_fresh(state, day) and len(new_trade_lines) <= 1:
+            for name, src in found.items():
+                _put_archived_file(src, _under(root, folder, name))
+        else:
+            merged = _merge_traded_after_wipe(archive_state, state)
+            _write_json(live, merged)
+            for name, src in found.items():
+                if name == state_name:
+                    continue
+                dest = _under(root, folder, name)
+                if name == "trades.csv" and len(new_trade_lines) > 1:
+                    prior = [ln for ln in open(src, encoding="utf-8").read().splitlines() if ln.strip()]
+                    header = prior[:1] or new_trade_lines[:1]
+                    extra = [ln for ln in new_trade_lines[1:] if ln not in prior]
+                    body = "\n".join(header + prior[1:] + extra) + "\n"
+                    if os.path.islink(dest):
+                        real = os.path.realpath(dest)
+                        os.makedirs(os.path.dirname(real), exist_ok=True)
+                        dest = real
+                    with open(dest, "w", encoding="utf-8") as handle:
+                        handle.write(body)
+                elif not os.path.isfile(dest):
+                    _put_archived_file(src, dest)
         if desk_lifetime is not None:
             desk_lifetime.mark_wipe_restored(root, bot_id, day)
         restored.append(bot_id)
