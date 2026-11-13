@@ -53,7 +53,7 @@ def test_buy_needs_real_kalshi_trading_at_our_price(tmp_path):
     assert engine.tape_volume(_busy_tape("", NOW), "no", 0.30) == 500
 
 
-def test_one_buy_per_window_no_switching_sides(tmp_path):
+def test_can_buy_again_after_an_early_sale(tmp_path):
     bot = _bot()
     import kalshi_shadow_tower as engine
     tower = str(tmp_path / "t")
@@ -64,10 +64,10 @@ def test_one_buy_per_window_no_switching_sides(tmp_path):
     run([_quote(fair=0.40, bid=0.80)])            # model flip: sold at the bid
     acct = _acct(tower)
     assert acct["open"] == [] and acct["closed"][0]["exit"] == "model-flip"
-    run([_quote(side="no", fair=0.80, ask=0.25)])  # other side, same window: blocked
-    run([_quote(fair=0.90, ask=0.60)])             # same side again: blocked
-    assert _acct(tower)["open"] == []
-    run([_quote(ticker="KXSOL15M-NEXT")])          # next window is fine
+    run([_quote(side="no", fair=0.45, ask=0.30)])  # other side, edge clears: bought
+    acct = _acct(tower)
+    assert len(acct["open"]) == 1 and acct["open"][0]["side"] == "no"
+    run([_quote(fair=0.90, ask=0.60)])             # still holding this market: no second position
     assert len(_acct(tower)["open"]) == 1
 
 
@@ -80,7 +80,7 @@ def test_fee_charged_once_per_order_like_kalshi():
     old = engine.size_order(25.0, 0.60, False)
     assert c >= old[0] and f < old[1]
     bot = _bot()
-    assert bot.SPEC["fee_per_order"] and bot.SPEC["one_per_window"] and bot.SPEC["tape_check"]
+    assert bot.SPEC["fee_per_order"] and bot.SPEC["tape_check"] and not bot.SPEC.get("one_per_window")
 
 
 def test_fair_tracks_distance_from_open(tmp_path, monkeypatch):

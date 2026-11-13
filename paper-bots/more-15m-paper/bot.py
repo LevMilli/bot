@@ -15,7 +15,8 @@ Kalshi's source, so the bot learns the open offset at each fresh window and
 only buys once it has seen 3 opens.
 
 Paper only. Shadow only. Locked floor 0.05 (same as BTC 15m), trust cap 0.20,
-$25 ticket from a $500 sleeve, max 4 open, one buy per window ever (no switching sides), one new buy per check.
+$25 ticket from a $500 sleeve, max 4 open, one position per market at a time (may buy again after an early sale),
+one new buy per check.
 Buys need real Kalshi trading at or better than the ask (last 5 min); fee charged once per order.
 Buys only with 3 to 14 minutes left. Exits: model flip at the bid, settle backstop.
 """
@@ -41,8 +42,9 @@ import kalshi_shadow_tower as engine  # noqa: E402
 SPEC = {"id": "more-15m", "name": "More 15m", "floor": 0.05, "max_open": 4, "max_edge": 0.20,
         "group_cap": 2,
         # Nov 13 fill audit: buy only when Kalshi's tape shows real trading at our price,
-        # one buy per window (no switching sides), and Kalshi's fee once per order.
-        "tape_check": True, "one_per_window": True, "fee_per_order": True}
+        # and Kalshi's fee once per order. After an early sale the tower may buy again
+        # (either side) when the edge clears the floor.
+        "tape_check": True, "fee_per_order": True}
 
 # series -> (label, spot kind, spot symbol, Hyperliquid candle coin, sigma floor per minute)
 SERIES = {
