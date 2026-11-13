@@ -35,4 +35,21 @@ Desk ROI rules and per-bot buy/sell/failsafe inventory live in the paper pack: `
 | `npm run dev` | Vite dev server |
 | `npm run build` | Production bundle under `dist/` (served at `/apex-city/`) |
 | `npm run preview` | Preview the production build |
+| `npm test` | Look-rule tests (closed towers black, practice towers hidden, totals include losses) |
 | `python test_city_headers.py` | CSP / framing regression for the city shell |
+
+## City page files
+
+Keep the front end small and easy to edit:
+
+| File | What it holds |
+| --- | --- |
+| `src/data/cityRules.ts` | Every look rule in plain functions: roof color, lit windows, tower height cap, banner numbers, stale stamp, quiet hours, CSV |
+| `src/data/format.ts` | Who stands in the city (`towerInCity`) and who is closed (`towerClosed`) |
+| `src/hud/CityBanner.tsx` | Banner: real money off, desk today, lifetime, stop left, open of 12, risk of $100, clock, data age, legend, guide |
+| `src/hud/TowerRail.tsx` | Tower list, search box, plain-words card per tower, hidden lot |
+| `src/scene/Tower.tsx` | The 3D towers (black when closed, roof by today's result) |
+| `public/guide.html` | Plain user guide, linked from the banner |
+
+The card numbers come from `paper-bots/city_card.py` (read only; it never changes a tower).
+`/apex-city/health` answers `{"ok": true}` when the page is built.

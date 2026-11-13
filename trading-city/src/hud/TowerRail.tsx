@@ -12,10 +12,22 @@ import {
 import { isResearchTower, isStaffSupport, isSupportTower } from '../data/floorMap'
 import type { BotRow } from '../types'
 import { marketSession, untilOpen, useMarketNow } from '../data/marketHours'
+import {
+  districtSign,
+  hiddenLot,
+  nextCheckIn,
+  resultsProgress,
+  searchTowers,
+  timerLabel,
+  tradesCsv,
+  whyNoTrade,
+} from '../data/cityRules'
 
 type Props = {
   bots: BotRow[]
   onSelect: (id: string) => void
+  /** Browser time (ms) the snapshot was read. Card countdowns run from here. */
+  readAt?: number | null
 }
 
 /** A zero or missing realized figure is an empty book, not a result. */
@@ -58,7 +70,9 @@ function TowerGroup({
   now,
   liveTrades,
   subgroups,
+  readAt,
 }: {
+  readAt?: number | null
   label: string
   bots: BotRow[]
   all: BotRow[]
@@ -87,6 +101,7 @@ function TowerGroup({
                 index={Math.max(0, all.indexOf(bot))}
                 onSelect={onSelect}
                 now={now}
+                readAt={readAt}
               />
             ))}
           </ul>
@@ -101,11 +116,13 @@ function TowerTab({
   index,
   onSelect,
   now,
+  readAt,
 }: {
   bot: BotRow
   index: number
   onSelect: (id: string) => void
   now: Date
+  readAt?: number | null
 }) {
   const color = beamColorFor(bot.id, index)
   const closed = towerClosed(bot)
@@ -126,10 +143,14 @@ function TowerTab({
       : supportIdle
         ? supportHeadline(bot)
         : hologramPnl(bot)
+  const card = bot.card
+  const skipFlag = Boolean(card?.learning_skip)
+  const errorLight = Boolean(card?.error)
   return (
     <li>
       <button
         type="button"
+        aria-label={`${bot.name}. ${closed ? 'Closed.' : ''} ${figure}. Open tower.`}
         className={`tower-tab ${closed ? 'closed' : ''} ${shut ? 'market-shut' : ''}`}
         style={{ ['--tab-beam' as string]: closed || shut ? '#3a4152' : color }}
         onClick={() => onSelect(bot.id)}
@@ -139,6 +160,14 @@ function TowerTab({
         <span className="tower-tab-body">
           <span className="tower-tab-name">
             {bot.name}
+            {skipFlag && (
+              <span className="tower-flag skip" title={card?.learning_skip} aria-label="Paused by a learning skip">
+                skip
+              </span>
+            )}
+            {errorLight && (
+              <span className="tower-flag error" title={card?.error} aria-label={`Error: ${card?.error}`} />
+            )}
             {shut && (
               <span className="tower-tab-shut">
                 <span className="tower-tab-shut-word">Closed</span>
@@ -166,7 +195,110 @@ function TowerTab({
           {staff && !closed && <span className="tower-tab-status">One book. It does not trade.</span>}
         </span>
       </button>
+      <TowerCard bot={bot} now={now} readAt={readAt} />
     </li>
+  )
+}
+
+function downloadCsv(bot: BotRow) {
+  const blob = new Blob([tradesCsv(bot)], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${bot.id}-paper-trades.csv`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+/** Plain-words card: what it trades, how often, today's result, why no trade. */
+function TowerCard({ bot, now, readAt }: { bot: BotRow; now: Date; readAt?: number | null }) {
+  const card = bot.card
+  const t = card?.today
+  const timer = timerLabel(bot)
+  const elapsed = readAt ? (now.getTime() - readAt) / 1000 : 0
+  const next = nextCheckIn(bot, elapsed)
+  const why = whyNoTrade(bot)
+  const progress = resultsProgress(bot)
+  const floor = card?.floor ?? bot.venue_min_edge
+  const history = [...(bot.history || [])].slice(-12).reverse()
+  const open = bot.positions || []
+  return (
+    <details className="tower-card">
+      <summary aria-label={`Card for ${bot.name}`}>card</summary>
+      <div className="tower-card-body">
+        <p className="tower-card-sign">{districtSign(bot)}</p>
+        {bot.blurb && <p>{bot.blurb}</p>}
+        {(timer || next) && (
+          <p>
+            {timer && <span>Checks {timer}.</span>} {next && <span>{next[0].toUpperCase() + next.slice(1)}.</span>}
+          </p>
+        )}
+        {(bot.card?.scan_times?.length || 0) > 0 && timer.startsWith('every') && (
+          <p>Scan times: {bot.card?.scan_times?.join(', ')} CT.</p>
+        )}
+        <p>
+          Today: {t?.settled || 0} settled, {t?.wins || 0} won, {t?.losses || 0} lost
+          {t?.pnl != null ? `, ${money(t.pnl, true)}` : ''}. Fees paid today {money(t?.fees || 0)}.
+        </p>
+        {(t?.early_sales || t?.held) ? (
+          <p>
+            Sold early {t?.early_sales || 0} ({money(t?.early_pnl || 0, true)}) · held to the result{' '}
+            {t?.held || 0} ({money(t?.held_pnl || 0, true)}).
+          </p>
+        ) : null}
+        {(t?.best || t?.worst) && (
+          <p>
+            {t?.best && <span>Best today: {t.best.what} {money(t.best.pnl, true)}. </span>}
+            {t?.worst && <span>Worst today: {t.worst.what} {money(t.worst.pnl, true)}.</span>}
+          </p>
+        )}
+        {bot.lifetime?.realized != null && (
+          <p>
+            Lifetime {money(bot.lifetime.realized, true)} ({bot.lifetime.wins || 0} won, {bot.lifetime.losses || 0}{' '}
+            lost). Losses included.
+          </p>
+        )}
+        {why && (
+          <p className="tower-card-why">
+            {(t?.settled || 0) > 0 ? 'Last check: ' : 'Why no trade: '}
+            {why}
+          </p>
+        )}
+        {card?.learning_skip && <p className="tower-card-skip">Learning skip: {card.learning_skip}</p>}
+        {card?.error && <p className="tower-card-error">Error: {card.error}</p>}
+        {floor != null && <p>Edge floor {Number(floor).toFixed(2)} (locked, never lower).</p>}
+        {progress && (
+          <div className="tower-card-progress" role="progressbar" aria-valuemin={0} aria-valuemax={progress.need} aria-valuenow={Math.min(progress.have, progress.need)} aria-label="Results toward 50">
+            <span style={{ width: `${progress.pct}%` }} />
+            <em>{progress.note}</em>
+          </div>
+        )}
+        {(history.length > 0 || open.length > 0) && (
+          <details className="tower-card-trades">
+            <summary>trades ({open.length} open, {(bot.history || []).length} settled)</summary>
+            <ul>
+              {open.map((p, i) => (
+                <li key={`o${i}`}>
+                  open · {String(p.what || p.title || p.team || p.ticker || 'position')}
+                  {p.cost != null ? ` · ${money(p.cost)}` : ''}
+                </li>
+              ))}
+              {history.map((h, i) => (
+                <li key={`h${i}`} className={`tone-${pnlTone(h.pnl)}`}>
+                  {String(h.closed_at || h.when || '')} · {String(h.what || h.title || h.team || 'trade')} ·{' '}
+                  {money(h.pnl, true)} {h.exit_reason ? `· ${h.exit_reason}` : ''}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+        <button type="button" className="tower-card-csv" onClick={() => downloadCsv(bot)}>
+          Export trades (CSV)
+        </button>
+      </div>
+    </details>
   )
 }
 
@@ -174,8 +306,9 @@ function TowerTab({
  * Compact tower dropdown — keeps the plaza clear.
  * World holograms stay as quiet name tags; this menu is the accessible hit target.
  */
-export function TowerRail({ bots, onSelect }: Props) {
+export function TowerRail({ bots: allBots, onSelect, readAt }: Props) {
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const now = useMarketNow()
   const rootRef = useRef<HTMLDivElement | null>(null)
   const listId = useId()
@@ -197,7 +330,16 @@ export function TowerRail({ bots, onSelect }: Props) {
     }
   }, [open])
 
-  if (!bots.length) return null
+  if (!allBots.length) return null
+
+  // Hidden lot: practice towers that have not traded yet. They stay off the
+  // plaza and fold into one closed row here until they wake.
+  const lot = hiddenLot(allBots)
+  const lotIds = new Set(lot.map((b) => b.id))
+  const bots = searchTowers(
+    query ? allBots : allBots.filter((b) => !lotIds.has(b.id)),
+    query,
+  )
 
   const live = bots.filter((b) => !towerClosed(b) && !(marketSession(b.id, now) && !marketSession(b.id, now)?.open)).length
   const research = bots.filter((bot) => isSupportTower(bot.id))
@@ -248,11 +390,22 @@ export function TowerRail({ bots, onSelect }: Props) {
 
       {open && (
         <nav className="tower-menu-panel" aria-label="Paper towers" id={listId}>
+          <label className="tower-search">
+            <span className="sr-only">Find a tower by name</span>
+            <input
+              type="search"
+              placeholder="Find a tower"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="Find a tower by name"
+            />
+          </label>
           <TowerGroup
             label="Trading"
             bots={trading}
             all={bots}
             now={now}
+            readAt={readAt}
             liveTrades={liveTrades}
             subgroups={[
               { label: 'Desk · spends vault cash', bots: deskBots },
@@ -268,6 +421,7 @@ export function TowerRail({ bots, onSelect }: Props) {
             bots={research}
             all={bots}
             now={now}
+            readAt={readAt}
             onSelect={(id) => {
               setOpen(false)
               onSelect(id)
@@ -278,11 +432,28 @@ export function TowerRail({ bots, onSelect }: Props) {
             bots={support}
             all={bots}
             now={now}
+            readAt={readAt}
             onSelect={(id) => {
               setOpen(false)
               onSelect(id)
             }}
           />
+          {!query && lot.length > 0 && (
+            <details className="tower-menu-group tower-lot">
+              <summary className="tower-menu-heading">
+                <span>Hidden lot</span>
+                <span className="tower-menu-live">{lot.length} waiting to trade</span>
+              </summary>
+              <ul className="tower-menu-list">
+                {lot.map((bot) => (
+                  <li key={bot.id} className="tower-lot-row">
+                    {bot.name} · not in the city until it trades
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {query && !bots.length && <p className="tower-search-none">No tower matches that name.</p>}
         </nav>
       )}
     </div>

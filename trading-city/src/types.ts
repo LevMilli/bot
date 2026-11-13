@@ -135,9 +135,63 @@ export type BotRow = {
   venue_min_edge?: number | null
   sizing_mode?: 'curve' | 'kelly_lite' | 'fixed' | 'none' | string
   lifetime?: Lifetime | null
+  /** Plain-words city card from paper-bots/city_card.py. Read only. */
+  card?: CityCard | null
+}
+
+export type CityTradeLine = { what?: string; pnl?: number | null }
+
+export type CityCard = {
+  district?: string
+  every_sec?: number | null
+  scan_times?: string[]
+  next_check_in_sec?: number | null
+  today?: {
+    settled?: number
+    wins?: number
+    losses?: number
+    flat?: number
+    pnl?: number
+    fees?: number
+    early_sales?: number
+    early_pnl?: number
+    held?: number
+    held_pnl?: number
+    best?: CityTradeLine | null
+    worst?: CityTradeLine | null
+  }
+  trades_today?: number
+  settled_total?: number
+  progress?: { have?: number; need?: number; counts?: boolean; note?: string } | null
+  why_no_trade?: string
+  learning_skip?: string
+  error?: string
+  floor?: number | null
+}
+
+export type CityBannerFacts = {
+  real_money?: string
+  today?: number
+  lifetime_realized?: number | null
+  lifetime_wins?: number
+  lifetime_losses?: number
+  stop?: number
+  stop_left?: number
+  open_count?: number
+  max_open?: number
+  open_risk?: number
+  max_open_risk?: number
+  halted?: boolean
+  halt_reason?: string
+  gate?: string
+  districts?: { id: string; sign: string }[]
+  results_needed?: number
+  error?: string
 }
 
 export type Desk = {
+  /** City banner numbers from paper-bots/city_card.py. */
+  city?: CityBannerFacts
   cash?: Money
   realized?: Money
   today?: Money
@@ -844,6 +898,8 @@ export type Snapshot = {
   timer?: string
   ok?: boolean
   error?: string
+  /** Server time (epoch seconds) when this shared snapshot was read. */
+  cached_at?: number
 }
 
 export type DataMode = 'live' | 'offline'

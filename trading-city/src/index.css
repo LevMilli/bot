@@ -1838,3 +1838,383 @@ a {
   padding-top: 0.12rem;
   font-weight: 700;
 }
+
+/* ---- City page cards and banner (plan 806-885) ---- */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Quiet hours (10 PM to 7 AM CT): the plaza dims. The page text stays readable. */
+.app.quiet .stage canvas {
+  filter: brightness(0.62) saturate(0.85);
+}
+
+.city-banner {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 2.35rem;
+  z-index: 5;
+  max-width: min(46rem, calc(100% - 17.5rem));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.3rem;
+  pointer-events: none;
+}
+
+.city-banner > * {
+  pointer-events: auto;
+}
+
+.city-banner-row,
+.city-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.28rem;
+}
+
+.city-chip {
+  display: inline-block;
+  padding: 0.18rem 0.45rem;
+  border: 1px solid rgba(154, 163, 199, 0.32);
+  background: rgba(4, 8, 22, 0.88);
+  color: #e6eaf7;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.city-chip.money-off {
+  border-color: rgba(57, 255, 20, 0.55);
+  color: #b9ffa6;
+}
+
+.city-chip.tone-up {
+  color: var(--lime);
+}
+
+.city-chip.tone-down {
+  color: #ff6b6b;
+}
+
+.city-chip.stale {
+  background: #3a3f4b;
+  color: #f1f2f5;
+  border-color: #8a90a0;
+}
+
+.city-chip-btn {
+  cursor: pointer;
+  text-decoration: none;
+  color: #cfe9ff;
+}
+
+.city-chip-btn:hover,
+.city-chip-btn:focus-visible {
+  border-color: var(--cyan);
+  outline: none;
+}
+
+.city-halted {
+  padding: 0.35rem 0.6rem;
+  background: #4a0d14;
+  border: 1px solid #ff5c5c;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  max-width: 34rem;
+}
+
+.city-legend {
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 0.45rem 0.6rem;
+  background: rgba(4, 8, 22, 0.94);
+  border: 1px solid rgba(154, 163, 199, 0.32);
+  color: #e6eaf7;
+  font-size: 0.66rem;
+  max-width: 22rem;
+}
+
+.city-legend li {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.city-legend i {
+  flex: 0 0 auto;
+  width: 0.7rem;
+  height: 0.7rem;
+  border: 1px solid #6b7390;
+}
+
+.tower-search {
+  display: block;
+  padding: 0.4rem 0.45rem 0.1rem;
+}
+
+.tower-search input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.28rem 0.4rem;
+  background: #050a18;
+  border: 1px solid rgba(154, 163, 199, 0.35);
+  color: #f1f4ff;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+}
+
+.tower-search-none {
+  margin: 0.4rem 0.6rem;
+  color: #d5dcf5;
+  font-size: 0.66rem;
+}
+
+.tower-flag {
+  display: inline-block;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  letter-spacing: 0.04em;
+}
+
+.tower-flag.skip {
+  padding: 0 0.25rem;
+  background: #f9c80e;
+  color: #1a1400;
+}
+
+.tower-flag.error {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: #ff5c5c;
+  box-shadow: 0 0 6px #ff5c5c;
+}
+
+.tower-card {
+  margin: 0.08rem 0 0 0.28rem;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: #d5dcf5;
+}
+
+.tower-card > summary {
+  cursor: pointer;
+  color: #9fb4e6;
+  font-size: 0.58rem;
+  padding: 0.05rem 0.2rem;
+  width: max-content;
+}
+
+.tower-card-body {
+  padding: 0.3rem 0.45rem 0.4rem;
+  border-left: 1px solid rgba(154, 163, 199, 0.28);
+  display: grid;
+  gap: 0.22rem;
+}
+
+.tower-card-body p {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.tower-card-sign {
+  color: #ffe9a8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.56rem;
+}
+
+.tower-card-why {
+  color: #e6eaf7;
+}
+
+.tower-card-skip {
+  color: #f9d54a;
+}
+
+.tower-card-error {
+  color: #ff8a8a;
+}
+
+.tower-card-progress {
+  position: relative;
+  height: 1.05rem;
+  background: #111827;
+  border: 1px solid rgba(154, 163, 199, 0.32);
+}
+
+.tower-card-progress span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: rgba(45, 226, 230, 0.35);
+}
+
+.tower-card-progress em {
+  position: relative;
+  display: block;
+  padding: 0.1rem 0.3rem;
+  font-style: normal;
+  color: #f1f4ff;
+  font-size: 0.56rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tower-card-trades summary {
+  cursor: pointer;
+  color: #9fb4e6;
+}
+
+.tower-card-trades ul {
+  list-style: none;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.12rem;
+  max-height: 10rem;
+  overflow: auto;
+}
+
+.tower-card-trades li.tone-up {
+  color: var(--lime);
+}
+
+.tower-card-trades li.tone-down {
+  color: #ff6b6b;
+}
+
+.tower-card-csv {
+  justify-self: start;
+  cursor: pointer;
+  padding: 0.18rem 0.45rem;
+  background: #0a1430;
+  border: 1px solid rgba(154, 163, 199, 0.35);
+  color: #cfe9ff;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+}
+
+.tower-lot > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.tower-lot-row {
+  color: #aab3cc;
+  font-size: 0.6rem;
+  padding: 0.12rem 0.2rem;
+}
+
+@media (max-width: 860px) {
+  .city-banner {
+    left: 0.5rem;
+    right: 0.5rem;
+    max-width: none;
+    align-items: stretch;
+  }
+
+  .city-banner-row {
+    justify-content: flex-start;
+  }
+
+  .city-chip {
+    font-size: 0.58rem;
+  }
+}
+
+@media print {
+  .stage canvas {
+    display: none;
+  }
+
+  .city-banner,
+  .tower-menu {
+    position: static;
+    max-width: none;
+  }
+
+  .city-chip,
+  .city-legend,
+  .tower-tab,
+  .tower-card {
+    background: #fff !important;
+    color: #000 !important;
+    border-color: #555 !important;
+  }
+}
+
+/* Phone screens (plan 830): header on two short rows, banners full width under it. */
+@media (max-width: 600px) {
+  .chrome-top {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.6rem;
+    padding: 0.5rem 0.6rem 0.25rem;
+  }
+
+  .brand {
+    font-size: 1.45rem;
+  }
+
+  .chrome-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .chrome-actions .back-btn {
+    padding: 0.28rem 0.5rem;
+    font-size: 0.72rem;
+  }
+
+  .chrome-actions .meta {
+    font-size: 0.6rem;
+  }
+
+  .tower-menu {
+    top: 5.6rem;
+  }
+
+  .banners {
+    top: 8.6rem;
+    left: 0.5rem;
+    right: 0.5rem;
+    transform: none;
+    max-width: none;
+    align-items: stretch;
+  }
+
+  .banners .banner {
+    font-size: 0.6rem;
+    padding: 0.25rem 0.45rem;
+  }
+}
+
+/* Floating tower name tags stay inside the 3D layer, so they never cover the
+   tower list, the banner or the buttons. */
+.stage > div:first-child {
+  isolation: isolate;
+}
+
+@media (max-width: 600px) {
+  .tower-menu {
+    z-index: 9;
+  }
+}
