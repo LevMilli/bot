@@ -1,0 +1,10 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "venue_min_edge": 0.02,
+  "stake_usd": 25,
+  "starter_cash": 500,
+  "max_open": 2,
+  "note": "Kalshi S&P 500 4pm close strikes (KXINXU) and ranges (KXINX). Fair = lognormal from the live S&P 500 and the VIX. Index floor 0.02 locked."
+}

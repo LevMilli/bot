@@ -1,0 +1,10 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "venue_min_edge": 0.05,
+  "stake_usd": 25,
+  "starter_cash": 500,
+  "max_open": 1,
+  "note": "Coinbase spot twin at the maker fee (0.50% a side). Limit orders fill only when a later candle trades through. Floor 0.05 locked."
+}
