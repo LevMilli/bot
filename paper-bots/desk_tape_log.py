@@ -265,6 +265,11 @@ def trade_lines(root: str, now: float | None = None) -> list[str]:
                 "fair": _f(p.get("fair")),
                 "opened": str(p.get("opened") or p.get("at") or "")[:19],
                 "closed": str(p.get("closed") or "")[:19],
+                "contracts": p.get("contracts"),
+                "payout": _f(p.get("payout")),
+                "exit_bid": _f(p.get("exit_bid")),
+                **({"order_fee": _f(p.get("order_fee"))} if p.get("order_fee") is not None else {}),
+                **({"tape_volume": _f(p.get("tape_volume"))} if p.get("tape_volume") is not None else {}),
             }, separators=(",", ":")))
     return out
 
