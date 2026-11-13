@@ -1,0 +1,8 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "research": true,
+  "stake_usd": 0,
+  "note": "Research building. Scores new model ideas on real Kalshi 15-minute windows. Buys nothing; no tower reads it to trade."
+}

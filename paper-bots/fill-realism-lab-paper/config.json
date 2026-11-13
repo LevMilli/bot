@@ -1,0 +1,8 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "research": true,
+  "stake_usd": 0,
+  "note": "Research building. Checks every tower's pretend fills against what really traded. Buys nothing and changes no tower."
+}
