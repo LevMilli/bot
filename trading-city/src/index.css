@@ -256,7 +256,8 @@ a {
 .tower-menu-toggle {
   appearance: none;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  /* Swatches shrink to fit so the label never spills past the box. */
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 0.55rem;
   width: 100%;
@@ -282,14 +283,18 @@ a {
 
 .tower-menu-beams {
   display: flex;
-  gap: 0.18rem;
+  min-width: 0;
+  overflow: hidden;
+  gap: 0.14rem;
   align-items: stretch;
   height: 1.35rem;
 }
 
 .tower-menu-beams i {
   display: block;
-  width: 0.22rem;
+  flex: 1 1 0;
+  min-width: 2px;
+  max-width: 0.22rem;
   border-radius: 1px;
   box-shadow: 0 0 8px color-mix(in srgb, currentColor 40%, transparent);
 }
@@ -1782,4 +1787,8 @@ a {
 .tower-holo-shut {
   color: #7d8599;
   font-weight: 400;
+}
+
+.tower-tab-offcity {
+  color: #7d8599;
 }

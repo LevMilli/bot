@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import {
   beamColorFor,
   towerClosed,
+  towerInCity,
   hologramPnl,
   hologramPnlValue,
   money,
@@ -159,6 +160,7 @@ function TowerTab({
             {!supportIdle && !closed && bot.cash != null && (
               <span className="tower-tab-cash">{money(bot.cash)}</span>
             )}
+            {!towerInCity(bot) && <span className="tower-tab-offcity">not in city until it trades</span>}
           </span>
           {!supportIdle && <span className="tower-tab-status">{status}</span>}
           {staff && !closed && <span className="tower-tab-status">One book. It does not trade.</span>}

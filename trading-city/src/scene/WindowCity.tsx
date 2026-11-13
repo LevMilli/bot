@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { BotRow, Desk } from '../types'
 import { layoutCity } from './CityScene'
+import { towerInCity } from '../data/format'
 import { GridFloor } from './GridFloor'
 import { PurpleHorizon, SkyEquityLine, Skyline, Starfield } from './Skyline'
 import { FillerTower, Tower } from './Tower'
@@ -24,7 +25,8 @@ export function StreetCity({
   desk?: Desk
   lite?: boolean
 }) {
-  const { slots, fillers } = useMemo(() => layoutCity(bots), [bots])
+  const standing = useMemo(() => bots.filter(towerInCity), [bots])
+  const { slots, fillers } = useMemo(() => layoutCity(standing), [standing])
 
   return (
     <group position={[3.2, 0, -16]}>

@@ -114,6 +114,19 @@ export function pnlTone(n: Money): 'up' | 'down' | 'flat' {
 }
 
 /** Plaza lights stay off when the tower is missing or the desk has it paused. */
+/**
+ * Practice (shadow) towers stay off the plaza until they have traded:
+ * an open position, a settled result, or a trade on the book.
+ * Desk towers always stand.
+ */
+export function towerInCity(bot: BotRow): boolean {
+  if (!bot.shadow_only) return true
+  if ((Number(bot.open_count) || 0) > 0) return true
+  if (bot.realized != null && Number(bot.realized) !== 0) return true
+  if (bot.today != null && Number(bot.today) !== 0) return true
+  return (bot.trades?.length || 0) > 0
+}
+
 export function towerClosed(bot: BotRow): boolean {
   return bot.present === false || Boolean(bot.paused)
 }
