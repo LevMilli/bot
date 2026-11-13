@@ -903,6 +903,16 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
             fee = fee_per_contract(float(ask))
             per = float(ask) + float(fee or 0)
         contracts = int(check["contracts"])
+    try:
+        import fill_realism
+        if fill_realism.flag("btc15m_tape"):
+            # Off by default (FILL_BTC15M_TAPE=1): buy only when real Kalshi trading
+            # at or better than our price covers the whole order.
+            blocked = fill_realism.tape_gate(ticker, side, float(ask), contracts)
+            if blocked:
+                return blocked
+    except ImportError:
+        pass
     cost = round(contracts * per, 2)
     cash = float(state.get("cash") or 0)
     if cost > cash + 1e-9 or len(state.get("open") or []) >= 12:

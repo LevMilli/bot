@@ -1819,6 +1819,16 @@ def paper_buy(state: dict, ev: dict, buys_this_check: int = 0, sold_this_check=N
             fee = float(kalshi_fee(ask))
             per = ask + fee
         contracts = int(check["contracts"])
+    try:
+        import fill_realism
+        if fill_realism.flag("commodity_tape"):
+            # Off by default (FILL_COMMODITY_TAPE=1): buy only when real Kalshi trading
+            # at or better than our price covers the whole order.
+            blocked = fill_realism.tape_gate(ticker, ev["side"], float(ask), contracts)
+            if blocked:
+                return f"{none_msg} {blocked}."
+    except ImportError:
+        pass
     cost = round(contracts * per, 2)
     cash = float(state.get("cash") or 0)
     if cost > cash + 1e-9 or len(state.get("open") or []) >= 12:

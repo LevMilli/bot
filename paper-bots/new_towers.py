@@ -652,6 +652,77 @@ TOWERS = (
         "office": "Market snapshots",
         "color": "#b4a7f5",
     },
+    {
+        "id": "fill-realism-lab",
+        "name": "Fill-realism lab",
+        "folder": "fill-realism-lab-paper",
+        "keep": ("fill_realism.json",),
+        "venue": "kalshi_econ",
+        "floor": 0.05,
+        "kind": "research",
+        "research": True,
+        "every_sec": 3600,
+        "timeout": 180,
+        "max_open": 0,
+        "blurb": (
+            "Research building. Every hour it checks each tower's pretend fills against what really "
+            "traded on Kalshi: was there real trading at our price, how far our price sat from the "
+            "tape, and would a resting order have filled. Buys nothing and changes no tower."
+        ),
+        "buy": [
+            "Never buys. Zero cash, zero stake, no tower risk share",
+            "Each tower buy is checked once against Kalshi's public trades around it",
+            "A tower whose fills beat the tape by half a cent on average is flagged",
+        ],
+        "sell": [
+            "Nothing to sell",
+            "Writes fill_realism.json: tape cover, tape gap, fill-quality score, no-fills and a daily spot check",
+            "Maker practice book kept apart: would a bid one cent under the ask have filled?",
+        ],
+        "failsafes": [
+            "Reads only the towers' own books plus public Kalshi, Coinbase and Yahoo data",
+            "At most 40 Kalshi reads and 10 candle reads a run",
+            "Suggests only: every fill rule it measures stays off until Levi turns it on",
+        ],
+        "aliases": ("fill realism", "fill lab", "fill-realism lab"),
+        "office": "Fill-realism lab",
+        "color": "#9fd3c7",
+    },
+    {
+        "id": "model-lab",
+        "name": "Model lab",
+        "folder": "model-lab-paper",
+        "keep": ("model_lab.json",),
+        "venue": "kalshi_btc15m",
+        "floor": 0.05,
+        "kind": "research",
+        "research": True,
+        "every_sec": 300,
+        "timeout": 90,
+        "max_open": 0,
+        "blurb": (
+            "Research building. Every 5 minutes it prices the open Kalshi 15-minute BTC, ETH, SOL, XRP "
+            "and DOGE windows four ways (today's method, blended swings, fatter tails, time of day) and "
+            "scores each against the real result. Buys nothing; no tower reads it to trade."
+        ),
+        "buy": [
+            "Never buys. Zero cash, zero stake, no tower risk share",
+            "Logs log-only inputs too: jump guard, top-of-book imbalance, BTC pulling the other coins",
+            "A method or input gets a verdict only after 50 settled windows",
+        ],
+        "sell": [
+            "Nothing to sell",
+            "Writes model_lab.json: Brier score per method, error by minutes left, swing multipliers, exit-rule replay",
+        ],
+        "failsafes": [
+            "Public Coinbase candles and Kalshi markets only, through the shared gateway",
+            "Swing multipliers move at most 0.15 a week, and only after 50 windows",
+            "Suggests only: changing a tower's model needs a practice twin, 50 results and Levi's OK",
+        ],
+        "aliases": ("model lab", "models"),
+        "office": "Model lab",
+        "color": "#f5a3c7",
+    },
 )
 
 BY_ID = {row["id"]: row for row in TOWERS}

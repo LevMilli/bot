@@ -40,6 +40,10 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import fill_realism  # noqa: E402 - flags are off by default; nothing changes unless Levi sets one
+
 KALSHI = "https://api.elections.kalshi.com/trade-api/v2"
 STAKE_USD = 25.0
 STARTER_CASH = 500.0
@@ -314,6 +318,14 @@ def model_flips(state: dict, quotes: list[dict], now: dt.datetime, margin: float
             keep.append(pos)
             continue
         contracts = int(pos.get("contracts") or 0)
+        if fill_realism.flag("shadow_sell_depth"):
+            # Off by default (FILL_SHADOW_SELL_DEPTH=1): never sell more than half the
+            # bid size shown. When the bid is too thin, hold to the next check / settle.
+            size = num((quote or {}).get("bid_size"))
+            if size is not None and fill_realism.sell_cap([(bid, size)], contracts)["contracts"] < contracts:
+                pos["sell_held"] = f"bid size {size:g} too thin to sell {contracts}"
+                keep.append(pos)
+                continue
         if per_order_fee:
             proceeds = round(contracts * bid - order_fee(contracts, bid), 2)
         else:
@@ -343,6 +355,37 @@ def _append_research(tower: str, now: dt.datetime, decisions: list[dict], note: 
            "note": note, "n": len(decisions), "decisions": ranked[:RESEARCH_ROWS]}
     with open(path, "a", encoding="utf-8") as handle:
         handle.write(json.dumps(row) + "\n")
+
+
+def _strict_recheck(d: dict, contracts: int, cfg: dict, per_order_fee: bool):
+    """strict_fill re-check for one shadow buy. Only used behind FILL_SHADOW_STRICT=1.
+
+    Returns (contracts, order_fee, cost, fill_check, why). ``why`` is a plain
+    no-fill reason when the buy must be skipped.
+    """
+    import strict_fill
+
+    check = strict_fill.recheck(d["ticker"], d["side"].upper(), float(d["ask"]), contracts,
+                                fee_per=fee, edge=d.get("edge"), min_edge=cfg["venue_min_edge"],
+                                force=True)
+    stamp = {k: check.get(k) for k in
+             ("decided_ask", "quoted_ask", "slip", "depth", "capped", "requoted", "note")}
+    if not check.get("ok"):
+        return 0, 0.0, 0.0, stamp, str(check.get("reason") or "re-check failed")
+    ask = float(check["ask"])
+    n, cost_fee, cost = size_order(cfg["stake_usd"], ask, per_order_fee)
+    n = min(n, int(check["contracts"]))
+    if n < 1:
+        return 0, 0.0, 0.0, stamp, "ticket buys no contract at the re-checked price"
+    if per_order_fee:
+        cost_fee = order_fee(n, ask)
+        cost = round(n * ask + cost_fee, 2)
+    else:
+        cost_fee, cost = round(n * fee(ask), 2), round(n * (ask + fee(ask)), 2)
+    d["ask"], d["fee"] = round(ask, 4), fee(ask)
+    if d.get("edge") is not None:
+        d["edge"] = round(float(d["edge"]) - float(check.get("slip") or 0), 4)
+    return n, cost_fee, cost, stamp, ""
 
 
 # ------------------------------------------------------------------ one check
@@ -420,6 +463,14 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
                     if vol + 1e-9 < contracts:
                         why = (f"Kalshi tape: {vol:g} contracts traded at {float(d['ask']):.2f} or better "
                                f"in the last {TAPE_LOOKBACK_SEC // 60} min; need {contracts}")
+        fill_check = None
+        if not why and fill_realism.flag("shadow_strict"):
+            # Off by default (FILL_SHADOW_STRICT=1). strict_fill's 3-second re-check,
+            # worse-of-two-asks and half-the-book rules for the shadow towers.
+            contracts, order_cost_fee, cost, fill_check, why = _strict_recheck(
+                d, contracts, cfg, per_order_fee)
+            if not why and float(state.get("cash") or 0) + 1e-9 < cost:
+                why = "shadow cash below ticket"
         if why:
             d["action"], d["reason"] = "skip", why
             continue
@@ -435,6 +486,7 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
             "paper_only": True, "shadow_only": True,
             "exit_plan": {"kind": "model-flip+settle", "flip_margin": cfg["flip_margin"]},
             **({"extra": True} if extra else {}),
+            **({"fill_check": fill_check} if fill_check else {}),
         })
         if extra:
             d["extra"] = True
