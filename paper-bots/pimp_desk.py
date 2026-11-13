@@ -3732,6 +3732,15 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         "fill_tax": tax,
         "gate_a_ready_bots": [r["bot"] for r in gate_rows if r.get("ready")],
     }
+    # City cards (plan 806-885). Read only: plain lines for each tower card.
+    try:
+        import city_card
+        city_card.attach(
+            public, desk_row, cfg, specs=BOTS, auto=AUTO, saved_auto=_load_auto(root),
+            day=day, now=dt.datetime.now(dt.timezone.utc), ct_date=_ct_date,
+        )
+    except Exception as exc:  # noqa: BLE001 - snapshot must never fail on the city cards
+        desk_row["city"] = {"paper_only": True, "real_money": "off", "error": type(exc).__name__}
     return {
         "paper_only": True,
         # City snapshot schema version (snapshot_schema.py). New keys are fine; a renamed key bumps it.

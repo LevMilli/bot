@@ -7,6 +7,7 @@ import { beamColorFor, towerClosed } from '../data/format'
 import { isSupportTower } from '../data/floorMap'
 import { TowerHologram } from '../hud/Holograms'
 import { marketClosed, useMarketNow } from '../data/marketHours'
+import { BLACKED_OUT, roofColor, towerHeight, windowLitShare } from '../data/cityRules'
 
 type Props = {
   bot: BotRow
@@ -25,6 +26,7 @@ function WindowInstances({
   offline,
   dark = false,
   sparse = false,
+  litShare = 1,
 }: {
   height: number
   width: number
@@ -34,6 +36,8 @@ function WindowInstances({
   dark?: boolean
   /** Filler towers: fewer rows/faces so the plaza stays interactive. */
   sparse?: boolean
+  /** Share of panes lit (today's trade count). Closed towers pass 0. */
+  litShare?: number
 }) {
   const mesh = useRef<InstancedMesh>(null)
   const yStep = sparse ? 0.75 : 0.52
@@ -82,12 +86,23 @@ function WindowInstances({
     }
     mesh.current.count = i
     mesh.current.instanceMatrix.needsUpdate = true
-  }, [count, height, seed, width, yStep, colMin, colMax])
+    // Closed or paused: every pane blacked out. Open: light panes by today's trades.
+    const lit = new THREE.Color('#f4f0d4')
+    const unlit = new THREE.Color('#15141f')
+    const black = new THREE.Color(BLACKED_OUT)
+    const shut = new THREE.Color('#0b0b14')
+    for (let k = 0; k < i; k++) {
+      const r = Math.abs(Math.sin((k + 1) * 12.9898 + seed * 78.233) * 43758.5453) % 1
+      const c = offline ? black : dark ? shut : r < litShare ? lit : unlit
+      mesh.current.setColorAt(k, c)
+    }
+    if (mesh.current.instanceColor) mesh.current.instanceColor.needsUpdate = true
+  }, [count, height, seed, width, yStep, colMin, colMax, offline, dark, litShare])
 
   return (
     <instancedMesh ref={mesh} args={[undefined, undefined, count]}>
       <boxGeometry args={[0.08, 0.1, 0.04]} />
-      <meshBasicMaterial color={dark ? '#0b0b14' : offline ? '#2a3348' : '#f4f0d4'} />
+      <meshBasicMaterial color="#ffffff" />
     </instancedMesh>
   )
 }
@@ -102,7 +117,8 @@ function TradeTower({ bot, index, position, selected, onSelect, vista = false }:
   // The book and card still work; only the lights go off.
   const shut = !towerClosed(bot) && marketClosed(bot.id, now)
   const closed = towerClosed(bot) || shut
-  const height = offline ? 5.4 : 7.6 + (index % 3) * 1.35 + (index === 0 ? 1.2 : 0)
+  // Height follows lifetime results (losses included), capped.
+  const height = towerHeight(bot, index, offline)
   const width = 1.9 + (index % 2) * 0.28
   const hero = index === 0 && !offline
 
@@ -170,22 +186,29 @@ function TradeTower({ bot, index, position, selected, onSelect, vista = false }:
       >
         <boxGeometry args={[width, height, width]} />
         <meshStandardMaterial
-          color={offline ? '#06050c' : '#05040c'}
-          emissive={selected ? (shut ? '#3a4152' : color) : '#080814'}
-          emissiveIntensity={selected ? 0.32 : offline || shut ? 0.03 : 0.06}
+          color={closed ? '#000000' : '#05040c'}
+          emissive={closed ? '#000000' : selected ? color : '#080814'}
+          emissiveIntensity={closed ? 0 : selected ? 0.32 : 0.06}
           roughness={0.88}
           metalness={0.12}
         />
       </mesh>
 
-      <WindowInstances height={height} width={width} seed={index + 3} offline={closed} dark={shut} sparse />
+      <WindowInstances
+        height={height}
+        width={width}
+        seed={index + 3}
+        offline={closed}
+        sparse
+        litShare={windowLitShare(bot, closed)}
+      />
 
-      {/* roof cap */}
+      {/* roof cap: green up today, red down, gray flat. Black when closed. */}
       <mesh position={[0, height + 0.08, 0]}>
         <boxGeometry args={[width + 0.22, 0.16, width + 0.22]} />
         <meshStandardMaterial
-          color="#0c0c14"
-          emissive={closed ? '#000000' : color}
+          color={closed ? '#000000' : '#0c0c14'}
+          emissive={roofColor(bot, closed)}
           emissiveIntensity={closed ? 0 : 0.7}
         />
       </mesh>
@@ -310,7 +333,7 @@ function SupportRelay({ bot, index, position, selected, onSelect, vista = false 
         <mesh key={t} position={[0, height * t, 0]}>
           <cylinderGeometry args={[radius + 0.045, radius + 0.045, 0.07, 8]} />
           <meshBasicMaterial
-            color={closed ? '#2a3348' : color}
+            color={closed ? BLACKED_OUT : color}
             transparent
             opacity={closed ? 0.2 : 0.92}
             toneMapped={false}
@@ -341,7 +364,7 @@ function SupportRelay({ bot, index, position, selected, onSelect, vista = false 
         </mesh>
         <mesh position={[0, 0.02, 0]}>
           <cylinderGeometry args={[0.045, 0.045, 0.55, 8]} />
-          <meshBasicMaterial color={closed ? '#2a3348' : '#f4f7ff'} toneMapped={false} />
+          <meshBasicMaterial color={closed ? BLACKED_OUT : '#f4f7ff'} toneMapped={false} />
         </mesh>
       </group>
 
@@ -449,7 +472,7 @@ function WallStreetHall({ bot, index, position, selected, onSelect, vista = fals
         windowRows.map((y) => (
           <mesh key={`${x}-${y}`} position={[x, y, podiumD / 2 + 0.02]}>
             <boxGeometry args={[0.16, 0.22, 0.03]} />
-            <meshBasicMaterial color={closed ? '#2a3348' : '#f4f0d4'} toneMapped={false} />
+            <meshBasicMaterial color={closed ? BLACKED_OUT : '#f4f0d4'} toneMapped={false} />
           </mesh>
         )),
       )}

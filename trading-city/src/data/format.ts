@@ -134,6 +134,8 @@ export function towerInCity(bot: BotRow): boolean {
   if ((Number(bot.open_count) || 0) > 0) return true
   if (bot.realized != null && Number(bot.realized) !== 0) return true
   if (bot.today != null && Number(bot.today) !== 0) return true
+  if ((bot.history?.length || 0) > 0) return true
+  if ((Number(bot.lifetime?.trades) || 0) > 0) return true
   return (bot.trades?.length || 0) > 0
 }
 

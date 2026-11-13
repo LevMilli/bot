@@ -6,6 +6,9 @@ import { Banners } from './hud/Banners'
 import { Monitors } from './hud/Monitors'
 import { Ticker } from './hud/Ticker'
 import { TowerRail } from './hud/TowerRail'
+import { CityBanner } from './hud/CityBanner'
+import { isQuietHours } from './data/cityRules'
+import { useMarketNow } from './data/marketHours'
 import { beamColorFor } from './data/format'
 import { FLOORS, parseCityHash } from './data/floorMap'
 import { CityScene } from './scene/CityScene'
@@ -231,6 +234,9 @@ export default function App() {
   const [vaultOpsOpen, setVaultOpsOpen] = useState(false)
   const [walkHint, setWalkHint] = useState('')
   const guest = useMemo(() => guestModeFromUrl(), [])
+  const now = useMarketNow()
+  // Quiet hours (10 PM to 7 AM CT): the city dims. Active towers still glow.
+  const quiet = isQuietHours(now)
 
   const bots = snap?.bots || []
   const selected: BotRow | null = useMemo(
@@ -329,7 +335,7 @@ export default function App() {
   }
 
   return (
-    <div className={`app ${view !== 'city' ? 'office' : 'city'}${guest ? ' guest' : ''}`}>
+    <div className={`app ${view !== 'city' ? 'office' : 'city'}${guest ? ' guest' : ''}${quiet && view === 'city' ? ' quiet' : ''}`}>
       <div className="stage">
         <Canvas
           dpr={view === 'bank' ? [1, 1.1] : view === 'office' ? [1, 1.1] : [1, 1.25]}
@@ -4472,8 +4478,16 @@ export default function App() {
 
         {view === 'city' && (
           <>
+            <CityBanner
+              desk={snap?.desk}
+              limits={snap?.limits}
+              cachedAt={snap?.cached_at}
+              updatedAt={updatedAt}
+              now={now}
+            />
             <TowerRail
               bots={bots}
+              readAt={updatedAt}
               onSelect={(id) => {
                 openTower(id)
               }}

@@ -35317,6 +35317,7 @@ def dash_app(web):
                     web.post("/api/log.json", dash_api_log),
                     web.get("/logout", dash_logout),
                     web.get("/staff", dash_staff), web.get("/pimp-trading", dash_pimp),
+                    web.get("/apex-city/health", dash_pimp_city_health),
                     web.get("/apex-city", dash_pimp_city),
                     web.get("/apex-city/", dash_pimp_city),
                     web.get(r"/apex-city/{tail:.*}", dash_pimp_city),
@@ -41993,6 +41994,57 @@ async def dash_pimp_city(request):
     return resp
 
 
+# The city and the staff page both poll the paper desk. One snapshot is shared
+# for 15 seconds so the server stays light (plan step 832). Only the default
+# view (no search, first page) is shared; a search always reads fresh.
+PIMP_SNAPSHOT_TTL_SEC = 15.0
+_PIMP_SNAPSHOT_CACHE: dict = {}
+
+
+def pimp_snapshot_cache_clear() -> None:
+    _PIMP_SNAPSHOT_CACHE.clear()
+
+
+def pimp_snapshot_cached(desk, q: str = "", filt: str = "all", page: int = 1, now: float | None = None):
+    import time as _time
+    if q or (filt or "all") != "all" or int(page or 1) != 1:
+        return desk.snapshot(q=q, filt=filt, page=page)
+    t = _time.monotonic() if now is None else now
+    hit = _PIMP_SNAPSHOT_CACHE.get("default")
+    if hit and hit[1] is desk and t - hit[0] < PIMP_SNAPSHOT_TTL_SEC:
+        return hit[2]
+    body = desk.snapshot(q=q, filt=filt, page=page)
+    if isinstance(body, dict):
+        body = dict(body)
+        body["cached_at"] = _time.time()
+    _PIMP_SNAPSHOT_CACHE["default"] = (t, desk, body)
+    return body
+
+
+def pimp_city_health(root: str | None = None) -> dict:
+    """Is the city page built and servable? No desk data, no secrets."""
+    import time as _time
+    root = root or pimp_city_root()
+    index = os.path.join(root, "index.html")
+    ok = os.path.isfile(index)
+    assets = os.path.join(root, "assets")
+    bundles = sorted(n for n in os.listdir(assets) if n.endswith(".js")) if os.path.isdir(assets) else []
+    age = None
+    if ok:
+        try:
+            age = int(_time.time() - os.path.getmtime(index))
+        except OSError:
+            age = None
+    return {"ok": bool(ok and bundles), "page": "/apex-city/", "built": ok, "bundles": len(bundles),
+            "built_age_sec": age, "paper_only": True, "real_money": "off"}
+
+
+async def dash_pimp_city_health(request):
+    from aiohttp import web
+    body = pimp_city_health()
+    return web.json_response(body, status=200 if body["ok"] else 503)
+
+
 async def dash_api_pimp(request):
     from aiohttp import web
     uid = staff_uid_from_request(request)
@@ -42019,7 +42071,8 @@ async def dash_api_pimp(request):
         page = 1
     try:
         q, filt = str(request.query.get("q") or ""), str(request.query.get("filter") or "all")
-        body = await asyncio.get_running_loop().run_in_executor(None, lambda: desk.snapshot(q=q, filt=filt, page=page))
+        body = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: pimp_snapshot_cached(desk, q=q, filt=filt, page=page))
     except Exception:
         log.exception("pimp snapshot")
         return web.json_response({"ok": False, "error": "Could not read the paper desk."}, status=500)
@@ -42031,6 +42084,8 @@ async def dash_api_pimp_post(request):
     uid = staff_uid_from_request(request)
     if uid is None:
         return dash_error(web, request, 403)
+    # A staff change (save, run, reset) shows on the next read, not 15 seconds later.
+    pimp_snapshot_cache_clear()
     gid = staff_gid()
     who = staff_rec(uid, gid).get("name") or str(uid)
     body = await _req_json(request)

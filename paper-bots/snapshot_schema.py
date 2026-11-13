@@ -15,7 +15,7 @@ SCHEMA_VERSION = 1
 # Top-level keys of the TypeScript ``Snapshot`` type, per schema version.
 FIELDS_BY_VERSION = {
     1: ("paper_only", "banner", "desk", "bots", "limits", "roi_system", "health", "timer", "ok", "error",
-        "schema_version"),
+        "schema_version", "cached_at"),
 }
 FIELDS = FIELDS_BY_VERSION[SCHEMA_VERSION]
 # Keys the desk always sends (``ok`` and ``error`` only appear on a failure).
