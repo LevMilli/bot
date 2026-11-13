@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { Line } from '@react-three/drei'
 import type { BotRow, Desk } from '../types'
 import { workersOnShift } from '../data/format'
 import { GridFloor } from './GridFloor'
@@ -259,6 +260,36 @@ export function CityScene({ bots, desk, selectedId, onSelect, onOpenVault }: Pro
   )
 }
 
+/** A line from each tower into the vault. Gold spends desk cash. Dim lines are shadow books. */
+function VaultBeams({
+  slots,
+}: {
+  slots: { bot: BotRow; position: [number, number, number] }[]
+}) {
+  const vault: [number, number, number] = [VAULT_XZ.x, 1.2, VAULT_XZ.z]
+  return (
+    <>
+      {slots.map(({ bot, position }) => {
+        const shadow = Boolean(bot.shadow_only)
+        const missing = !shadow && bot.cash == null
+        return (
+          <Line
+            key={bot.id}
+            points={[
+              [position[0], 0.4, position[2]],
+              vault,
+            ]}
+            color={missing ? '#ff3355' : shadow ? '#6a5acd' : '#f9c80e'}
+            lineWidth={shadow ? 1 : 1.6}
+            transparent
+            opacity={missing ? 0.85 : shadow ? 0.22 : 0.55}
+          />
+        )
+      })}
+    </>
+  )
+}
+
 /** Plaza, towers, vault, and sky for the city camera. The office window uses its own street view. */
 export function CityContents({
   bots,
@@ -288,6 +319,7 @@ export function CityContents({
       <Skyline z={-46} width={52} />
       <SkyEquityLine />
       <Vault desk={desk} workers={workers} onOpen={onOpenVault} />
+      <VaultBeams slots={slots} />
 
       {fillers.map((f, i) => (
         <FillerTower key={`f-${i}`} {...f} />

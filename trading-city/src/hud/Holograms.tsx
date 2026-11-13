@@ -79,7 +79,11 @@ export function VaultHologram({ desk, workers }: { desk?: Desk; workers: number 
   const realizedTone = pnlTone(desk?.realized)
   const skips = desk?.more?.skip_leaderboard?.top?.slice(0, 3) || []
   const budgets = desk?.more?.tower_budgets || {}
-  const budgetEntries = Object.entries(budgets).slice(0, 4)
+  const budgetEntries = Object.entries(budgets)
+  const roll = desk?.bankroll
+  const deskTowers = roll?.towers?.length
+  const shadowTowers = roll?.shadow_towers?.length
+  const missing = roll?.missing || []
   const adapt = desk?.adapt?.by_bot || {}
   let safe = 0
   let big = 0
@@ -105,8 +109,23 @@ export function VaultHologram({ desk, workers }: { desk?: Desk; workers: number 
           <span className={`tone-${todayTone}`}>today {money(desk?.today, true)}</span>
         </span>
         <span>
-          cash {money(desk?.cash)} · {workers} worker{workers === 1 ? '' : 's'} on shift
+          cash {money(desk?.cash)}
+          {deskTowers != null
+            ? ` · ${deskTowers} tower${deskTowers === 1 ? '' : 's'} in this cash`
+            : ''}
+          {' · '}
+          {workers} on shift
         </span>
+        {shadowTowers != null && shadowTowers > 0 && (
+          <span className="vault-books">
+            {shadowTowers} shadow tower{shadowTowers === 1 ? '' : 's'} on their own books
+            {roll?.shadow_today != null ? ` · today ${money(roll.shadow_today, true)}` : ''}
+            {' · not added to this cash'}
+          </span>
+        )}
+        {missing.length > 0 && (
+          <span className="vault-books">missing book: {missing.join(', ')}</span>
+        )}
         {desk?.pace_line && <span className="holo-pace">{desk.pace_line}</span>}
         {skips.length > 0 && (
           <span className="vault-skips">
@@ -115,7 +134,7 @@ export function VaultHologram({ desk, workers }: { desk?: Desk; workers: number 
         )}
         {budgetEntries.length > 0 && (
           <span className="vault-budgets">
-            budgets {budgetEntries.map(([id, n]) => `${id.split('-')[0]} $${Number(n).toFixed(0)}`).join(' · ')}
+            risk caps {budgetEntries.map(([id, n]) => `${id.split('-')[0]} $${Number(n).toFixed(0)}`).join(' · ')}
           </span>
         )}
         {(safe > 0 || big > 0) && (

@@ -92,6 +92,8 @@ export type BotRow = {
   cash?: Money
   realized?: Money
   today?: Money
+  /** Shadow books spend no desk cash and are not added to the vault. */
+  shadow_only?: boolean
   open_count?: number
   /** Wall Street floor headcount. Staff on one book, not extra strategies. */
   traders?: number
@@ -139,6 +141,21 @@ export type Desk = {
   cash?: Money
   realized?: Money
   today?: Money
+  /** Desk towers in the vault, and shadow towers kept on their own books. */
+  bankroll?: {
+    paper_only?: boolean
+    towers?: string[]
+    connected?: string[]
+    missing?: string[]
+    cash?: number | null
+    realized?: number | null
+    today?: number
+    shadow_towers?: string[]
+    shadow_cash?: number | null
+    shadow_realized?: number | null
+    shadow_today?: number
+    note?: string
+  }
   open_risk?: Money
   open_count?: number
   last_check?: string

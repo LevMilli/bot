@@ -2948,8 +2948,12 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         bot["gates_hit"] = bot_gates_hit(bot, gate)
         matches = [s for s in shadow_rows if s.get("bot") == bot.get("id")]
         bot["shadow"] = matches[0] if matches else None
-    cashes = [b["cash"] for b in bots if b.get("cash") is not None and not b.get("shadow_only")]
-    realized_rows = [b["realized"] for b in bots if b.get("realized") is not None]
+    # Vault cash, realized, and today use the same towers: the ones that spend
+    # desk cash. Shadow books stay on their own line so a research win cannot
+    # hide a desk loss, and a research loss is not dropped from its own book.
+    money_bots = _desk_money_bots(bots)
+    cashes = [b["cash"] for b in money_bots if b.get("cash") is not None]
+    realized_rows = [b["realized"] for b in money_bots if b.get("realized") is not None]
     last_epoch = max((b.get("last_epoch") or 0) for b in bots)
     last_check = _fmt_epoch(last_epoch)
     if not last_check:
@@ -2961,6 +2965,7 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         row.pop("last_epoch", None)
         public.append(row)
     desk_row = _desk_row(public, cashes, realized_rows, last_check, gate, cfg, root)
+    desk_row["bankroll"] = bankroll_roll(public)
     try:
         import desk_lifetime
         desk_lifetime.backfill_once(root)
@@ -7237,16 +7242,70 @@ def mark_seen(root: str | None = None) -> dict:
     return payload
 
 
+def _desk_money_bots(bots: list) -> list:
+    """Towers whose paper cash is the vault. Shadow books are not added in."""
+    return [b for b in bots if not b.get("shadow_only")]
+
+
+def bankroll_roll(bots: list) -> dict:
+    """Desk vault versus shadow books. Losses stay in whichever book made them."""
+    desk = _desk_money_bots(bots)
+    shadow = [b for b in bots if b.get("shadow_only")]
+
+    def _ids(rows: list) -> list:
+        return [str(b.get("id") or "") for b in rows if b.get("id")]
+
+    def _sum(rows: list, key: str):
+        vals = []
+        for bot in rows:
+            number = bot.get(key)
+            if number is None:
+                continue
+            try:
+                vals.append(float(number))
+            except (TypeError, ValueError):
+                continue
+        if not vals:
+            return None
+        return round(sum(vals), 2)
+
+    missing = [str(b.get("id") or "") for b in desk if b.get("cash") is None and b.get("id")]
+    return {
+        "paper_only": True,
+        "towers": _ids(desk),
+        "connected": [str(b.get("id") or "") for b in desk if b.get("cash") is not None and b.get("id")],
+        "missing": missing,
+        "cash": _sum(desk, "cash"),
+        "realized": _sum(desk, "realized"),
+        "today": round(sum(float(b.get("today") or 0) for b in desk), 2),
+        "open_risk": round(sum(float(b.get("open_risk") or 0) for b in desk), 2),
+        "open_count": int(sum(int(b.get("open_count") or 0) for b in desk)),
+        "shadow_towers": _ids(shadow),
+        "shadow_cash": _sum(shadow, "cash"),
+        "shadow_realized": _sum(shadow, "realized"),
+        "shadow_today": round(sum(float(b.get("today") or 0) for b in shadow), 2),
+        "note": (
+            "Vault cash is only towers that spend desk cash. "
+            "Shadow towers keep their own books and are not added in."
+        ),
+    }
+
+
 def _desk_row(bots: list, cashes: list, realized_rows: list, last_check: str, gate: str, cfg: dict, root: str) -> dict:
     day = _today()
-    week, wins, losses, swing = _week_pnl(bots, day)
+    # Headline cash, P&L, week, and the chart are the desk book only.
+    # Shadow towers still run; they do not move this total.
+    money_bots = _desk_money_bots(bots)
+    cashes = [b["cash"] for b in money_bots if b.get("cash") is not None]
+    realized_rows = [b["realized"] for b in money_bots if b.get("realized") is not None]
+    week, wins, losses, swing = _week_pnl(money_bots, day)
     goal = float(cfg.get("week_goal") or 0)
     if goal <= 0:
         bar = 0
     else:
         bar = max(0, min(100, int(round(100 * week / goal))))
     trades_today = 0
-    for row in _flatten(bots):
+    for row in _flatten(money_bots):
         when = str(row.get("when") or "")
         if _day_hit(when, day):
             trades_today += 1
@@ -7266,16 +7325,16 @@ def _desk_row(bots: list, cashes: list, realized_rows: list, last_check: str, ga
         if nxt_at is None or at < nxt_at:
             nxt, nxt_at = text, at
     central = _central_from_text(last_check)
-    curve = _equity_curve(bots)
+    curve = _equity_curve(money_bots)
     spikes = _equity_spikes(curve)
     pace = hour_pace(root, cfg=cfg)
     now = _chart_now()
     return {
         "cash": None if not cashes else round(sum(cashes), 2),
         "realized": None if not realized_rows else round(sum(realized_rows), 2),
-        "today": round(sum(float(bot.get("today") or 0) for bot in bots), 2),
-        "open_risk": round(sum(float(bot.get("open_risk") or 0) for bot in bots), 2),
-        "open_count": int(sum(int(bot.get("open_count") or 0) for bot in bots)),
+        "today": round(sum(float(bot.get("today") or 0) for bot in money_bots), 2),
+        "open_risk": round(sum(float(bot.get("open_risk") or 0) for bot in money_bots), 2),
+        "open_count": int(sum(int(bot.get("open_count") or 0) for bot in money_bots)),
         "last_check": last_check,
         "central_check": central,
         "next_check": nxt or "No timer slot.",
@@ -7295,7 +7354,7 @@ def _desk_row(bots: list, cashes: list, realized_rows: list, last_check: str, ga
             "zone": "America/Chicago",
             "default": "ytd",
             "ranges": chart_windows(now),
-            "open_line": _open_line(bots),
+            "open_line": _open_line(money_bots),
         },
         "spikes": spikes,
         "news": news_calendar(root),
