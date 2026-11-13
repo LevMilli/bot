@@ -1,0 +1,10 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "venue_min_edge": 0.05,
+  "stake_usd": 25,
+  "starter_cash": 500,
+  "max_open": 3,
+  "note": "Kalshi 2Y/5Y/30Y Treasury par yield (KXUST2A, KXUST5A, KXUST30A). Fair = live yield + recent daily yield moves + feed-to-Treasury basis. Settlement day only. Floor 0.05 locked."
+}

@@ -1,0 +1,8 @@
+paper_account.json
+research.jsonl
+research.jsonl.1
+ensemble_cache.json
+nws_forecast_cache.json
+nws_points.json
+*.tmp
+__pycache__/
