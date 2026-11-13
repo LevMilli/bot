@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { CanvasTexture, SRGBColorSpace, type Group, type Mesh } from 'three'
 import type { Desk } from '../types'
@@ -140,8 +140,13 @@ export function Vault({
   onOpen?: () => void
 }) {
   const beacon = useRef<Mesh>(null)
+  // The card is an HTML overlay. Mounted on the very first render it can attach
+  // before the canvas sits in the page and never show until you leave and come
+  // back. Wait for the first drawn frame, then mount it.
+  const [holoReady, setHoloReady] = useState(false)
 
   useFrame(({ clock }) => {
+    if (!holoReady) setHoloReady(true)
     if (!beacon.current) return
     const mat = beacon.current.material as { opacity?: number }
     if (mat.opacity != null) mat.opacity = 0.55 + Math.sin(clock.getElapsedTime() * 1.8) * 0.25
@@ -262,7 +267,7 @@ export function Vault({
 
       {lights && <pointLight position={[0, 3.4, 1.2]} intensity={1.15} color="#9ee7ff" distance={14} />}
 
-      {showHolo && <VaultHologram desk={desk} workers={workers} />}
+      {showHolo && holoReady && <VaultHologram desk={desk} workers={workers} />}
     </group>
   )
 }
