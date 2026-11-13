@@ -1436,6 +1436,353 @@ TOWERS = (
         "office": "Window history",
         "color": "#9ad0ff",
     },
+    # Practice twins of the 15-minute towers (ideas B1-B5). Rules: fifteen_twins.py.
+    {
+        "id": "more-15m-longshot",
+        "name": "More 15m long-shot bar",
+        "folder": "more-15m-longshot-paper",
+        "venue": "kalshi_btc15m",
+        "floor": 0.05,
+        "kind": "crypto",
+        "twin_of": "more-15m",
+        "idea": "B1",
+        "every_sec": 60,
+        "timeout": 50,
+        "max_open": 4,
+        "blurb": (
+            "Practice twin of More 15m (idea B1). Same markets, prices and rules as More 15m, "
+            "with one change: an ask under 20c needs 0.05 more edge (0.10 after fee in total). "
+            "Spends no desk cash."
+        ),
+        "buy": [
+            "Practice twin of More 15m: same series, same fair price, same tape check and fee once per order",
+            "One change (B1): an ask under 20c needs edge of at least 0.10 after fee (floor 0.05 + 0.05). The floor itself does not move",
+            "Edge = fair − Kalshi ask − Kalshi fee; every other buy rule is More 15m's",
+            "Fixed $25 ticket in whole contracts from a $500 sleeve; max 4 open, one new buy per check",
+        ],
+        "sell": [
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "BTC floor 0.05 cannot be lowered in config",
+            "Reads the original tower's code and data read-only; never writes its ledger, learning or offsets",
+            "Missing price, book or swing → that window skips; nothing invented",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("long-shot bar", "longshot twin", "b1 twin"),
+        "office": "More 15m long-shot bar",
+        "color": "#0fb37a",
+    },
+    {
+        "id": "more-15m-tp15",
+        "name": "More 15m take-profit",
+        "folder": "more-15m-tp15-paper",
+        "venue": "kalshi_btc15m",
+        "floor": 0.05,
+        "kind": "crypto",
+        "twin_of": "more-15m",
+        "idea": "B5",
+        "every_sec": 60,
+        "timeout": 50,
+        "max_open": 4,
+        "blurb": (
+            "Practice twin of More 15m (idea B5). Same markets, prices and buy rules as More 15m, "
+            "with one change: it also sells early once the bid reaches the entry price plus 15c. "
+            "Spends no desk cash."
+        ),
+        "buy": [
+            "Practice twin of More 15m: same series, same fair price, same buy rules, tape check and fee once per order",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked BTC 0.05 and ≤ 0.20 trust cap",
+            "Fixed $25 ticket in whole contracts from a $500 sleeve; max 4 open, one new buy per check",
+        ],
+        "sell": [
+            "One change (B5): take-profit, sell at the bid once it reaches entry ask + 15¢ (cap 99¢)",
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "BTC floor 0.05 cannot be lowered in config",
+            "Reads the original tower's code and data read-only; never writes its ledger, learning or offsets",
+            "Missing price, book or swing → that window skips; nothing invented",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("more take-profit", "tp15 twin", "b5 more twin"),
+        "office": "More 15m take-profit",
+        "color": "#3fe0a8",
+    },
+    {
+        "id": "btc15m-mirror",
+        "name": "BTC 15m mirror",
+        "folder": "btc15m-mirror-paper",
+        "venue": "kalshi_btc15m",
+        "floor": 0.05,
+        "kind": "crypto",
+        "twin_of": "btc15m",
+        "idea": "control",
+        "every_sec": 60,
+        "timeout": 50,
+        "max_open": 3,
+        "blurb": (
+            "Control twin of BTC 15m on the shared practice engine. Uses BTC 15m's own prices and "
+            "buy gates with no rule changed, so the BTC 15m practice twins have a fair yardstick. "
+            "Spends no desk cash."
+        ),
+        "buy": [
+            "Control twin: BTC 15m's market list, spot, swing (DVOL and 1-minute candles) and order book",
+            "BTC 15m's gates: model 80% (72% with 0.02 more edge), z, $35 cushion, 70-92¢ ask, spread, depth, candles, USD news",
+            "Buys only with 10+ minutes left (BTC 15m's rule)",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked BTC 0.05",
+            "Fixed $25 ticket in whole contracts from a $500 sleeve; max 3 open, one new buy per check",
+        ],
+        "sell": [
+            "Take-profit: sell at the bid once it reaches entry ask + 15¢ (cap 99¢), as BTC 15m does",
+            "Side flip: sell at the bid when BTC crosses the target and the model switches sides",
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "BTC floor 0.05 cannot be lowered in config",
+            "Reads the original tower's code and data read-only; never writes its ledger, learning or offsets",
+            "Missing price, book or swing → that window skips; nothing invented",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("btc mirror", "btc control"),
+        "office": "BTC 15m mirror",
+        "color": "#c97a12",
+    },
+    {
+        "id": "btc15m-5min",
+        "name": "BTC 15m 5-minute rule",
+        "folder": "btc15m-5min-paper",
+        "venue": "kalshi_btc15m",
+        "floor": 0.05,
+        "kind": "crypto",
+        "twin_of": "btc15m",
+        "idea": "B3",
+        "every_sec": 60,
+        "timeout": 50,
+        "max_open": 3,
+        "blurb": (
+            "Practice twin of BTC 15m (idea B3). Same prices and gates as the BTC 15m mirror, "
+            "with one change: it may buy with 5 or more minutes left instead of 10. Spends no "
+            "desk cash."
+        ),
+        "buy": [
+            "Practice twin: same as the BTC 15m mirror (BTC 15m's prices and gates)",
+            "One change (B3): may buy with 5+ minutes left instead of 10+",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked BTC 0.05",
+            "Fixed $25 ticket in whole contracts from a $500 sleeve; max 3 open, one new buy per check",
+        ],
+        "sell": [
+            "Take-profit at entry ask + 15¢ (cap 99¢), side flip and model flip, as the mirror",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "BTC floor 0.05 cannot be lowered in config",
+            "Reads the original tower's code and data read-only; never writes its ledger, learning or offsets",
+            "Missing price, book or swing → that window skips; nothing invented",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("btc 5 minute", "5-minute rule", "b3 twin"),
+        "office": "BTC 15m 5-minute rule",
+        "color": "#e0a040",
+    },
+    {
+        "id": "btc15m-tape",
+        "name": "BTC 15m tape check",
+        "folder": "btc15m-tape-paper",
+        "venue": "kalshi_btc15m",
+        "floor": 0.05,
+        "kind": "crypto",
+        "twin_of": "btc15m",
+        "idea": "B4",
+        "every_sec": 60,
+        "timeout": 50,
+        "max_open": 3,
+        "blurb": (
+            "Practice twin of BTC 15m (idea B4). Same prices and gates as the BTC 15m mirror, "
+            "with one change: it buys only when Kalshi's tape shows real trading at our price, "
+            "and pays the fee once per order. Spends no desk cash."
+        ),
+        "buy": [
+            "Practice twin: same as the BTC 15m mirror (BTC 15m's prices and gates, 10+ minutes left)",
+            "One change (B4): buy only when Kalshi trades in the last 5 minutes at or better than the ask cover the order; fee once per order",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked BTC 0.05",
+            "Fixed $25 ticket in whole contracts from a $500 sleeve; max 3 open, one new buy per check",
+        ],
+        "sell": [
+            "Take-profit at entry ask + 15¢ (cap 99¢), side flip and model flip, as the mirror (fee once per order)",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "BTC floor 0.05 cannot be lowered in config",
+            "Reads the original tower's code and data read-only; never writes its ledger, learning or offsets",
+            "Missing price, book or swing → that window skips; nothing invented",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("btc tape", "b4 btc twin"),
+        "office": "BTC 15m tape check",
+        "color": "#d98c2b",
+    },
+    {
+        "id": "btc15m-tp10",
+        "name": "BTC 15m take-profit 10c",
+        "folder": "btc15m-tp10-paper",
+        "venue": "kalshi_btc15m",
+        "floor": 0.05,
+        "kind": "crypto",
+        "twin_of": "btc15m",
+        "idea": "B5",
+        "every_sec": 60,
+        "timeout": 50,
+        "max_open": 3,
+        "blurb": (
+            "Practice twin of BTC 15m (idea B5). Same prices and gates as the BTC 15m mirror, "
+            "with one change: it takes profit at the entry price plus 10c instead of 15c. Spends "
+            "no desk cash."
+        ),
+        "buy": [
+            "Practice twin: same as the BTC 15m mirror (BTC 15m's prices and gates, 10+ minutes left)",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked BTC 0.05",
+            "Fixed $25 ticket in whole contracts from a $500 sleeve; max 3 open, one new buy per check",
+        ],
+        "sell": [
+            "One change (B5): take-profit at entry ask + 10¢ instead of 15¢ (cap 99¢)",
+            "Side flip and model flip, as the mirror",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "BTC floor 0.05 cannot be lowered in config",
+            "Reads the original tower's code and data read-only; never writes its ledger, learning or offsets",
+            "Missing price, book or swing → that window skips; nothing invented",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("btc take-profit", "tp10 twin", "b5 btc twin"),
+        "office": "BTC 15m take-profit 10c",
+        "color": "#b8860b",
+    },
+    {
+        "id": "commodity-15m-mirror",
+        "name": "Commodity 15m mirror",
+        "folder": "commodity-15m-mirror-paper",
+        "venue": "kalshi_commodity15m",
+        "floor": 0.05,
+        "kind": "macro",
+        "twin_of": "commodity-15m",
+        "idea": "control",
+        "every_sec": 60,
+        "timeout": 50,
+        "max_open": 2,
+        "blurb": (
+            "Control twin of Commodity 15m on the shared practice engine. Uses Commodity 15m's "
+            "own prices and buy gates with no rule changed, so the Commodity 15m practice twins "
+            "have a fair yardstick. Spends no desk cash."
+        ),
+        "buy": [
+            "Control twin: Commodity 15m's index feed, open offsets, market list and order books (gold, oil, silver, copper and more)",
+            "Commodity 15m's gates: model 80% (72% with 0.02 more edge), z, cushion, 70-92¢ ask, spread, depth, EIA blackout",
+            "Buys only with 8+ minutes left (Commodity 15m's rule); one energy and one metal bet open at a time",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked commodity 0.05",
+            "Fixed $25 ticket in whole contracts from a $500 sleeve; max 2 open, one new buy per check",
+        ],
+        "sell": [
+            "Side flip: sell at the bid when the price crosses the target and the model switches sides",
+            "Model flip: sell at the bid when bid − fee beats the model fair by 2¢",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Commodity floor 0.05 cannot be lowered in config",
+            "Reads the original tower's code and data read-only; never writes its ledger, learning or offsets",
+            "Missing price, book or swing → that window skips; nothing invented",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("commodity mirror", "commodity control"),
+        "office": "Commodity 15m mirror",
+        "color": "#8a8f98",
+    },
+    {
+        "id": "commodity-15m-cap85",
+        "name": "Commodity 15m 85c cap",
+        "folder": "commodity-15m-cap85-paper",
+        "venue": "kalshi_commodity15m",
+        "floor": 0.05,
+        "kind": "macro",
+        "twin_of": "commodity-15m",
+        "idea": "B2",
+        "every_sec": 60,
+        "timeout": 50,
+        "max_open": 2,
+        "blurb": (
+            "Practice twin of Commodity 15m (idea B2). Same prices and gates as the Commodity 15m "
+            "mirror, with one change: it never buys an ask over 85c. Spends no desk cash."
+        ),
+        "buy": [
+            "Practice twin: same as the Commodity 15m mirror (Commodity 15m's prices and gates)",
+            "One change (B2): no buys when the ask is over 85¢ (Commodity 15m allows up to 92¢)",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked commodity 0.05",
+            "Fixed $25 ticket in whole contracts from a $500 sleeve; max 2 open, one new buy per check",
+        ],
+        "sell": [
+            "Side flip and model flip, as the mirror",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Commodity floor 0.05 cannot be lowered in config",
+            "Reads the original tower's code and data read-only; never writes its ledger, learning or offsets",
+            "Missing price, book or swing → that window skips; nothing invented",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("85c cap", "commodity cap", "b2 twin"),
+        "office": "Commodity 15m 85c cap",
+        "color": "#a7adb6",
+    },
+    {
+        "id": "commodity-15m-tape",
+        "name": "Commodity 15m tape check",
+        "folder": "commodity-15m-tape-paper",
+        "venue": "kalshi_commodity15m",
+        "floor": 0.05,
+        "kind": "macro",
+        "twin_of": "commodity-15m",
+        "idea": "B4",
+        "every_sec": 60,
+        "timeout": 50,
+        "max_open": 2,
+        "blurb": (
+            "Practice twin of Commodity 15m (idea B4). Same prices and gates as the Commodity 15m "
+            "mirror, with one change: it buys only when Kalshi's tape shows real trading at our "
+            "price, and pays the fee once per order. Spends no desk cash."
+        ),
+        "buy": [
+            "Practice twin: same as the Commodity 15m mirror (Commodity 15m's prices and gates)",
+            "One change (B4): buy only when Kalshi trades in the last 5 minutes at or better than the ask cover the order; fee once per order",
+            "Edge = fair − Kalshi ask − Kalshi fee; buy only if edge ≥ locked commodity 0.05",
+            "Fixed $25 ticket in whole contracts from a $500 sleeve; max 2 open, one new buy per check",
+        ],
+        "sell": [
+            "Side flip and model flip, as the mirror (fee once per order)",
+            "Holds to the Kalshi result otherwise: $1 per contract when our side wins",
+        ],
+        "failsafes": [
+            "Desk entry_gate still blocks new buys; exits still run",
+            "Commodity floor 0.05 cannot be lowered in config",
+            "Reads the original tower's code and data read-only; never writes its ledger, learning or offsets",
+            "Missing price, book or swing → that window skips; nothing invented",
+            "Incubation n≥50 settles before any desk share. No auto-promote",
+        ],
+        "aliases": ("commodity tape", "b4 commodity twin"),
+        "office": "Commodity 15m tape check",
+        "color": "#7d848e",
+    },
 )
 
 BY_ID = {row["id"]: row for row in TOWERS}

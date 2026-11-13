@@ -198,6 +198,15 @@ def decide(quote: dict, cfg: dict) -> dict:
         row["reason"] = (f"edge {edge:.3f} < floor {cfg['venue_min_edge']:g} "
                          f"(fair {fair:.3f} ask {ask:.2f} fee {cost:.2f})")
         return row
+    # A model may raise the bar for one quote (never lower it): ``extra_edge``.
+    extra_bar = num(quote.get("extra_edge"))
+    if extra_bar is not None and extra_bar > 0:
+        bar = float(cfg["venue_min_edge"]) + extra_bar
+        row["extra_edge"] = round(extra_bar, 4)
+        if edge + 1e-12 < bar:
+            row["reason"] = (f"edge {edge:.3f} < raised bar {bar:g} (floor {cfg['venue_min_edge']:g} "
+                             f"+ {extra_bar:g}{': ' + str(quote['extra_reason']) if quote.get('extra_reason') else ''})")
+            return row
     if cfg.get("max_edge") is not None and edge > float(cfg["max_edge"]) + 1e-12:
         row["reason"] = (f"edge {edge:.3f} over trust cap {cfg['max_edge']:g}: "
                          "model and market disagree on inputs; logged, not bought")
@@ -340,6 +349,72 @@ def model_flips(state: dict, quotes: list[dict], now: dt.datetime, margin: float
     return sold
 
 
+def take_profits(state: dict, quotes: list[dict], now: dt.datetime, add: float, cap: float = 0.99,
+                 per_order_fee: bool = False) -> list[dict]:
+    """Sell a held side at the bid once the bid reaches entry ask + ``add`` (capped at ``cap``).
+
+    Off unless a tower's spec sets ``take_profit``. Same rule as BTC 15m's +15c take-profit.
+    """
+    by_key = {(q.get("ticker"), q.get("side")): q for q in quotes}
+    sold, keep = [], []
+    for pos in state.get("open") or []:
+        quote = by_key.get((pos.get("ticker"), pos.get("side")))
+        bid = num((quote or {}).get("bid"))
+        ask0 = num(pos.get("ask"))
+        if bid is None or ask0 is None or not (0.0 < bid < 1.0):
+            keep.append(pos)
+            continue
+        target = min(round(ask0 + float(add), 2), float(cap))
+        if bid + 1e-12 < target:
+            keep.append(pos)
+            continue
+        contracts = int(pos.get("contracts") or 0)
+        if per_order_fee:
+            proceeds = round(contracts * bid - order_fee(contracts, bid), 2)
+        else:
+            proceeds = round(contracts * (bid - fee(bid)), 2)
+        row = dict(pos, exit="take-profit", exit_bid=bid, exit_target=target,
+                   payout=proceeds, pnl=round(proceeds - float(pos.get("cost") or 0), 2),
+                   closed=now.isoformat(timespec="seconds"))
+        if quote and num(quote.get("fair")) is not None:
+            row["exit_fair"] = round(float(quote["fair"]), 4)
+        state["cash"] = round(float(state.get("cash") or 0) + proceeds, 4)
+        state.setdefault("closed", []).append(row)
+        sold.append(row)
+    state["open"] = keep
+    return sold
+
+
+def side_flips(state: dict, quotes: list[dict], now: dt.datetime, per_order_fee: bool = False) -> list[dict]:
+    """Sell a held side at the bid when its quote carries ``exit_now`` (the model switched sides).
+
+    Off unless a model sets ``exit_now`` on a quote. BTC 15m and Commodity 15m sell this way.
+    """
+    by_key = {(q.get("ticker"), q.get("side")): q for q in quotes}
+    sold, keep = [], []
+    for pos in state.get("open") or []:
+        quote = by_key.get((pos.get("ticker"), pos.get("side"))) or {}
+        bid = num(quote.get("bid"))
+        if not quote.get("exit_now") or bid is None or not (0.0 < bid < 1.0):
+            keep.append(pos)
+            continue
+        contracts = int(pos.get("contracts") or 0)
+        if per_order_fee:
+            proceeds = round(contracts * bid - order_fee(contracts, bid), 2)
+        else:
+            proceeds = round(contracts * (bid - fee(bid)), 2)
+        row = dict(pos, exit="side-flip", exit_bid=bid, exit_reason=str(quote.get("exit_now")),
+                   payout=proceeds, pnl=round(proceeds - float(pos.get("cost") or 0), 2),
+                   closed=now.isoformat(timespec="seconds"))
+        if num(quote.get("fair")) is not None:
+            row["exit_fair"] = round(float(quote["fair"]), 4)
+        state["cash"] = round(float(state.get("cash") or 0) + proceeds, 4)
+        state.setdefault("closed", []).append(row)
+        sold.append(row)
+    state["open"] = keep
+    return sold
+
+
 def _append_research(tower: str, now: dt.datetime, decisions: list[dict], note: str) -> None:
     path = os.path.join(tower, "research.jsonl")
     try:
@@ -412,7 +487,13 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
             quotes, note = [], f"read failed ({type(exc).__name__}); waiting"
     quotes = list(quotes or [])
     per_order_fee = bool(spec.get("fee_per_order"))
-    flipped = model_flips(state, quotes, now, cfg["flip_margin"], per_order_fee)
+    early = []
+    if spec.get("take_profit"):
+        early += take_profits(state, quotes, now, float(spec["take_profit"]),
+                              float(spec.get("take_profit_cap") or 0.99), per_order_fee)
+    if any(q.get("exit_now") for q in quotes):
+        early += side_flips(state, quotes, now, per_order_fee)
+    flipped = early + model_flips(state, quotes, now, cfg["flip_margin"], per_order_fee)
     tape_check = bool(spec.get("tape_check"))
     tape = tape or kalshi_tape
     tape_reads = 0
@@ -435,7 +516,9 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
             why = "already holding this event"
         elif d.get("group") and spec.get("group_cap") and sum(
                 1 for p in state["open"] if p.get("group") == d["group"]) >= int(spec["group_cap"]):
-            why = f"same-direction cap ({int(spec['group_cap'])} per window: {d['group']})"
+            why = (str(spec["group_cap_why"]).format(cap=int(spec["group_cap"]), group=d["group"])
+                   if spec.get("group_cap_why") else
+                   f"same-direction cap ({int(spec['group_cap'])} per window: {d['group']})")
         extra = False
         if not why and len(state["open"]) >= cfg["max_open"]:
             if len(state["open"]) >= cfg["max_open"] + cfg["extra_slots"]:
@@ -484,7 +567,11 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
             **({"group": d["group"]} if d.get("group") else {}),
             "opened": now.isoformat(timespec="seconds"),
             "paper_only": True, "shadow_only": True,
-            "exit_plan": {"kind": "model-flip+settle", "flip_margin": cfg["flip_margin"]},
+            "exit_plan": ({"kind": "model-flip+settle", "flip_margin": cfg["flip_margin"]}
+                          if not spec.get("take_profit") else
+                          {"kind": "take-profit+model-flip+settle", "flip_margin": cfg["flip_margin"],
+                           "take_profit": float(spec["take_profit"]),
+                           "take_profit_cap": float(spec.get("take_profit_cap") or 0.99)}),
             **({"extra": True} if extra else {}),
             **({"fill_check": fill_check} if fill_check else {}),
         })
@@ -502,7 +589,7 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
     for row in settled:
         print(f"SETTLE: {row['label']} {row['side'].upper()} {row['result']} pnl {row['pnl']:+.2f}")
     for row in flipped:
-        print(f"EXIT: model-flip {row['label']} {row['side'].upper()} at {row['exit_bid']:.2f} "
+        print(f"EXIT: {row.get('exit') or 'model-flip'} {row['label']} {row['side'].upper()} at {row['exit_bid']:.2f} "
               f"pnl {row['pnl']:+.2f}")
     priced = sum(1 for d in decisions if d.get("edge") is not None)
     if bought:
