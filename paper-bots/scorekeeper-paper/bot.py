@@ -65,6 +65,31 @@ def extra_split(root: str, fill_tax: float) -> dict:
     return out
 
 
+def promotion_rows(root: str, fill_tax: float, min_n: int = sm.MIN_N) -> list[dict]:
+    """B14: the 50-result card rows, read from every practice row in new_towers.py.
+
+    Every non-research row counts, so new shadow twins join the card the moment
+    their row is added. $ per closed trade is after fees and the fill tax, and
+    every closed trade counts, losses included.
+    """
+    import new_towers
+
+    out = []
+    for row in new_towers.TOWERS:
+        if row.get("research"):
+            continue
+        state = engine.read_json(os.path.join(root, row["folder"], "paper_account.json")) or {}
+        pnls = []
+        for trade in state.get("closed") or []:
+            pnl = engine.num(trade.get("pnl"))
+            if pnl is None:
+                continue
+            pnls.append(pnl - fill_tax * float(trade.get("contracts") or 0))
+        out.append(sm.promotion_row(row["id"], row["name"], pnls, min_n=min_n,
+                                    paused=row["id"] in new_towers.PAUSED))
+    return out
+
+
 def main(argv: list[str] | None = None, *, root: str | None = None, now: dt.datetime | None = None) -> int:
     import desk_profit
 
@@ -83,12 +108,14 @@ def main(argv: list[str] | None = None, *, root: str | None = None, now: dt.date
 
     body = sm.run(histories(root, now), now, pnls_of=pnls_of)
     body["extra_slots"] = extra_split(root, desk_profit.FILL_ADVERSE_TAX)
+    body["promotion"] = sm.promotion(promotion_rows(root, desk_profit.FILL_ADVERSE_TAX), now)
     engine.write_json(os.path.join(here, "scorecard.json"), body)
     state["checks"] = int(state.get("checks") or 0) + 1
     state["last_check"] = now.isoformat(timespec="seconds")
     state["counts"] = body["counts"]
+    state["ready_to_review"] = body["promotion"]["ready"]
     engine.write_json(acct, state)
-    print("CARD: " + sm.card(body))
+    print("CARD: " + sm.promotion_card(body["promotion"]) + ". " + sm.card(body))
     print("no trade")
     return 0
 
