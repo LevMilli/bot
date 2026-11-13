@@ -1,0 +1,8 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "research": true,
+  "stake_usd": 0,
+  "note": "Support building. Records the last 14 minutes of every Kalshi 15-minute window the towers trade, for later tests. Buys nothing."
+}
