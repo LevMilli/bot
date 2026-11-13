@@ -19,11 +19,14 @@ export function TowerHologram({
   index,
   height,
   onSelect,
+  shut = false,
 }: {
   bot: BotRow
   index: number
   height: number
   onSelect: (id: string) => void
+  /** Market closed: grey card, numbers still shown. */
+  shut?: boolean
 }) {
   const closed = towerClosed(bot)
   const color = beamColorFor(bot.id, index)
@@ -48,7 +51,9 @@ export function TowerHologram({
         style={
           closed
             ? { borderColor: '#243044', boxShadow: 'none' }
-            : { borderColor: color, boxShadow: `0 0 12px ${color}40` }
+            : shut
+              ? { borderColor: '#3a4152', boxShadow: 'none', opacity: 0.8 }
+              : { borderColor: color, boxShadow: `0 0 12px ${color}40` }
         }
         onClick={(e) => {
           e.stopPropagation()
@@ -56,9 +61,12 @@ export function TowerHologram({
         }}
         title={statusLabel(bot)}
       >
-        <strong>{bot.name}</strong>
+        <strong>
+          {bot.name}
+          {shut && <span className="tower-holo-shut"> · closed</span>}
+        </strong>
         <span className={`holo-pnl tone-${pnlToneClass}`}>
-          {closed ? 'closed' : floorLabel || hologramPnl(bot)}
+          {closed ? (bot.present === false ? 'offline' : 'paused') : floorLabel || hologramPnl(bot)}
         </span>
         {!closed && (bot.skip_board?.length ?? 0) > 0 && (
           <span className="tower-skips">

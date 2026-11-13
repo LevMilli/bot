@@ -6,6 +6,7 @@ import type { BotRow } from '../types'
 import { beamColorFor, towerClosed } from '../data/format'
 import { isSupportTower } from '../data/floorMap'
 import { TowerHologram } from '../hud/Holograms'
+import { marketClosed, useMarketNow } from '../data/marketHours'
 
 type Props = {
   bot: BotRow
@@ -93,7 +94,11 @@ function TradeTower({ bot, index, position, selected, onSelect, vista = false }:
   const beamCore = useRef<Mesh>(null)
   const color = beamColorFor(bot.id, index)
   const offline = bot.present === false
-  const closed = towerClosed(bot)
+  const now = useMarketNow()
+  // Market closed (Nasdaq after hours, weekends): grey shell, no beam, no neon.
+  // The book and card still work; only the lights go off.
+  const shut = !towerClosed(bot) && marketClosed(bot.id, now)
+  const closed = towerClosed(bot) || shut
   const height = offline ? 5.4 : 7.6 + (index % 3) * 1.35 + (index === 0 ? 1.2 : 0)
   const width = 1.9 + (index % 2) * 0.28
   const hero = index === 0 && !offline
@@ -162,9 +167,9 @@ function TradeTower({ bot, index, position, selected, onSelect, vista = false }:
       >
         <boxGeometry args={[width, height, width]} />
         <meshStandardMaterial
-          color={offline ? '#06050c' : '#05040c'}
-          emissive={selected ? color : '#080814'}
-          emissiveIntensity={selected ? 0.32 : offline ? 0.03 : 0.06}
+          color={shut ? '#5a5e6a' : offline ? '#06050c' : '#05040c'}
+          emissive={shut ? '#6a6e7a' : selected ? color : '#080814'}
+          emissiveIntensity={shut ? (selected ? 0.3 : 0.16) : selected ? 0.32 : offline ? 0.03 : 0.06}
           roughness={0.88}
           metalness={0.12}
         />
@@ -224,7 +229,7 @@ function TradeTower({ bot, index, position, selected, onSelect, vista = false }:
       )}
 
       {!vista && (
-        <TowerHologram bot={bot} index={index} height={height} onSelect={onSelect} />
+        <TowerHologram bot={bot} index={index} height={height} onSelect={onSelect} shut={shut} />
       )}
     </group>
   )

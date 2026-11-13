@@ -10,6 +10,7 @@ import {
 } from '../data/format'
 import { isResearchTower, isStaffSupport, isSupportTower } from '../data/floorMap'
 import type { BotRow } from '../types'
+import { marketSession, untilOpen, useMarketNow } from '../data/marketHours'
 
 type Props = {
   bots: BotRow[]
@@ -40,26 +41,56 @@ function supportHeadline(bot: BotRow): string {
   return cleaned || 'No paper book yet'
 }
 
+/** Market-closed rows sink to the bottom; the rest keep their desk order. */
+function byOpenFirst(bots: BotRow[], now: Date) {
+  return bots
+    .map((bot, i) => ({ bot, i, shut: Boolean(marketSession(bot.id, now) && !marketSession(bot.id, now)?.open) }))
+    .sort((a, b) => Number(a.shut) - Number(b.shut) || a.i - b.i)
+    .map((r) => r.bot)
+}
+
 function TowerGroup({
   label,
   bots,
   all,
   onSelect,
+  now,
+  liveTrades,
+  subgroups,
 }: {
   label: string
   bots: BotRow[]
   all: BotRow[]
   onSelect: (id: string) => void
+  now: Date
+  /** Open paper positions across this group. Shown beside the heading. */
+  liveTrades?: number
+  subgroups?: { label: string; bots: BotRow[] }[]
 }) {
   if (!bots.length) return null
+  const parts = subgroups?.filter((g) => g.bots.length) || [{ label: '', bots }]
   return (
     <section className="tower-menu-group" aria-label={label}>
-      <h3 className="tower-menu-heading">{label}</h3>
-      <ul className="tower-menu-list">
-        {bots.map((bot) => (
-          <TowerTab key={bot.id} bot={bot} index={Math.max(0, all.indexOf(bot))} onSelect={onSelect} />
-        ))}
-      </ul>
+      <h3 className="tower-menu-heading">
+        <span>{label}</span>
+        {liveTrades != null && <span className="tower-tab-open tower-menu-live">Live Trades: {liveTrades}</span>}
+      </h3>
+      {parts.map((part) => (
+        <div key={part.label || label}>
+          {part.label && <h4 className="tower-menu-subheading">{part.label}</h4>}
+          <ul className="tower-menu-list">
+            {byOpenFirst(part.bots, now).map((bot) => (
+              <TowerTab
+                key={bot.id}
+                bot={bot}
+                index={Math.max(0, all.indexOf(bot))}
+                onSelect={onSelect}
+                now={now}
+              />
+            ))}
+          </ul>
+        </div>
+      ))}
     </section>
   )
 }
@@ -68,20 +99,27 @@ function TowerTab({
   bot,
   index,
   onSelect,
+  now,
 }: {
   bot: BotRow
   index: number
   onSelect: (id: string) => void
+  now: Date
 }) {
   const color = beamColorFor(bot.id, index)
   const closed = towerClosed(bot)
+  const session = marketSession(bot.id, now)
+  const shut = Boolean(session && !session.open)
+  const countdown = untilOpen(session, now)
   const status = statusLabel(bot)
   const staff = isStaffSupport(bot.id)
   const supportIdle = (isResearchTower(bot.id) || staff) && !closed && !bookPnlApplies(bot)
   const tone = closed || supportIdle ? 'flat' : pnlTone(hologramPnlValue(bot))
   const desks = bot.traders && bot.traders >= 100 ? bot.traders : 120
   const figure = closed
-    ? 'closed'
+    ? bot.present === false
+      ? 'offline'
+      : 'paused'
     : staff
       ? `6 desks · ${desks}`
       : supportIdle
@@ -91,14 +129,26 @@ function TowerTab({
     <li>
       <button
         type="button"
-        className={`tower-tab ${closed ? 'closed' : ''}`}
-        style={{ ['--tab-beam' as string]: closed ? '#243044' : color }}
+        className={`tower-tab ${closed ? 'closed' : ''} ${shut ? 'market-shut' : ''}`}
+        style={{ ['--tab-beam' as string]: closed || shut ? '#3a4152' : color }}
         onClick={() => onSelect(bot.id)}
         title={status}
       >
         <span className="tower-tab-beam" aria-hidden />
         <span className="tower-tab-body">
-          <span className="tower-tab-name">{bot.name}</span>
+          <span className="tower-tab-name">
+            {bot.name}
+            {shut && (
+              <span className="tower-tab-shut">
+                <span className="tower-tab-shut-word">Closed</span>
+                {countdown && (
+                  <span className="tower-tab-open" title={`Time until the ${session?.label} opens`}>
+                    opens in {countdown}
+                  </span>
+                )}
+              </span>
+            )}
+          </span>
           <span className="tower-tab-meta">
             <span className={supportIdle ? 'tower-tab-pnl tower-tab-wait' : `tower-tab-pnl tone-${tone}`}>
               {figure}
@@ -124,6 +174,7 @@ function TowerTab({
  */
 export function TowerRail({ bots, onSelect }: Props) {
   const [open, setOpen] = useState(false)
+  const now = useMarketNow()
   const rootRef = useRef<HTMLDivElement | null>(null)
   const listId = useId()
 
@@ -146,10 +197,13 @@ export function TowerRail({ bots, onSelect }: Props) {
 
   if (!bots.length) return null
 
-  const live = bots.filter((b) => !towerClosed(b)).length
+  const live = bots.filter((b) => !towerClosed(b) && !(marketSession(b.id, now) && !marketSession(b.id, now)?.open)).length
   const research = bots.filter((bot) => isSupportTower(bot.id))
   const support = bots.filter((bot) => isStaffSupport(bot.id))
   const trading = bots.filter((bot) => !isResearchTower(bot.id) && !isStaffSupport(bot.id))
+  const deskBots = trading.filter((bot) => !bot.shadow_only)
+  const practiceBots = trading.filter((bot) => bot.shadow_only)
+  const liveTrades = trading.reduce((n, bot) => n + Math.max(0, Number(bot.open_count) || 0), 0)
 
   return (
     <div className={`tower-menu ${open ? 'open' : ''}`} ref={rootRef}>
@@ -170,7 +224,12 @@ export function TowerRail({ bots, onSelect }: Props) {
           {bots.map((bot, i) => (
             <i
               key={bot.id}
-              style={{ background: towerClosed(bot) ? '#243044' : beamColorFor(bot.id, i) }}
+              style={{
+                background:
+                  towerClosed(bot) || (marketSession(bot.id, now) && !marketSession(bot.id, now)?.open)
+                    ? '#3a4152'
+                    : beamColorFor(bot.id, i),
+              }}
             />
           ))}
         </span>
@@ -191,6 +250,12 @@ export function TowerRail({ bots, onSelect }: Props) {
             label="Trading"
             bots={trading}
             all={bots}
+            now={now}
+            liveTrades={liveTrades}
+            subgroups={[
+              { label: 'Desk · spends vault cash', bots: deskBots },
+              { label: 'Practice · own $500 book', bots: practiceBots },
+            ]}
             onSelect={(id) => {
               setOpen(false)
               onSelect(id)
@@ -200,6 +265,7 @@ export function TowerRail({ bots, onSelect }: Props) {
             label="Research"
             bots={research}
             all={bots}
+            now={now}
             onSelect={(id) => {
               setOpen(false)
               onSelect(id)
@@ -209,6 +275,7 @@ export function TowerRail({ bots, onSelect }: Props) {
             label="Support"
             bots={support}
             all={bots}
+            now={now}
             onSelect={(id) => {
               setOpen(false)
               onSelect(id)
