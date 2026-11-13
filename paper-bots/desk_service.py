@@ -56,12 +56,22 @@ def one_pass(desk) -> dict:
         out["audit"].append(str(health["alert"]))
     desk.run_scheduled()
     log_desk_open(desk)
+    health_notes = []
     watchdog = getattr(desk, "tower_watchdog", None)
     if callable(watchdog):
         try:
-            out["audit"].extend(str(note) for note in (watchdog() or []))
+            health_notes.extend(str(note) for note in (watchdog() or []))
         except Exception:  # noqa: BLE001 - the watchdog never stops a pass
             log.exception("Tower watchdog failed")
+    ops = getattr(desk, "ops_check", None)
+    if callable(ops):
+        try:
+            health_notes.extend(str(note) for note in (ops() or []))
+        except Exception:  # noqa: BLE001 - desk-wide checks never stop a pass
+            log.exception("Desk ops check failed")
+    if health_notes:
+        import desk_ops
+        out["audit"].extend(desk_ops.group_notes(health_notes))
     for note in desk.drain_alerts() or []:
         if "outside a bot run" in str(note):
             out["audit"].append(str(note))
@@ -124,6 +134,11 @@ def run_forever(desk=None, sleep=time.sleep, passes: int | None = None) -> None:
         import pimp_desk as desk
     log.info("Desk service timer on. Paper only.")
     try:
+        import desk_ops
+        log.info("Deploy: %s", desk_ops.build_line())
+    except Exception:  # noqa: BLE001
+        pass
+    try:
         desk.touch_heartbeat()
     except Exception:  # noqa: BLE001
         log.exception("First heartbeat failed")
@@ -149,6 +164,13 @@ def serve() -> None:
     import pimp_desk
 
     pimp_desk.keep_closed_settlements()
+    try:
+        import kalshi_gateway
+        gone = kalshi_gateway.cleanup_stale() + kalshi_gateway.prune_cache()
+        if gone:
+            log.info("Kalshi gateway: removed %d stale file(s) at startup.", gone)
+    except Exception:  # noqa: BLE001 - cleanup never blocks startup
+        log.exception("Kalshi gateway cleanup failed")
     threading.Thread(target=run_forever, args=(pimp_desk,), name="desk-timer", daemon=True).start()
     if len(desk_web.service_key()) < desk_web.MIN_KEY_LEN:
         log.warning("DESK_SERVICE_KEY is missing or short. The desk API refuses every call until it is set.")

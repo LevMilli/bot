@@ -242,14 +242,21 @@ def make_app(desk=None):
             timer = desk.timer_health()
         except Exception:  # noqa: BLE001
             timer = {"alive": False}
-        return web.json_response({
+        body = {
             "ok": True,
             "paper_only": True,
             "service": "trading-desk",
             "timer_alive": bool(timer.get("alive")),
             "has_books": _has_books(desk),
             "imported": imported(desk),
-        })
+        }
+        try:
+            import desk_ops
+            extra = desk_ops.health(desk)
+            body.update({k: v for k, v in extra.items() if k not in body})
+        except Exception:  # noqa: BLE001 - extra health fields never break the health page
+            log.exception("desk health extras")
+        return web.json_response(body)
 
     async def do_call(request):
         guard(request)

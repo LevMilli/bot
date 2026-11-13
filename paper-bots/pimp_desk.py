@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from zoneinfo import ZoneInfo
@@ -213,6 +214,9 @@ SETTLEMENT_FILES = (
     "pimp-trading.json",
     "pimp-bot-params.json",
     "pimp-midnight.json",
+    # Desk ops: run stats per tower per day and the ops checks' memory (desk_ops).
+    "pimp-run-stats.json",
+    "pimp-ops.json",
     "pimp-audit.json",
     "pimp-runs.json",
     # Lifetime record. Books cleared by the midnight refill or a staff reset
@@ -3912,6 +3916,7 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
         cwd = _under(root, folder)
         script = os.path.join(cwd, spec["argv"][0])
         timed_out = False
+        started = time.monotonic()
         try:
             proc = subprocess.Popen(
                 [sys.executable, script, *spec["argv"][1:]],
@@ -3960,7 +3965,8 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
                 summary = prev_sum
                 kept_scan_tip = True
         row = {"at": _now(), "ok": ok, "summary": summary, "exit": proc.returncode, "action": action,
-               "warning": warning, "entries_blocked": bool(block_entries)}
+               "warning": warning, "entries_blocked": bool(block_entries),
+               "secs": round(time.monotonic() - started, 2)}
         if kept_scan_tip:
             row["kept_scan_tip"] = True
             row["action"] = "run"  # tip stays scan-truth while settle found nothing open
@@ -6617,6 +6623,13 @@ def tower_watchdog(root: str | None = None, now: dt.datetime | None = None) -> l
     root = _root(root)
     alive = bool(timer_health(root, now=now).get("alive"))
     return desk_watchdog.check(sys.modules[__name__], root, now=now, timer_alive=alive)
+
+
+def ops_check(root: str | None = None, now: dt.datetime | None = None) -> list:
+    """Desk-wide notes: run stats, slow towers, daily summary, disk, memory, clock, backups (desk_ops)."""
+    import desk_ops
+
+    return desk_ops.check(sys.modules[__name__], _root(root), now=now)
 
 
 def timer_health(root: str | None = None, now: dt.datetime | None = None) -> dict:

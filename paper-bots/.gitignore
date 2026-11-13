@@ -148,3 +148,5 @@ helpers/__pycache__/
 teller_memory.json
 .kalshi_gateway/
 pimp-watchdog.json
+pimp-ops.json
+pimp-run-stats.json

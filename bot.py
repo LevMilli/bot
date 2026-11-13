@@ -35091,6 +35091,24 @@ async def dash_health(request):
     return web.Response(text="ok", content_type="text/plain")
 
 
+async def dash_health_json(request):
+    """Bot health with what it last heard from the trading service. No secrets."""
+    from aiohttp import web
+    body = {"ok": True, "service": "discord-bot", "paper_only": True}
+    try:
+        import sys
+        folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "paper-bots")
+        if folder not in sys.path:
+            sys.path.insert(0, folder)
+        import desk_ops
+        import desk_pulse
+        body["build"] = desk_ops.build_info()
+        body["desk"] = desk_pulse.snapshot()
+    except Exception:
+        body["desk"] = None
+    return web.json_response(body)
+
+
 def _dash_brand_path(name: str) -> str:
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "dash-brand", name)
 
@@ -35273,7 +35291,7 @@ def dash_app(web):
                     web.get("/people", dash_index), web.get("/posters", dash_index), web.get("/more", dash_index),
                     web.get("/api/data", dash_api_data), web.get("/api/player.json", dash_api_player),
                     web.get(r"/api/player/{league:[a-z0-9-]{2,28}}/{aid:[0-9]{1,12}}.json", dash_api_player_one),
-                    web.get("/health", dash_health), web.get("/img/app-splash.jpg", dash_app_splash),
+                    web.get("/health", dash_health), web.get("/health.json", dash_health_json), web.get("/img/app-splash.jpg", dash_app_splash),
                     web.get("/img/intro-collage.jpg", dash_intro_collage),
                     web.get(r"/img/look/{name:[a-z]+}.svg", dash_look_img),
                     web.get(r"/img/head/{league:[a-z0-9-]+}/{aid:[0-9]{1,12}}.png", dash_head_img),
@@ -52751,6 +52769,32 @@ class PicksBot(discord.Client):
         else:
             log.warning("Paper book copy skipped: %s", result.get("error"))
 
+    async def _desk_pulse_watch(self) -> None:
+        """Ask the trading service's /healthz once a minute; post when its timer misses passes. Read-only."""
+        try:
+            import desk_ops
+            import desk_pulse
+            import desk_remote
+            base = desk_remote.service_url()
+            mine = desk_ops.build_info()
+            log.info("Discord bot %s", desk_ops.build_line())
+        except Exception:
+            log.exception("Desk pulse watch could not start")
+            return
+        if not base:
+            return
+        loop = asyncio.get_running_loop()
+        state: dict = {}
+        await asyncio.sleep(90)
+        while not self.is_closed():
+            try:
+                notes = await loop.run_in_executor(None, desk_pulse.check, base, state, mine)
+                for note in notes:
+                    await self._paper_audit(note)
+            except Exception:
+                log.exception("Desk pulse watch failed")
+            await asyncio.sleep(desk_pulse.PASS_GAP_S)
+
     async def paper_timer(self) -> None:
         """Run the paper desk checks on a timer. Paper only. No live orders."""
         await self.wait_until_ready()
@@ -52761,6 +52805,7 @@ class PicksBot(discord.Client):
                 # The trading service runs the timer. Two timers would run the same checks twice.
                 log.info("Paper timer is off here. The trading service runs it.")
                 await self._push_books_once()
+                await self._desk_pulse_watch()
                 return
         except Exception:
             log.exception("Paper timer could not read PAPER_TIMER; running here")

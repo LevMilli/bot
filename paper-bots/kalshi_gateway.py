@@ -235,6 +235,30 @@ def prune_cache(max_age: float = 600.0) -> int:
     return gone
 
 
+def cleanup_stale(max_age: float = 300.0, clock=time.time) -> int:
+    """Remove half-written ``.tmp`` files a crashed tower left behind. Run at desk startup.
+
+    The lock itself is an OS file lock (flock): the kernel drops it when the
+    holder dies, so ``pace.lock`` never needs removing and a crash cannot leave
+    the door locked.
+    """
+    base = state_dir()
+    gone = 0
+    cutoff = clock() - max_age
+    for folder, _dirs, files in os.walk(base):
+        for name in files:
+            if not name.endswith(".tmp"):
+                continue
+            path = os.path.join(folder, name)
+            try:
+                if os.path.getmtime(path) < cutoff:
+                    os.remove(path)
+                    gone += 1
+            except OSError:
+                pass
+    return gone
+
+
 def _bump_hits() -> None:
     try:
         with _Locked():
