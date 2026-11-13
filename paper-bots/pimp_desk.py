@@ -2544,6 +2544,102 @@ def desk_open_summary(root: str | None = None, bots: list | None = None) -> dict
     }
 
 
+def _report_closed_rows(spec: dict, base: str, view: dict, day: dt.date,
+                        first_day: dt.date | None = None) -> tuple[list, int, bool]:
+    """(closed rows from ``first_day`` to ``day``, settled results ever, rows match the tower's today number).
+
+    Reads the same closed list the tower card reads. Read only. ``first_day`` defaults to ``day``.
+    """
+    import desk_report
+
+    if first_day is not None and first_day != day:
+        rows, settled, _same = _report_closed_rows(spec, base, view, day)
+        state = None
+        if spec.get("state") and spec.get("kind") in ("sports", "btc", "spot", "carry", "log", "shadow", "kalshi"):
+            state, _problem = _read_state(_under(base, spec["folder"], spec["state"]))
+        if isinstance(state, dict) and isinstance(state.get("closed"), list):
+            src = _dedupe_pos([p for p in state["closed"] if isinstance(p, dict)])
+            key = ("settled_at", "day") if spec.get("kind") == "kalshi" else ("closed",)
+            pick = []
+            for p in src:
+                when = next((p.get(k) for k in key if p.get(k)), "")
+                d = _ct_date(str(when or ""))
+                if d is not None and first_day <= d <= day:
+                    pick.append(p)
+        else:
+            pick = [r for r in (view.get("history") or []) if isinstance(r, dict)
+                    and (desk_report.ct_date(r.get("closed_at")) or dt.date.min) >= first_day
+                    and (desk_report.ct_date(r.get("closed_at")) or dt.date.max) <= day]
+        return pick, settled, False
+
+    kind = spec.get("kind")
+    state = None
+    if spec.get("state") and kind in ("sports", "btc", "spot", "carry", "log", "shadow", "kalshi"):
+        state, _problem = _read_state(_under(base, spec["folder"], spec["state"]))
+    if isinstance(state, dict) and isinstance(state.get("closed"), list):
+        closed = _dedupe_pos([p for p in state["closed"] if isinstance(p, dict)])
+        if kind == "kalshi":
+            today = [p for p in closed if _day_hit(str(p.get("settled_at") or p.get("day") or ""), day)
+                     or str(p.get("day") or "") == day.isoformat()]
+        else:
+            today = [p for p in closed if _day_hit(str(p.get("closed") or ""), day)]
+        settled = sum(1 for p in closed if _num(p.get("pnl") if p.get("pnl") is not None else p.get("pnl_usd")) is not None)
+        return today, settled, True
+    history = [r for r in (view.get("history") or []) if isinstance(r, dict)]
+    today = [r for r in history if desk_report.ct_date(r.get("closed_at")) == day]
+    settled = sum(1 for r in history if r.get("pnl") is not None)
+    return today, settled, False
+
+
+def desk_report_card(root: str | None = None, now: dt.datetime | None = None) -> dict:
+    """Read-only desk report card for the evening report (plan steps 886-925). See desk_report.py."""
+    import desk_report
+    import new_towers
+
+    cfg = load_settings(root)
+    base = _root(root)
+    runs = _load_runs(base)
+    day = _today() if now is None else now.astimezone(CT).date()
+    views, closed_by_bot, settled, checked = [], {}, {}, set()
+    for spec in BOTS:
+        view = _bot_view(spec, base, runs, day)
+        views.append(view)
+        try:
+            rows, n, same = _report_closed_rows(spec, base, view, day)
+        except Exception:  # noqa: BLE001 - a bad file shows as an error, never stops the card
+            rows, n, same = [], 0, False
+            view["read_error"] = view.get("read_error") or "Could not read closed trades."
+        closed_by_bot[spec["id"]], settled[spec["id"]] = rows, n
+        if same:
+            checked.add(spec["id"])
+    gate = entry_gate(base, views)
+    return desk_report.report_card(
+        views, closed_by_bot, gate, cfg, settled_by_bot=settled,
+        research_ids=set(new_towers.RESEARCH) | {s["id"] for s in BOTS if s.get("kind") == "floor"},
+        checked_ids=checked, now=now, city_url=str(cfg.get("city_url") or ""),
+    )
+
+
+def desk_period_card(root: str | None = None, days: int = 7, now: dt.datetime | None = None) -> dict:
+    """Read-only week (days=7) or month (days=30) totals per tower, with a cautious lower bound."""
+    import desk_report
+
+    base = _root(root)
+    runs = _load_runs(base)
+    day = _today() if now is None else now.astimezone(CT).date()
+    first = day - dt.timedelta(days=max(1, int(days)) - 1)
+    views, rows_by_bot = [], {}
+    for spec in BOTS:
+        view = _bot_view(spec, base, runs, day)
+        views.append(view)
+        try:
+            rows, _n, _same = _report_closed_rows(spec, base, view, day, first_day=first)
+        except Exception:  # noqa: BLE001
+            rows = []
+        rows_by_bot[spec["id"]] = rows
+    return desk_report.period_card(views, rows_by_bot, first, day)
+
+
 def venue_min_edge(venue: str, cfg: dict | None = None) -> float:
     return desk_profit.venue_min_edge(venue, cfg or load_settings(), DEFAULTS["min_edge"])
 

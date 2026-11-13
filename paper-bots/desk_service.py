@@ -35,6 +35,8 @@ INTERVAL_S = 60
 WARMUP_S = 20
 OPEN_LOG_EVERY_S = 300   # "desk open" line for the evening report's daily high
 _last_open_log = [0.0]
+REPORT_LOG_EVERY_S = 1800  # "desk report" card for the evening report (plan steps 886-925)
+_last_report_log = [0.0]
 
 
 def timer_mode() -> str:
@@ -56,6 +58,7 @@ def one_pass(desk) -> dict:
         out["audit"].append(str(health["alert"]))
     desk.run_scheduled()
     log_desk_open(desk)
+    log_desk_report(desk)
     health_notes = []
     watchdog = getattr(desk, "tower_watchdog", None)
     if callable(watchdog):
@@ -99,6 +102,27 @@ def log_desk_open(desk, now: float | None = None) -> str:
         line = "desk open " + json.dumps(s, sort_keys=True)
     except Exception:  # noqa: BLE001
         log.exception("Desk open count failed")
+        return ""
+    log.info(line)
+    return line
+
+
+def log_desk_report(desk, now: float | None = None) -> str:
+    """Every 30 minutes, log the read-only desk report card as one ``desk report {json}`` line.
+
+    The evening report can read the day's last card: tower W-L, fees, profit, health,
+    50-results progress and the number check. Never stops a pass.
+    """
+    fn = getattr(desk, "desk_report_card", None)
+    now = time.time() if now is None else now
+    if not callable(fn) or now - _last_report_log[0] < REPORT_LOG_EVERY_S:
+        return ""
+    _last_report_log[0] = now
+    try:
+        import desk_report
+        line = desk_report.log_line(fn())
+    except Exception:  # noqa: BLE001
+        log.exception("Desk report card failed")
         return ""
     log.info(line)
     return line
