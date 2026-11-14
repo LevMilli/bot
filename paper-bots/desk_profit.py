@@ -21,6 +21,8 @@ VENUE_KEYS = (
     "coinbase_spot",
     # Registry lock for the held carry. Not the btc15m 0.05 per-trade floor.
     "binance_btc_carry",
+    # Held BTC carry on Coinbase (spot + BIP perp). Same 0.02 lock, moved 2026-11-14.
+    "coinbase_btc_carry",
     # Kalshi Fed / econ binaries (FedWatch shadow). Same 0.05 as BTC binaries.
     "kalshi_econ",
     # QQQ intraday shadow shares. Band-clear buffer (share of band width), not a probability.
@@ -35,6 +37,7 @@ DEFAULT_VENUE_MIN_EDGE = {
     "solana_dex": 0.02,
     "coinbase_spot": 0.05,
     "binance_btc_carry": 0.02,
+    "coinbase_btc_carry": 0.02,
     "kalshi_econ": 0.05,
     "equity_qqq": 0.02,
 }
@@ -63,7 +66,7 @@ BOT_VENUE = {
     "kalshi-sized": "kalshi_inx",
     "memecoin": "solana_dex",
     "coinbase-spot": "coinbase_spot",
-    "btc-carry": "binance_btc_carry",
+    "btc-carry": "coinbase_btc_carry",
     # Sharp→Kalshi lag reuses locked sports floor 0.06 (no softer venue).
     "sports-sharp-lag": "kalshi_sports",
     # FedWatch→Kalshi relative value. Economics floor 0.05. Idea-bank for main AUTO.

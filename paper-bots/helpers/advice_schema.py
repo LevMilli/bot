@@ -22,6 +22,7 @@ LOCKED_VENUE_FLOORS = {
     "solana_dex": 0.02,
     "coinbase_spot": 0.05,
     "binance_btc_carry": 0.02,
+    "coinbase_btc_carry": 0.02,
     "kalshi_econ": 0.05,
     "equity_qqq": 0.02,
 }
@@ -42,7 +43,8 @@ _VENUE_ALIASES = {
     "solana_dex": "solana_dex",
     "coinbase": "coinbase_spot",
     "coinbase_spot": "coinbase_spot",
-    "btc_carry": "binance_btc_carry",
+    "btc_carry": "coinbase_btc_carry",
+    "coinbase_btc_carry": "coinbase_btc_carry",
     "binance_btc_carry": "binance_btc_carry",
     "econ": "kalshi_econ",
     "fed": "kalshi_econ",

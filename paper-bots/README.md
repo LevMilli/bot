@@ -21,7 +21,7 @@ pretend ("paper") account in local files.
 | `memecoin-paper/` | Solana meme-coin paper bot: strict rug-pull filter, paper buys at real prices, stop/ladder/trailing exits | DexScreener, RugCheck |
 | `btc15m-signal/` | `btc15m_signal.py`: Bitcoin 15-minute Kalshi **paper** bot. Prints BUY or SKIP, paper-fills into `paper_account.json` when the checklist clears; **real TP + model-flip + settle** | Kalshi, Coinbase, Kraken, Bitstamp, Deribit DVOL, ForexFactory calendar |
 | `coinbase-spot-paper/` | Shadow Coinbase spot tower. Public 15m candles. Longs only when excess return clears the locked 0.05 floor after the US intro taker. Spends no desk cash | Coinbase Exchange public candles (no key) |
-| `btc-carry-paper/` | Shadow BTC spot-long / perpetual-short carry. Unlevered and held. Round trip 0.30%, paid rarely. Spends no desk cash | Binance public archive funding and premium index (no key) |
+| `btc-carry-paper/` | Shadow BTC carry on Coinbase: 0.01 BTC spot long, 1 BIP perp short, paid hourly funding. Spot wallet and futures margin kept like the real accounts. $1,500 of its own pretend cash | Coinbase public market data: order books, hourly funding, live margin rates (no key) |
 | `TEAM_ROLES.md` | How the "desk" of helper bots was organized, and the safety rules | — |
 | `DESK_ROI_SYSTEM.md` | Desk-wide ROI rules every present bot must follow (paper only) | — |
 | `BUY_SELL_FAILSAFE_INVENTORY.md` | Per-bot buy / sell / failsafe thresholds + entry_gate map | — |
@@ -83,7 +83,7 @@ empty paper account: no trade history or saved state is included in this pack.
 
 ## BTC carry tower (shadow)
 
-`btc-carry-paper/` is a different book again. It is long BTC spot and short the BTC perpetual, unlevered, and held. The mark uses the Binance regular schedule: spot taker 0.10%, perp taker 0.05%, round trip 0.30%, paid when the hold opens and not every month. It does not use the Coinbase 0.90% taker, and it does not change the BTC 15-minute floor of 0.05. A red funding month is marked, not flipped. The sleeve is shadow: $500 of its own paper cash, no desk risk share, no auto-promote. The pass bar is an after-fee monthly median that stays positive. Flipping every month is a reject.
+`btc-carry-paper/` is a different book again. It moved from Binance to Coinbase on 2026-11-14, because Binance does not serve US residents. It holds 0.01 BTC on Coinbase spot and is short one nano BTC perp (BIP) on Coinbase Financial Markets, so price moves cancel and the hourly funding is what is left. Fees are the real US retail ones: spot taker 0.90% each side and perp 0.05% (at least $0.20) per contract per side, so a round trip is about 1.9%. It opens only when 7-day funding minus that round trip clears the locked `coinbase_btc_carry` 0.02 floor. It keeps a spot wallet and a futures margin account and moves pretend USD between them like a real sweep. One result is written per daily 5 PM ET settle; 50 before it is judged. The old Binance book is archived in `paper_account.binance-retired.json`. See `btc-carry-paper/README.md`.
 
 ## Living Trading Upgrade (staff pulse)
 Paper-only living spine — floors locked, never auto-publishes Discord.

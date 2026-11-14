@@ -1,57 +1,75 @@
-# BTC carry paper tower
+# BTC carry paper tower (Coinbase)
 
-Shadow sleeve. Long BTC spot, short the BTC perpetual, unlevered, and held.
-It reads the public Binance archive (`data.binance.vision` funding and 8h
-premium index). It places no orders, uses no API key, and spends no desk cash.
-It has no share of the desk risk budget.
+Shadow sleeve. Long 0.01 BTC on Coinbase spot and short one nano BTC perp
+(BIP) on Coinbase Financial Markets. Price moves cancel out. What is left is
+the hourly funding: when the rate is positive, shorts get paid.
 
-This is not the BTC 15-minute tower and not the Coinbase spot tower. The
-15-minute fee floor stays 0.05. This book does not use the Coinbase 0.90% taker.
+It moved from Binance on 2026-11-14 because Binance does not serve US
+residents and Binance.US has no perpetual futures. The old Binance book is
+kept, untouched, in `paper_account.binance-retired.json`. The Coinbase book
+starts fresh at $1,500 and its results count from zero.
 
-## Fees
+Pretend money only. It reads Coinbase's public market data (no key, no
+account, no order). If any Coinbase or Binance key is in the environment, the
+check refuses to run.
 
-| Input | Locked value |
+## Wallet layout (built to match the real thing)
+
+| Account | Holds | Product |
+| --- | --- | --- |
+| Coinbase spot wallet | 0.01 BTC per contract and spare USD | `BTC-USD` |
+| Coinbase Financial Markets futures account | USD margin for the short | `BIP-20DEC30-CDE` (0.01 BTC per contract) |
+
+Money moves, all simulated with pretend USD:
+
+1. Open: buy 0.01 BTC on spot at the ask, sweep margin to futures (2x
+   Coinbase's overnight short margin, read live), sell 1 BIP at the bid.
+2. Every hour: the posted funding rate is credited (or charged) on
+   `0.01 x mark x rate`. A missed hour uses the last rate seen and is counted
+   as estimated on the card.
+3. Top-up: if the futures account falls below 1.5x overnight margin, USD is
+   swept in from spot. If spot USD runs out, a slice of spot BTC is sold (with
+   the taker fee) and the card says the hedge drifted.
+4. Forced close: below Coinbase's intraday margin, both legs close and the
+   0.80% liquidation fee is charged.
+5. Daily at 5 PM ET: funding and the day's price change post to the futures
+   account. Margin above 3x is swept back to spot. One result is written.
+6. Close: sell the BTC at the bid, buy back the BIP at the ask, sweep the
+   futures USD back to spot.
+
+## Fees (locked, can go up, never down)
+
+| Cost | Value |
 | --- | --- |
-| Spot taker | 0.10% |
-| Perp taker | 0.05% |
-| Round trip | 0.30% (`2 × (0.10% + 0.05%)`) |
-| When it is paid | Once to open, once if a person later closes. Not every month. |
-| Pass-bar haircut | 0.03% of notional per month (the round trip spread across a year). It is not a second trade. |
+| Spot taker | 0.90% each side (Coinbase Advanced US intro tier) |
+| Perp fee | 0.05% of notional per contract per side, at least $0.20 |
+| Liquidation | 0.80% |
+| Spreads | the live bid/ask on both books |
 
-A config that asks for the Coinbase 0.90% taker is put back on this schedule.
-A config that asks for a cheaper taker is raised to this schedule. Leverage
-above 1 is put back to 1.
+A full round trip on one contract is about 1.9% of the position.
 
-## Hold
+## Rules
 
-The sleeve opens one unlevered pair when a public funding mark and a premium
-mark both exist, then sits. A red funding month is marked. It is not a close,
-and it does not open a second leg to earn the loss back. Closing and reopening
-every month is the version whose 2026 mean is −0.04%. That path is a reject.
-The bot does not run it.
+- Entry: at least 24 real hourly funding rates seen. The 7-day average as a
+  yearly rate, minus the full round trip, plus the entry basis, must be at
+  least the locked `coinbase_btc_carry` floor of 0.02 (2% a year).
+- Exit: after 30 days, close if the 7-day funding is below -2% a year.
+- One result per daily settle. 50 results before the tower is judged. The
+  pass bar is a positive total and a positive median after every fee.
+- Nothing auto-promotes. Real money stays off.
 
-While the book is flat (no public mark yet, or the check was refused) the city
-card line is:
+## What real money would need (not built)
 
-`flat - BTC spot long / perp short not open; 0.30% round trip unpaid`
-
-## Pass bar
-
-Shadow until a person graduates it. Nothing auto-promotes.
-
-The pass bar is: the after-fee monthly median stays positive. Flipping every month is a reject. On the 2026 archive months (January through October) the held median is +0.30% after the 0.03% haircut, and the flip-every-month mean is −0.04%.
-
-## Twins (observe only)
-
-ETH is the **same factor** as BTC — a research line inside this sleeve, not a
-second tower and not desk cash. SOL’s 2026 held mean is red after the haircut —
-**reject**. Staff board: `make -C .. living-funding-twins` or `python bot.py --twins`.
+- A Coinbase account with futures approval.
+- One API key with view and trade only (no transfer, no withdraw), saved in
+  Railway, never in code or chat.
+- A separate real-order piece with its own tests and limits.
+- 50 practice results and Levi's OK.
 
 ## Run
 
 ```bash
-python bot.py --research   # print the locked card, write nothing
-python bot.py --twins      # ETH observe / SOL reject (no cash)
+python bot.py --research   # print the locked card and the wallet layout
 python bot.py              # one paper check
 python bot.py --reset
 ```
