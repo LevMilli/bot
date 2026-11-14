@@ -2,12 +2,16 @@
   "paper_only": true,
   "live_orders": false,
   "shadow_only": true,
-  "venue": "binance_btc_carry",
-  "symbol": "BTCUSDT",
-  "spot_taker": 0.001,
+  "venue": "coinbase_btc_carry",
+  "spot_product": "BTC-USD",
+  "perp_product": "BIP-20DEC30-CDE",
+  "contracts": 1,
+  "contract_btc": 0.01,
+  "spot_taker": 0.009,
   "perp_taker": 0.0005,
-  "notional_usd": 500,
+  "perp_fee_min": 0.20,
+  "liq_fee_rate": 0.008,
+  "starter_cash": 1500,
   "leverage": 1,
-  "starter_cash": 500,
-  "fee_note": "Binance regular user. Spot taker 0.10%, USD-M perp taker 0.05%. Round trip 0.30%, paid once when the hold opens and once if a person later closes it. Not the Coinbase 0.90% taker. Not charged every month."
+  "fee_note": "Coinbase US retail, checked 2026-11-14. Spot taker 0.90% each side (Advanced US intro tier). CFM futures 0.05% of notional per contract per side, at least $0.20. Liquidation 0.80%. Config can raise these, never lower them."
 }

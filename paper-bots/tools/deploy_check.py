@@ -44,7 +44,7 @@ REPO = os.path.dirname(DESK)
 LOCKED_FLOORS = {
     "kalshi_sports": 0.06, "kalshi_btc15m": 0.05, "kalshi_commodity15m": 0.05, "kalshi_inx": 0.02,
     "solana_dex": 0.02, "coinbase_spot": 0.05, "binance_btc_carry": 0.02, "kalshi_econ": 0.05,
-    "equity_qqq": 0.02,
+    "equity_qqq": 0.02, "coinbase_btc_carry": 0.02,
 }
 MAX_PASS_AGE_S = 300
 

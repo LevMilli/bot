@@ -26,7 +26,8 @@ This desk trades pretend money only. Here is what keeps it that way, in plain wo
 | kalshi_inx | 0.02 |
 | solana_dex | 0.02 |
 | coinbase_spot | 0.05 |
-| binance_btc_carry | 0.02 |
+| binance_btc_carry | 0.02 (retired tower; lock kept) |
+| coinbase_btc_carry | 0.02 |
 | kalshi_econ | 0.05 |
 | equity_qqq | 0.02 |
 

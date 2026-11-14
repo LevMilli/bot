@@ -143,7 +143,7 @@ def test_locked_floor_table_matches_desk_profit_and_brief():
     assert desk_safety.LOCKED_FLOORS == {
         "kalshi_sports": 0.06, "kalshi_btc15m": 0.05, "kalshi_commodity15m": 0.05,
         "kalshi_inx": 0.02, "solana_dex": 0.02, "coinbase_spot": 0.05,
-        "binance_btc_carry": 0.02, "kalshi_econ": 0.05, "equity_qqq": 0.02,
+        "binance_btc_carry": 0.02, "coinbase_btc_carry": 0.02, "kalshi_econ": 0.05, "equity_qqq": 0.02,
     }
     for key, lock in desk_safety.LOCKED_FLOORS.items():
         assert float(desk_profit.DEFAULT_VENUE_MIN_EDGE[key]) + 1e-12 >= lock, key

@@ -79,7 +79,7 @@ def _closed_rows(bot: dict) -> list:
 # Spot venues: a percent of the trade on each side.
 STRESS_CENTS = (0.01, 0.02)
 STRESS_SPOT = (0.0010, 0.0025)
-SPOT_VENUES = ("solana_dex", "coinbase_spot", "binance_btc_carry")
+SPOT_VENUES = ("solana_dex", "coinbase_spot", "binance_btc_carry", "coinbase_btc_carry")
 
 
 def _venue_kind(bot_id: str) -> str:

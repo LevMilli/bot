@@ -59,7 +59,7 @@ def test_real_desk_floors_and_money_pass():
 def test_locked_floor_list_matches_the_brief():
     assert deploy_check.LOCKED_FLOORS == {
         "kalshi_sports": 0.06, "kalshi_btc15m": 0.05, "kalshi_commodity15m": 0.05, "kalshi_inx": 0.02,
-        "solana_dex": 0.02, "coinbase_spot": 0.05, "binance_btc_carry": 0.02, "kalshi_econ": 0.05,
+        "solana_dex": 0.02, "coinbase_spot": 0.05, "binance_btc_carry": 0.02, "coinbase_btc_carry": 0.02, "kalshi_econ": 0.05,
         "equity_qqq": 0.02}
 
 

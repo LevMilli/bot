@@ -6322,18 +6322,19 @@ def default_exit_plan(bot: str) -> dict:
         }
     if b in ("btc-carry", "btc_carry"):
         return {
-            "kind": "hold+refuse_monthly_flip",
+            "kind": "hold+funding_exit",
             "hold": True,
-            "red_month_exit": False,
-            "monthly_flip": False,
+            "min_hold_days": 30,
+            "funding_exit": "7-day funding below -2%/yr",
+            "forced_close": "futures below intraday margin",
             "staff_close_backstop": True,
             "shadow_only": True,
             "auto_promote": False,
             "fee_floors_locked": True,
             "unlevered": True,
             "note": (
-                "Held unlevered BTC carry. A red funding month is a mark, not a flip. "
-                "Staff close is the backstop. No auto-promote."
+                "Held BTC carry on Coinbase (spot + BIP perp). After 30 days it closes on a week "
+                "of negative funding. Forced close below intraday margin. No auto-promote."
             ),
         }
     if b in ("coinbase-spot", "coinbase"):

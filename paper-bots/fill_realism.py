@@ -458,8 +458,8 @@ def daily_sample(rows: list[dict], day: str, n: int | None = None) -> list[dict]
 FEE_REFERENCE = {
     "coinbase-spot": {"taker": 0.009, "slippage": 0.001, "sides": 2,
                       "source": "Coinbase Advanced US intro taker 0.90%, 16 Sep 2026 schedule"},
-    "btc-carry": {"spot_taker": 0.001, "perp_taker": 0.0005,
-                  "source": "Binance spot 0.10% and USD-M perp 0.05% regular-tier taker"},
+    "btc-carry": {"spot_taker": 0.009, "perp_taker": 0.0005,
+                  "source": "Coinbase Advanced US spot taker 0.90% and CFM futures 0.05% (min $0.20) per contract per side"},
     "memecoin": {"swap_fee_pct": 1.0, "price_impact": True,
                  "source": "About 1% DEX/aggregator fee on every buy and sell, plus pool impact"},
     "qqq-momentum": {"commission": 0.0035, "slippage": 0.01,

@@ -107,6 +107,8 @@ DEFAULTS = {
         "coinbase_spot": 0.05,
         # Registry lock for the held BTC carry. Does not change kalshi_btc15m.
         "binance_btc_carry": 0.02,
+        # BTC carry moved to Coinbase spot + BIP perp. Same 0.02 lock.
+        "coinbase_btc_carry": 0.02,
         # Fed / econ binaries (FedWatch shadow). Locked. Idea-bank for main AUTO.
         "kalshi_econ": 0.05,
         # QQQ intraday shadow shares: close must clear the band by 2% of its width.
@@ -259,7 +261,7 @@ ACTIONS = {
         "run": {"argv": ("bot.py",), "entry": True, "timeout": 45, "label": "Run one check"},
     },
     "btc-carry": {
-        # Shadow sleeve. Public funding archive only. Entry gate blocks a new open.
+        # Shadow sleeve. Coinbase public market data only. Entry gate blocks a new open.
         "run": {"argv": ("bot.py",), "entry": True, "timeout": 60, "label": "Run one check"},
     },
     "sports-sharp-lag": {
@@ -411,8 +413,8 @@ BOTS = (
         "folder": "btc-carry-paper",
         "script": "bot.py",
         "blurb": (
-            "Shadow BTC spot-long / perpetual-short carry. Public archive only. "
-            "Unlevered and held. A red month is a mark, not a flip. "
+            "Shadow BTC carry on Coinbase: 0.01 BTC spot long, 1 BIP perp short. "
+            "Paid hourly funding. Spot wallet and futures margin kept like the real accounts. "
             "Spends no desk cash."
         ),
         "state": "paper_account.json",
@@ -766,29 +768,29 @@ BOT_PLANS = {
     },
     "btc-carry": {
         "buy": [
-            "Shadow sleeve only — spends no desk cash and takes no tower risk share",
-            "Long BTC spot and short the BTC perpetual, same notional, leverage 1",
-            "Public Binance archive funding and 8h premium index; no key",
-            "Spot taker 0.10% and perp taker 0.05%. Round trip 0.30%, paid once to open",
-            "Open only when both marks exist. Then hold. Do not flip the month",
+            "Shadow sleeve only - $1,500 of its own pretend cash, no desk risk share",
+            "Long 0.01 BTC on Coinbase spot and short 1 BIP perp on Coinbase futures",
+            "Coinbase public market data only (books, hourly funding, live margin); no key",
+            "Spot taker 0.90% each side; perp 0.05% (min $0.20) per contract per side",
+            "Open when 7-day funding minus the round trip clears the 0.02 floor (24 real hours seen first)",
         ],
         "sell": [
-            "A red funding month is marked and is not a close",
-            "Flipping every month is refused. That path pays the 0.30% round trip every month",
-            "The sleeve does not add a second leg after a red month",
+            "Hold. After 30 days, close if 7-day funding is below -2% a year",
+            "Forced close below Coinbase's intraday margin, with the 0.80% liquidation fee",
+            "One result per daily 5 PM ET settle; 50 before the tower is judged",
             "Staff close is the backstop. Nothing here auto-promotes",
         ],
         "failsafes": [
             "Desk entry gate blocks a new open. An open hold still marks",
-            "Spot taker stays 0.10% and perp taker stays 0.05%. The Coinbase 0.90% taker is not used",
-            "kalshi_btc15m 0.05 is not this book and is not lowered",
-            "Leverage above 1 is put back to 1. Notional stays the $500 sleeve",
-            "Pass bar: after-fee monthly median stays positive. A monthly flip is a reject",
-            "Pause file. A Binance key in the environment refuses the check",
+            "Fees can only go up. One contract. Leverage stays 1 (fully hedged)",
+            "Margin top-up from spot USD below 1.5x overnight margin; BTC slice sold only if USD runs out",
+            "Missed funding hours use the last rate and are counted as estimated",
+            "coinbase_btc_carry 0.02 is locked; kalshi_btc15m 0.05 is not this book",
+            "A Coinbase or Binance key in the environment refuses the check",
         ],
         "exit_quality": "partial",
         "entry_gated": True,
-        "stake": "sleeve-500",
+        "stake": "sleeve-1500",
     },
 }
 
@@ -5004,7 +5006,7 @@ TOWER_STARTER_CASH = {
     "kalshi-sp": 500.0,
     "kalshi-sized": 500.0,
     "coinbase-spot": 500.0,
-    "btc-carry": 500.0,
+    "btc-carry": 1500.0,
     "sports-sharp-lag": 500.0,
     "fed-watch": 500.0,
     "exclusive-set": 0.0,
@@ -5018,7 +5020,7 @@ TOWER_MIN_AMMO = {
     "kalshi-sp": 20.0,
     "kalshi-sized": 20.0,
     "coinbase-spot": 25.0,
-    "btc-carry": 500.0,
+    "btc-carry": 1500.0,
     "sports-sharp-lag": 25.0,
     "fed-watch": 25.0,
     "exclusive-set": 0.0,
@@ -5202,8 +5204,8 @@ def tower_doing_good(bot: dict) -> bool:
     if not isinstance(bot, dict) or not bot.get("present"):
         return True
     bot_id = str(bot.get("id") or "")
-    # Carry pays the 0.15% entry leg once ($499.25 of a $500 sleeve). That is the
-    # hold, not a broke book. A midnight reload would flatten it and the next
+    # Carry pays its entry fees once and keeps margin in the futures account.
+    # That is the hold, not a broke book. A midnight reload would flatten it and the next
     # check would pay the fee again.
     if bot_id == "btc-carry":
         return True
@@ -5672,13 +5674,20 @@ def _account_body(bot_id: str) -> dict:
         }
     if bot_id == "btc-carry":
         return {
-            "cash": 500.0,
+            "version": 2,
+            "venue": "coinbase_btc_carry",
+            "cash": 1500.0,
+            "starter_cash": 1500.0,
+            "wallet": {
+                "spot_usd": 1500.0, "spot_btc": 0.0, "futures_usd": 0.0,
+                "short_contracts": 0, "short_entry": None, "settle_mark": None,
+            },
             "open": [],
             "closed": [],
+            "equity_at_settle": 1500.0,
             "paper_only": True,
             "shadow_only": True,
             "live_orders": False,
-            "entry_fees": 0,
         }
     if bot_id == "wall-street":
         return {

@@ -49,7 +49,7 @@ def test_locked_floors_unchanged():
     import desk_profit
 
     locked = {"kalshi_sports": 0.06, "kalshi_btc15m": 0.05, "kalshi_commodity15m": 0.05, "kalshi_inx": 0.02,
-              "solana_dex": 0.02, "coinbase_spot": 0.05, "binance_btc_carry": 0.02, "kalshi_econ": 0.05,
+              "solana_dex": 0.02, "coinbase_spot": 0.05, "binance_btc_carry": 0.02, "coinbase_btc_carry": 0.02, "kalshi_econ": 0.05,
               "equity_qqq": 0.02}
     for venue, floor in locked.items():
         assert desk_profit.DEFAULT_VENUE_MIN_EDGE[venue] == floor

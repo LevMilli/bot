@@ -173,7 +173,7 @@ class PimpDeskTests(unittest.TestCase):
             "memecoin": 100.0,
             "kalshi-sized": 500.0,
             "coinbase-spot": 500.0,
-            "btc-carry": 500.0,
+            "btc-carry": 1500.0,
             "sports-sharp-lag": None,
             "fed-watch": None,
             "exclusive-set": 0.0,
@@ -1667,7 +1667,7 @@ class PimpDeskTests(unittest.TestCase):
             self.assertEqual(by_id["kalshi-sized"]["cash"], 500.0)
             self.assertEqual(by_id["coinbase-spot"]["cash"], 500.0)
             self.assertTrue(by_id["coinbase-spot"]["shadow_only"])
-            self.assertEqual(by_id["btc-carry"]["cash"], 500.0)
+            self.assertEqual(by_id["btc-carry"]["cash"], 1500.0)
             self.assertTrue(by_id["btc-carry"]["shadow_only"])
             for spec in shadow_missing.ACTIVE:
                 self.assertEqual(by_id[spec["id"]]["cash"], 0.0, spec["id"])
