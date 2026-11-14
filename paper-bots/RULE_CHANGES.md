@@ -11,7 +11,10 @@ why, and the replay or logged result behind it. Newest first.
   binance_btc_carry 0.02, kalshi_econ 0.05, equity_qqq 0.02.
 - Existing towers keep their trading behavior. New ideas go in as a shadow twin or behind a
   flag that is off by default.
-- More 15m is frozen.
+- More 15m is frozen, except the early-sale price re-read Levi approved on Nov 13.
+- More 15m keeps practicing. No promotion (Levi, Nov 13).
+- Crypto ladder keeps practicing for 50 more results, then Levi decides (Nov 13; it had 66
+  settled results that day, so the decision comes at 116).
 - Shadow towers: shadow only, $25 ticket, $500 sleeve, reuse a locked floor. They count after
   50 settled results. Promotion still needs Levi's OK.
 - Favorite harvest stays off until its cells have 50 past results.
@@ -25,4 +28,5 @@ why, and the replay or logged result behind it. Newest first.
 
 | Date | Change | Why | Evidence |
 | --- | --- | --- | --- |
+| 2026-11-13 | Fix-now and decisions PR: meme price check gets its paper-only settings; the shared decision journal uses a lock and a unique temp file (Coinbase spot save errors); More 15m and its two twins re-read the bid 3 seconds after each early-sale decision and book the lower bid, and every buy records when its prices were read; 77 new series added to market snapshots and 5 new calibration families; Kalshi fee charged once per order on BTC 15m and Commodity 15m buys and sells (Kalshi S&P and Sized Kalshi already did); Weather high time limit 75s to 150s | Nov 13 evening report: meme price check refused 19 times, 2 Coinbase spot save errors, fill lab found 258 of 520 More 15m buys had no real trading at our price, 65 weather-high timeouts | Tests for each change. Sale decisions and edge checks are unchanged; only the booked sale price can get worse, never better |
 | 2026-11-13 | Added safety locks: startup floor check and log line, locked-limit tests, repo secret scan, 50-results check, promotion card | Plan steps 1-98 and 941-980 | Tests only. No tower trades differently |

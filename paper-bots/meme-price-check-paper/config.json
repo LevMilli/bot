@@ -1,0 +1,8 @@
+{
+  "paper_only": true,
+  "live_orders": false,
+  "shadow_only": true,
+  "research": true,
+  "stake_usd": 0,
+  "note": "Research building for the Memecoin tower. Compares DexScreener and Jupiter prices and counts would-be blocks. Buys nothing."
+}

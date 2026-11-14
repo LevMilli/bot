@@ -25,6 +25,19 @@ import gzip
 import json
 import os
 
+# Nov 13: the markets behind the new practice towers, so they get recorded and graded.
+CRYPTO_HOURLY = ("KXSOLD", "KXXRPD", "KXDOGED", "KXBNBD", "KXSOL", "KXXRP", "KXDOGE", "KXBNB")
+WEATHER_LOWS = tuple(f"KXLOWT{c}" for c in (
+    "NYC", "CHI", "MIA", "AUS", "DEN", "PHIL", "LAX", "ATL", "BOS", "DAL", "DC", "EWR",
+    "HOU", "LV", "MIN", "NOLA", "OKC", "PHX", "SAN", "SATX", "SDF", "SEA", "SFO", "TTN"))
+WEATHER_CITY_HIGHS = tuple(f"KXHIGHT{c}" for c in (
+    "ATL", "BOS", "DAL", "DC", "EWR", "HOU", "LV", "MIN", "NOLA", "OKC", "PHX",
+    "SAN", "SATX", "SDF", "SEA", "SFO", "TTN"))
+MONTHLY_PRECIP = tuple(f"KXRAIN{c}M" for c in (
+    "NYC", "ABQ", "CHI", "EWR", "IND", "MIN", "NOLA", "LAX", "HOU", "MIA", "SEA", "SFO",
+    "AUS", "DEN", "ATL", "BOS", "DC", "PHIL")) + tuple(f"KX{c}SNOWM" for c in (
+    "BOS", "CHI", "DEN", "DET", "SEA", "NYC", "DC", "PHIL", "MSP"))
+GAS_MONTHLY = ("KXAAAGASM",)
 SERIES = (
     # weather, gas, crypto daily, indexes
     "KXHIGHNY", "KXHIGHCHI", "KXHIGHMIA", "KXHIGHAUS", "KXHIGHDEN", "KXHIGHPHIL", "KXHIGHLAX",
@@ -33,7 +46,7 @@ SERIES = (
     "KXUST10A", "KXCPI", "KXCPIYOY", "KXGDP",
     # sports game winners
     "KXNBAGAME", "KXNFLGAME", "KXNHLGAME", "KXEPLGAME", "KXUCLGAME", "KXATPMATCH", "KXWTAMATCH",
-)
+) + CRYPTO_HOURLY + WEATHER_LOWS + WEATHER_CITY_HIGHS + MONTHLY_PRECIP + GAS_MONTHLY
 # B19: the 15-minute windows, recorded every minute for the last 14 minutes of each window.
 SERIES_15M = (
     "KXBTC15M", "KXETH15M", "KXSOL15M", "KXXRP15M", "KXDOGE15M", "KXBNB15M", "KXHYPE15M",

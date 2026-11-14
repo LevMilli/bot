@@ -42,8 +42,9 @@ class Btc15mSell(unittest.TestCase):
         self.assertEqual(len(sold), 1)
         self.assertEqual(state["open"], [])
         closed = state["closed"][0]
-        fee = btc.fee_per_contract(0.90)
-        self.assertAlmostEqual(closed["payout"], round(10 * (0.90 - fee), 2))
+        # Nov 13: Kalshi's fee is charged once for the whole order.
+        self.assertAlmostEqual(closed["payout"], round(10 * 0.90 - btc.order_fee(10, 0.90), 2))
+        self.assertEqual(closed["payout"], 8.93)  # 0.07 x 10 x 0.90 x 0.10 = 0.063 -> 0.07
         self.assertLess(closed["payout"], 9.0)
         self.assertIn("take-profit +15¢ cap 99¢", closed["exit"])
         self.assertFalse(closed["opens_new_ticket"])

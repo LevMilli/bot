@@ -66,13 +66,14 @@ TWINS = {
     "more-15m-longshot": {
         "family": "more", "idea": "B1",
         "spec": {"name": "More 15m long-shot bar", "max_open": 4, "max_edge": 0.20, "group_cap": 2,
-                 "tape_check": True, "fee_per_order": True},
+                 "tape_check": True, "fee_per_order": True, "sell_recheck_sec": 3},
         "cheap_extra_edge": CHEAP_EXTRA_EDGE,
     },
     "more-15m-tp15": {
         "family": "more", "idea": "B5",
         "spec": {"name": "More 15m take-profit", "max_open": 4, "max_edge": 0.20, "group_cap": 2,
-                 "tape_check": True, "fee_per_order": True, "take_profit": 0.15},
+                 "tape_check": True, "fee_per_order": True, "take_profit": 0.15,
+                 "sell_recheck_sec": 3},
     },
     "btc15m-mirror": {
         "family": "btc", "idea": "control",

@@ -388,10 +388,14 @@ def record_close(pos, *, cash, reason, bid=None, fee=None, root=None):
 
 
 def paper_sell(state, pos, bid, fee, reason):
-    """Flatten one open BTC paper position at bid − fee. No live order."""
+    """Flatten one open BTC paper position at bid, less Kalshi's fee for the whole order. No live order.
+
+    ``fee`` is the per-contract fee the caller looked up; zero means no fee applies.
+    The money moved uses the once-per-order fee (Nov 13).
+    """
     contracts = float(pos.get("contracts") or 0)
-    per = max(0.0, float(bid) - float(fee or 0))
-    proceeds = round(contracts * per, 2)
+    sell_fee = order_fee(contracts, bid) if float(fee or 0) > 0 else 0.0
+    proceeds = round(max(0.0, contracts * float(bid) - sell_fee), 2)
     pnl = round(proceeds - float(pos.get("cost") or 0), 2)
     state["cash"] = round(float(state.get("cash") or 0) + proceeds, 2)
     closed = dict(pos)
@@ -399,6 +403,7 @@ def paper_sell(state, pos, bid, fee, reason):
         "closed": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         "exit": reason,
         "exit_price": round(float(bid), 4),
+        "exit_fee_order": sell_fee,
         "payout": proceeds,
         "pnl": pnl,
         "opens_new_ticket": False,
@@ -913,7 +918,8 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
                 return blocked
     except ImportError:
         pass
-    cost = round(contracts * per, 2)
+    buy_fee = order_fee(contracts, ask) if float(fee or 0) > 0 else 0.0
+    cost = round(contracts * float(ask) + buy_fee, 2)  # Nov 13: fee once per order
     cash = float(state.get("cash") or 0)
     if cost > cash + 1e-9 or len(state.get("open") or []) >= 12:
         return none_msg
@@ -944,6 +950,8 @@ def paper_buy(state, ticker, side, ask, fee, prob, close_time, signal_buy, edge=
         "contracts": contracts,
         "ask": round(float(ask), 4),
         "fee": round(float(fee or 0), 4),
+        "fee_order": buy_fee,
+        "fee_mode": "per_order",
         "cost": cost,
         "risk": cost,
         "reward": reward,
@@ -1075,6 +1083,21 @@ def phi(z):
 def fee_per_contract(p):
     """Kalshi taker fee for 1 contract at price p (dollars), rounded up to the cent."""
     return math.ceil(round(0.07 * p * (1 - p) * 100, 6)) / 100
+
+
+def order_fee(contracts, p):
+    """Kalshi taker fee for one whole order: 0.07 x C x P x (1 - P), rounded up once to the cent.
+
+    Nov 13 (Levi approved): paper buys and sells are charged this once per order,
+    like Kalshi does, instead of the per-contract fee times the count.
+    """
+    try:
+        c, p = float(contracts), float(p)
+    except (TypeError, ValueError):
+        return 0.0
+    if c <= 0 or not (0.0 < p < 1.0) or not math.isfinite(p):
+        return 0.0
+    return math.ceil(round(0.07 * c * p * (1 - p) * 100, 6)) / 100
 
 
 def parse_ts(s):
