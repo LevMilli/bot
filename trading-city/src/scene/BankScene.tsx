@@ -3,7 +3,7 @@ import { Html, PerspectiveCamera } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { CanvasTexture, DoubleSide, MathUtils, type Group, type Mesh, type MeshStandardMaterial, type PointLight } from 'three'
 import type { BotRow, Desk } from '../types'
-import { BEAM_COLORS, beamColorFor, workersOnShift } from '../data/format'
+import { BEAM_COLORS, beamColorFor, towerBookCash, workersOnShift } from '../data/format'
 import { botPose } from '../data/botPose'
 import {
   sharpenBoardTexture,
@@ -102,6 +102,7 @@ function tellerSlots(bots: BotRow[]): (BotRow | null)[] {
 
 function TellerPod({
   bot,
+  cash,
   index,
   focused,
   near,
@@ -110,6 +111,8 @@ function TellerPod({
   onSelect,
 }: {
   bot: BotRow | null
+  /** This tower's recorded cash from the shared book. Null stays blank. */
+  cash: number | null
   index: number
   focused: boolean
   near: boolean
@@ -121,7 +124,10 @@ function TellerPod({
   const color = beamColorFor(bot?.id, index)
   const offline = !bot || bot.present === false
   const pose = bot ? botPose(bot) : 'waiting'
-  const plate = useMemo(() => tellerPlateTexture(bot, index, color), [bot, index, color])
+  const plate = useMemo(
+    () => tellerPlateTexture(bot ? { ...bot, cash } : null, index, color),
+    [bot, cash, index, color],
+  )
   const lamp = useRef<Mesh>(null)
   const halo = useRef<Mesh>(null)
   const screen = useRef<Mesh>(null)
@@ -403,8 +409,8 @@ function TellerPod({
   )
 }
 
-function ProfitBoard({ desk }: { desk?: Desk }) {
-  const map = useMemo(() => vaultBoardTexture(desk), [desk])
+function ProfitBoard({ desk, bots = [] }: { desk?: Desk; bots?: BotRow[] }) {
+  const map = useMemo(() => vaultBoardTexture(desk, bots), [desk, bots])
   const { gl } = useThree()
   useEffect(() => {
     sharpenBoardTexture(map, gl.capabilities.getMaxAnisotropy())
@@ -679,7 +685,7 @@ function LockboxWall({ bots }: { bots: BotRow[] }) {
     for (let row = 0; row < 5; row++) {
       for (let col = 0; col < 3; col++) {
         const i = row * 3 + col
-        const bot = bots[i % Math.max(bots.length, 1)]
+        const bot = i < bots.length ? bots[i] : null
         out.push({
           x: col * 0.38 - 0.38,
           y: row * 0.34 + 1.0,
@@ -1852,7 +1858,7 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps, onWalkHin
       <FloorGlowPaths tellers={tellers} />
 
       <HeroVaultDoor />
-      <ProfitBoard desk={desk} />
+      <ProfitBoard desk={desk} bots={bots} />
       <LockboxWall bots={bots} />
       <CountingCage />
       <SideScreen side={-1} desk={desk} bots={bots} onOpen={onOpenDeskOps} />
@@ -1873,6 +1879,7 @@ export function BankScene({ bots, desk, onSelectTeller, onOpenDeskOps, onWalkHin
           <group key={bot?.id || `empty-${i}`} position={[pose.x, 0, pose.z]} rotation={[0, pose.rotY, 0]}>
             <TellerPod
               bot={bot}
+              cash={bot ? (towerBookCash(desk, bot) ?? null) : null}
               index={i}
               focused={focus === i}
               near={nearIndex === i}

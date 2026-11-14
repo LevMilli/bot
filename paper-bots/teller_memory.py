@@ -190,6 +190,51 @@ def dialogue_line(root: str | None, bot_id: str | None = None) -> str:
     return "Shared memory empty — waiting on the next paper check."
 
 
+def tower_cash_line(bot: dict | None) -> str:
+    """Teller line for this tower's recorded cash. Blank when none was recorded."""
+    if not isinstance(bot, dict):
+        return ""
+    bot_id = str(bot.get("id") or "").strip()
+    if not bot_id or "cash" not in bot or bot.get("cash") is None:
+        return ""
+    try:
+        number = float(bot.get("cash"))
+    except (TypeError, ValueError):
+        return ""
+    if number != number:  # NaN
+        return ""
+    return f"{bot_id} cash ${number:.2f}"
+
+
+def cash_book(bots: list | None) -> dict:
+    """One row per tower. The city side and the vault both read this book.
+
+    A tower with no recorded cash stays null. The total adds only recorded
+    rows. It never fills a blank with zero or with another tower's cash.
+    """
+    rows = []
+    for bot in bots or []:
+        if not isinstance(bot, dict):
+            continue
+        bot_id = str(bot.get("id") or "")
+        if not bot_id:
+            continue
+        number = None
+        if "cash" in bot and bot.get("cash") is not None:
+            try:
+                number = round(float(bot.get("cash")), 2)
+            except (TypeError, ValueError):
+                number = None
+        rows.append({"id": bot_id, "cash": number})
+    vals = [row["cash"] for row in rows if row["cash"] is not None]
+    return {
+        "paper_only": True,
+        "rows": rows,
+        "cash": None if not vals else round(sum(vals), 2),
+        "note": "Recorded paper cash only. A tower with no cash stays blank.",
+    }
+
+
 def memory_summary(root: str | None = None) -> dict:
     state = load_memory(root)
     recent = []
@@ -237,6 +282,16 @@ def self_check() -> None:
         line = dialogue_line(tmp, "btc15m")
         assert "btc15m" in line.lower() or "win" in line.lower()
         assert os.path.isfile(memory_path(tmp))
+        book = cash_book([
+            {"id": "btc15m", "cash": 97.19},
+            {"id": "fed-watch", "cash": None},
+            {"id": "sports-gap"},
+        ])
+        assert book["cash"] == 97.19
+        assert book["rows"][1]["cash"] is None
+        assert book["rows"][2]["cash"] is None
+        assert tower_cash_line({"id": "btc15m", "cash": 97.19}) == "btc15m cash $97.19"
+        assert tower_cash_line({"id": "fed-watch", "cash": None}) == ""
 
 
 if __name__ == "__main__":

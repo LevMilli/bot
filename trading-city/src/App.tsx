@@ -4487,6 +4487,7 @@ export default function App() {
             />
             <TowerRail
               bots={bots}
+              desk={snap?.desk}
               readAt={updatedAt}
               onSelect={(id) => {
                 openTower(id)

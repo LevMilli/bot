@@ -1092,6 +1092,29 @@ def _num(value):
     return number
 
 
+def recorded_cash(state, kind: str):
+    """Cash this tower actually wrote down.
+
+    Kalshi books store ``bankroll``. The memecoin book stores ``cash_usd``.
+    Every other paper tower stores ``cash``. A missing key stays None.
+    Never a zero, and never some other field or some other tower.
+    """
+    if not isinstance(state, dict):
+        return None
+    if kind == "kalshi":
+        key = "bankroll"
+    elif kind == "meme":
+        key = "cash_usd"
+    else:
+        key = "cash"
+    if key not in state:
+        return None
+    number = _num(state.get(key))
+    if number is None:
+        return None
+    return round(number, 2)
+
+
 def _read_json(path: str):
     if not os.path.isfile(path):
         return None
@@ -2319,7 +2342,7 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
         if isinstance(state, dict):
             view["has_state"] = True
             view["empty"] = ""
-            view["cash"] = 0.0
+            view["cash"] = recorded_cash(state, "floor")
             try:
                 n = int(state.get("traders"))
             except (TypeError, ValueError):
@@ -2349,9 +2372,7 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
             positions, trades, realized, today, risk, count, history = _sports_positions(state, day)
             view["has_state"] = True
             view["empty"] = ""
-            view["cash"] = _num(state.get("cash"))
-            if view["cash"] is not None:
-                view["cash"] = round(view["cash"], 2)
+            view["cash"] = recorded_cash(state, spec.get("kind") or "")
             view["positions"] = positions
             view["trades"] = trades
             view["history"] = history
@@ -2408,10 +2429,10 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
     summary = str(run.get("summary") or "")
     if spec["kind"] == "sports":
         positions, trades, realized, today, risk, count, history = _sports_positions(state, day)
-        view["cash"] = _num(state.get("cash"))
+        view["cash"] = recorded_cash(state, "sports")
     elif spec["kind"] == "kalshi":
         positions, trades, realized, today, risk, count, history = _kalshi_positions(state, day)
-        view["cash"] = _num(state.get("bankroll"))
+        view["cash"] = recorded_cash(state, "kalshi")
         # Prefer densified CARD/NO TRADE from last scan over calendar-only (#414 sibling).
         # Sized reads its own config — never inherit S&P staff-clear tip (#501 twin).
         view["skip"] = _kalshi_skip(
@@ -2421,9 +2442,7 @@ def _bot_view(spec: dict, root: str, runs: dict, day: dt.date) -> dict:
         trades_path = _under(root, spec["folder"], "trades.csv")
         cap_log(trades_path)
         positions, trades, realized, today, risk, count, history = _meme_positions(state, trades_path, day)
-        view["cash"] = _num(state.get("cash_usd"))
-    if view["cash"] is not None:
-        view["cash"] = round(view["cash"], 2)
+        view["cash"] = recorded_cash(state, spec.get("kind") or "meme")
     view["positions"] = positions
     view["trades"] = trades
     view["history"] = history
@@ -2984,6 +3003,9 @@ def shadow_snapshot_rows(root: str, cfg: dict) -> list:
             state = load_shadow_account(root, bot_id, variant)
         except Exception:
             continue
+        # The loader fills a missing sleeve with $100 so a check can run.
+        # The book does not. No file, or no cash key, stays blank.
+        stored = _read_json(shadow_account_path(root, bot_id, variant))
         closed = state.get("closed") if isinstance(state.get("closed"), list) else []
         open_rows = state.get("open") if isinstance(state.get("open"), list) else []
         exp = desk_profit.bot_expectancy(
@@ -2993,7 +3015,7 @@ def shadow_snapshot_rows(root: str, cfg: dict) -> list:
             "bot": bot_id,
             "variant_id": variant,
             "active": True,
-            "cash": float(state.get("cash") or 0),
+            "cash": recorded_cash(stored, "shadow"),
             "open_count": len(open_rows),
             "n": exp.get("n") or 0,
             "expectancy": exp.get("expectancy"),
@@ -3238,12 +3260,24 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         desk_row["master"] = {"paper_only": True, "error": type(exc).__name__}
     try:
         import teller_memory
+        # Same rows the city side and the vault print. Built before ingest so a
+        # memory miss cannot drop the book.
+        desk_row["cash_book"] = teller_memory.cash_book(public)
         teller_memory.ingest_from_bots(root, public)
         desk_row["teller_memory"] = teller_memory.memory_summary(root)
         for bot in public:
             bot["memory_line"] = teller_memory.dialogue_line(root, bot.get("id"))
+            line = teller_memory.tower_cash_line(bot)
+            if line:
+                bot["cash_line"] = line
     except Exception as exc:  # noqa: BLE001
         desk_row["teller_memory"] = {"paper_only": True, "error": type(exc).__name__}
+        desk_row.setdefault("cash_book", {
+            "paper_only": True,
+            "rows": [],
+            "cash": None,
+            "error": type(exc).__name__,
+        })
     tip = sports_tip_alarm_from_cache(root)
     desk_row["sports_tip"] = tip
     if isinstance(desk_row.get("master"), dict):

@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import type { BotRow, Desk } from '../types'
-import { equitySeries, money, statusLabel } from '../data/format'
+import { bookCash, equitySeries, money, statusLabel } from '../data/format'
 
 const TEXTURE_SCALE = 4
 
@@ -225,7 +225,7 @@ export function rightMonitorTexture(bot: BotRow): THREE.CanvasTexture {
 }
 
 /** Wide bank lobby board — desk net profit / cash / pace. */
-export function vaultBoardTexture(desk?: Desk): THREE.CanvasTexture {
+export function vaultBoardTexture(desk?: Desk, bots: BotRow[] = []): THREE.CanvasTexture {
   // Tall canvas so primary + secondary rows stay legible from lobby distance.
   const { canvas, ctx, w, h } = makeCanvas(1280, 360)
   ctx.fillStyle = '#050812'
@@ -259,7 +259,7 @@ export function vaultBoardTexture(desk?: Desk): THREE.CanvasTexture {
   // High-contrast secondary row for far reading (avoid dark purple on black).
   ctx.fillStyle = '#7ef9ff'
   ctx.font = 'bold 40px monospace'
-  ctx.fillText(`cash ${money(desk?.cash)}`, 36, 305)
+  ctx.fillText(`cash ${money(bookCash(desk, bots))}`, 36, 305)
 
   ctx.fillStyle = '#ffc8ff'
   ctx.font = 'bold 36px monospace'
@@ -276,45 +276,45 @@ export function vaultBoardTexture(desk?: Desk): THREE.CanvasTexture {
   return screenTexture(canvas)
 }
 
-/** Left lobby — live desk ledger / teller cash (logical size × TEXTURE_SCALE). */
+/** Left lobby — the same paper-cash book the city side reads. */
 export function vaultLedgerTexture(desk?: Desk, bots: BotRow[] = []): THREE.CanvasTexture {
   // Large logical canvas → 4× backing store so glyphs stay sharp at lobby distance.
   const { canvas, ctx, w, h } = makeCanvas(1200, 900)
   paintBase(ctx, w, h)
   ctx.fillStyle = '#f9c80e'
-  ctx.font = 'bold 78px monospace'
-  ctx.fillText('DESK LEDGER', 40, 88)
+  ctx.font = 'bold 64px monospace'
+  ctx.fillText('PAPER BOOK', 40, 78)
   ctx.fillStyle = '#7ef9ff'
-  ctx.font = 'bold 52px monospace'
-  ctx.fillText(`vault cash ${money(desk?.cash)}`, 40, 168)
+  ctx.font = 'bold 44px monospace'
+  ctx.fillText(`cash ${money(bookCash(desk, bots))}`, 40, 138)
   ctx.fillStyle = '#e8eefc'
-  ctx.font = 'bold 36px monospace'
-  ctx.fillText(`open risk ${money(desk?.open_risk)} · positions ${desk?.open_count ?? 0}`, 40, 224)
+  ctx.font = 'bold 28px monospace'
+  ctx.fillText(`open risk ${money(desk?.open_risk)} · positions ${desk?.open_count ?? 0}`, 40, 180)
 
-  const deskBots = bots.filter((b) => !b.shadow_only)
-  const shadowBots = bots.filter((b) => b.shadow_only)
-  const shadowToday = shadowBots.reduce((sum, b) => sum + Number(b.today || 0), 0)
-  let y = 278
-  for (const bot of deskBots.slice(0, 6)) {
-    const offline = bot.present === false
-    ctx.fillStyle = offline ? '#9a88aa' : '#ffffff'
-    ctx.font = 'bold 40px monospace'
-    ctx.fillText(String(bot.name || bot.id).slice(0, 18), 40, y)
-    ctx.fillStyle = offline ? '#9a88aa' : Number(bot.today || 0) >= 0 ? '#39ff14' : '#ff2a6d'
-    ctx.font = 'bold 40px monospace'
-    const figure = offline ? 'offline' : `cash ${money(bot.cash)} · ${money(bot.today != null && bot.today !== 0 ? bot.today : bot.realized, true)}`
-    ctx.fillText(figure, w - 40 - ctx.measureText(figure).width, y)
-    y += 68
-    ctx.fillStyle = '#4a5568'
-    ctx.fillRect(40, y - 46, w - 80, 3)
-  }
-
-  ctx.fillStyle = '#b9a7e8'
-  ctx.font = 'bold 30px monospace'
-  const shadowLine = shadowBots.length
-    ? `${shadowBots.length} shadow towers on their own books · today ${money(shadowToday, true)} · not in this cash`
-    : 'Every desk tower is on this board.'
-  wrapText(ctx, shadowLine, 40, h - 64, w - 80, 34, 2)
+  const bookRows = desk?.cash_book?.rows
+  const lines = bookRows
+    ? bookRows.map((row) => {
+        const bot = bots.find((item) => item.id === row.id)
+        return { name: bot?.name || row.id, cash: row.cash }
+      })
+    : bots.map((bot) => ({ name: bot.name || bot.id, cash: bot.cash }))
+  const rowH = 22
+  const top = 214
+  const maxRows = Math.max(1, Math.floor((h - top - 36) / rowH))
+  const colW = (w - 70) / 3
+  ctx.font = 'bold 20px monospace'
+  lines.slice(0, maxRows * 3).forEach((line, i) => {
+    const col = Math.floor(i / maxRows)
+    const row = i % maxRows
+    const x = 40 + col * colW
+    const y = top + row * rowH
+    ctx.fillStyle = '#ffffff'
+    const name = String(line.name || '').slice(0, 14)
+    const figure = line.cash == null ? '—' : money(line.cash)
+    ctx.fillText(name, x, y)
+    ctx.fillStyle = line.cash == null ? '#8a7498' : '#7ef9ff'
+    ctx.fillText(figure, x + colW - 16 - ctx.measureText(figure).width, y)
+  })
 
   return screenTexture(canvas)
 }
@@ -348,10 +348,12 @@ export function tellerPlateTexture(
     ctx.fillStyle = Number(figure || 0) >= 0 ? '#39ff14' : '#ff2a6d'
     ctx.font = 'bold 34px monospace'
     ctx.fillText(money(figure, true), 20, 155)
-    ctx.fillStyle = '#7ef9ff'
-    ctx.font = 'bold 22px monospace'
-    const cash = `cash ${money(bot.cash)}`
-    ctx.fillText(cash, w - 22 - ctx.measureText(cash).width, 155)
+    if (bot.cash != null) {
+      ctx.fillStyle = '#7ef9ff'
+      ctx.font = 'bold 22px monospace'
+      const cash = `cash ${money(bot.cash)}`
+      ctx.fillText(cash, w - 22 - ctx.measureText(cash).width, 155)
+    }
   } else {
     ctx.fillStyle = '#8a7498'
     ctx.font = '22px monospace'

@@ -195,6 +195,16 @@ export type Desk = {
   cash?: Money
   realized?: Money
   today?: Money
+  /**
+   * Every paper tower's recorded cash. The city side and the vault both read
+   * this book. A tower with no recorded cash is null.
+   */
+  cash_book?: {
+    paper_only?: boolean
+    rows?: { id: string; cash?: number | null }[]
+    cash?: number | null
+    note?: string
+  }
   /** Desk towers in the vault, and shadow towers kept on their own books. */
   bankroll?: {
     paper_only?: boolean
