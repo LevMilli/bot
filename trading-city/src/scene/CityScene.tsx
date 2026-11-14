@@ -320,7 +320,7 @@ export function CityContents({
       <BorderScreens bots={bots} />
       <Skyline z={-46} width={52} />
       <SkyEquityLine />
-      <Vault desk={desk} workers={workers} onOpen={onOpenVault} />
+      <Vault desk={desk} bots={bots} workers={workers} onOpen={onOpenVault} />
       <VaultBeams slots={slots} />
 
       {fillers.map((f, i) => (

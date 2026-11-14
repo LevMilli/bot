@@ -223,6 +223,15 @@ class VaultLines(unittest.TestCase):
         self.assertIn("Practice ({shadowTowers}) <em>not counted</em>", holo)
         self.assertIn("All paper", holo)
         self.assertEqual(len(re.findall(r'className="vault-line[ "]', holo)), 4)  # head + three lines
+        self.assertIn("bookCash(desk, bots)", holo)
+        self.assertIn("Paper cash {money(paperCash)}", holo)
+        rail = src("hud/TowerRail.tsx")
+        self.assertIn("bookCash(desk, allBots)", rail)
+        self.assertIn("towerBookCash(desk, bot)", rail)
+        self.assertNotIn("own $500 book", rail)
+        fmt = src("data/format.ts")
+        self.assertIn("export function bookCash", fmt)
+        self.assertIn("export function towerBookCash", fmt)
 
 
 class OfflineBanner(unittest.TestCase):

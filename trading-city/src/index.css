@@ -813,6 +813,14 @@ a {
   width: max-content;
 }
 
+.vault-holo .vault-book-cash {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--cyan);
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+}
+
 .vault-holo strong {
   color: var(--amber);
   font-size: 0.82rem;

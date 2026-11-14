@@ -2,6 +2,7 @@ import { Html } from '@react-three/drei'
 import type { BotRow, Desk } from '../types'
 import {
   beamColorFor,
+  bookCash,
   hologramPnl,
   hologramPnlValue,
   money,
@@ -90,7 +91,16 @@ function sum(a: unknown, b: unknown): number | null {
   return Math.round(((Number.isFinite(x) ? x! : 0) + (Number.isFinite(y) ? y! : 0)) * 100) / 100
 }
 
-export function VaultHologram({ desk, workers }: { desk?: Desk; workers: number }) {
+export function VaultHologram({
+  desk,
+  workers,
+  bots = [],
+}: {
+  desk?: Desk
+  workers: number
+  bots?: BotRow[]
+}) {
+  const paperCash = bookCash(desk, bots)
   const deskCash = desk?.bankroll?.cash ?? desk?.cash
   const deskRealized = desk?.bankroll?.realized ?? desk?.realized
   const deskToday = desk?.bankroll?.today ?? desk?.today
@@ -122,6 +132,7 @@ export function VaultHologram({ desk, workers }: { desk?: Desk; workers: number 
     >
       <div className="holo html-holo vault-holo">
         <strong>THE VAULT · click to enter</strong>
+        <span className="vault-book-cash">Paper cash {money(paperCash)}</span>
         <span className="vault-lines" role="table" aria-label="Paper money by book">
           <span className="vault-line vault-line-head" role="row">
             <span role="columnheader">book</span>
@@ -154,7 +165,7 @@ export function VaultHologram({ desk, workers }: { desk?: Desk; workers: number 
           {shadowTowers != null && shadowTowers > 0 && (
             <span className="vault-line vault-line-total" role="row">
               <span role="cell">All paper</span>
-              <span role="cell">{money(sum(deskCash, roll?.shadow_cash))}</span>
+              <span role="cell">{money(paperCash)}</span>
               <span role="cell" className={`tone-${pnlTone(sum(deskRealized, roll?.shadow_realized))}`}>
                 {money(sum(deskRealized, roll?.shadow_realized), true)}
               </span>

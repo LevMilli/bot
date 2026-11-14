@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { CanvasTexture, SRGBColorSpace, type Group, type Mesh } from 'three'
-import type { Desk } from '../types'
+import type { BotRow, Desk } from '../types'
 import { VaultHologram } from '../hud/Holograms'
 
 const SHELL = '#07060e'
@@ -126,6 +126,7 @@ export function Vault({
   lights = true,
   position = [0, 0, 5.2],
   desk,
+  bots = [],
   workers = 0,
   showHolo = true,
   onOpen,
@@ -134,6 +135,7 @@ export function Vault({
   /** Plaza keeps the vault toward the overview camera. The office window places it down the street. */
   position?: [number, number, number]
   desk?: Desk
+  bots?: BotRow[]
   workers?: number
   showHolo?: boolean
   /** Enter the bank lobby when the vault is clicked. */
@@ -267,7 +269,7 @@ export function Vault({
 
       {lights && <pointLight position={[0, 3.4, 1.2]} intensity={1.15} color="#9ee7ff" distance={14} />}
 
-      {showHolo && holoReady && <VaultHologram desk={desk} workers={workers} />}
+      {showHolo && holoReady && <VaultHologram desk={desk} bots={bots} workers={workers} />}
     </group>
   )
 }

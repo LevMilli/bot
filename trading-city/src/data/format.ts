@@ -1,4 +1,4 @@
-import type { BotRow, Money, TradeOrHistory } from '../types'
+import type { BotRow, Desk, Money, TradeOrHistory } from '../types'
 
 /**
  * Unique neon beam per tower / teller. Index fallback must stay longer than the
@@ -92,6 +92,43 @@ export function beamColorFor(botId: string | null | undefined, index = 0): strin
     return pool[hashBotId(botId) % pool.length]
   }
   return BEAM_COLORS[((index % BEAM_COLORS.length) + BEAM_COLORS.length) % BEAM_COLORS.length]
+}
+
+/**
+ * The paper-cash total both the city side and the vault print.
+ * Prefer the desk book. Without one, add each tower's own cash.
+ * A missing figure stays blank. It is not zero and not another tower.
+ */
+export function bookCash(desk?: Desk, bots?: BotRow[]): Money {
+  const book = desk?.cash_book
+  if (book && Object.prototype.hasOwnProperty.call(book, 'cash')) return book.cash
+  if (bots && bots.length) {
+    const vals: number[] = []
+    for (const bot of bots) {
+      if (bot.cash == null || !Number.isFinite(Number(bot.cash))) continue
+      vals.push(Number(bot.cash))
+    }
+    if (!vals.length) return null
+    return Math.round(vals.reduce((sum, n) => sum + n, 0) * 100) / 100
+  }
+  const roll = desk?.bankroll
+  if (roll && (roll.cash != null || roll.shadow_cash != null)) {
+    const deskPart = roll.cash == null || !Number.isFinite(Number(roll.cash)) ? 0 : Number(roll.cash)
+    const shadowPart =
+      roll.shadow_cash == null || !Number.isFinite(Number(roll.shadow_cash)) ? 0 : Number(roll.shadow_cash)
+    if (roll.cash == null && roll.shadow_cash == null) return null
+    return Math.round((deskPart + shadowPart) * 100) / 100
+  }
+  return desk?.cash
+}
+
+/** This tower's cash from the shared book. Missing row stays blank. */
+export function towerBookCash(desk: Desk | undefined, bot: BotRow): Money {
+  const rows = desk?.cash_book?.rows
+  if (!rows) return bot.cash
+  const row = rows.find((item) => item.id === bot.id)
+  if (!row || !Object.prototype.hasOwnProperty.call(row, 'cash')) return null
+  return row.cash
 }
 
 export function money(n: Money, signed = false): string {
