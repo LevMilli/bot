@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   beamColorFor,
   towerClosed,
@@ -71,8 +72,14 @@ function TowerGroup({
   liveTrades,
   subgroups,
   readAt,
+  expanded = false,
+  cardsOpen = false,
 }: {
   readAt?: number | null
+  /** Full-screen page: the list lays out as a grid. */
+  expanded?: boolean
+  /** Cards start open. */
+  cardsOpen?: boolean
   label: string
   bots: BotRow[]
   all: BotRow[]
@@ -93,7 +100,7 @@ function TowerGroup({
       {parts.map((part) => (
         <div key={part.label || label}>
           {part.label && <h4 className="tower-menu-subheading">{part.label}</h4>}
-          <ul className="tower-menu-list">
+          <ul className={expanded ? 'tower-menu-list tower-page-grid' : 'tower-menu-list'}>
             {byOpenFirst(part.bots, now).map((bot) => (
               <TowerTab
                 key={bot.id}
@@ -102,6 +109,8 @@ function TowerGroup({
                 onSelect={onSelect}
                 now={now}
                 readAt={readAt}
+                expanded={expanded}
+                cardsOpen={cardsOpen}
               />
             ))}
           </ul>
@@ -117,12 +126,16 @@ function TowerTab({
   onSelect,
   now,
   readAt,
+  expanded = false,
+  cardsOpen = false,
 }: {
   bot: BotRow
   index: number
   onSelect: (id: string) => void
   now: Date
   readAt?: number | null
+  expanded?: boolean
+  cardsOpen?: boolean
 }) {
   const color = beamColorFor(bot.id, index)
   const closed = towerClosed(bot)
@@ -147,7 +160,7 @@ function TowerTab({
   const skipFlag = Boolean(card?.learning_skip)
   const errorLight = Boolean(card?.error)
   return (
-    <li>
+    <li className={expanded ? 'tower-page-item' : undefined}>
       <button
         type="button"
         aria-label={`${bot.name}. ${closed ? 'Closed.' : ''} ${figure}. Open tower.`}
@@ -195,7 +208,7 @@ function TowerTab({
           {staff && !closed && <span className="tower-tab-status">One book. It does not trade.</span>}
         </span>
       </button>
-      <TowerCard bot={bot} now={now} readAt={readAt} />
+      <TowerCard bot={bot} now={now} readAt={readAt} startOpen={cardsOpen} />
     </li>
   )
 }
@@ -213,7 +226,17 @@ function downloadCsv(bot: BotRow) {
 }
 
 /** Plain-words card: what it trades, how often, today's result, why no trade. */
-function TowerCard({ bot, now, readAt }: { bot: BotRow; now: Date; readAt?: number | null }) {
+function TowerCard({
+  bot,
+  now,
+  readAt,
+  startOpen = false,
+}: {
+  bot: BotRow
+  now: Date
+  readAt?: number | null
+  startOpen?: boolean
+}) {
   const card = bot.card
   const t = card?.today
   const timer = timerLabel(bot)
@@ -225,7 +248,7 @@ function TowerCard({ bot, now, readAt }: { bot: BotRow; now: Date; readAt?: numb
   const history = [...(bot.history || [])].slice(-12).reverse()
   const open = bot.positions || []
   return (
-    <details className="tower-card">
+    <details className="tower-card" open={startOpen || undefined}>
       <summary aria-label={`Card for ${bot.name}`}>card</summary>
       <div className="tower-card-body">
         <p className="tower-card-sign">{districtSign(bot)}</p>
@@ -302,6 +325,158 @@ function TowerCard({ bot, now, readAt }: { bot: BotRow; now: Date; readAt?: numb
   )
 }
 
+
+/** Trading (desk and practice), Research, Support and the hidden lot. Shared by the list and the full page. */
+function TowerSections({
+  bots,
+  lot,
+  query,
+  now,
+  readAt,
+  onSelect,
+  expanded = false,
+  cardsOpen = false,
+}: {
+  bots: BotRow[]
+  lot: BotRow[]
+  query: string
+  now: Date
+  readAt?: number | null
+  onSelect: (id: string) => void
+  expanded?: boolean
+  cardsOpen?: boolean
+}) {
+  const research = bots.filter((bot) => isSupportTower(bot.id))
+  const support = bots.filter((bot) => isStaffSupport(bot.id))
+  const trading = bots.filter((bot) => !isResearchTower(bot.id) && !isStaffSupport(bot.id))
+  const deskBots = trading.filter((bot) => !bot.shadow_only)
+  const practiceBots = trading.filter((bot) => bot.shadow_only)
+  const liveTrades = trading.reduce((n, bot) => n + Math.max(0, Number(bot.open_count) || 0), 0)
+  return (
+    <>
+      <TowerGroup
+        label="Trading"
+        bots={trading}
+        all={bots}
+        now={now}
+        readAt={readAt}
+        liveTrades={liveTrades}
+        expanded={expanded}
+        cardsOpen={cardsOpen}
+        subgroups={[
+          { label: 'Desk · spends vault cash', bots: deskBots },
+          { label: 'Practice · own $500 book', bots: practiceBots },
+        ]}
+        onSelect={onSelect}
+      />
+      <TowerGroup label="Research" bots={research} all={bots} now={now} readAt={readAt} expanded={expanded} cardsOpen={cardsOpen} onSelect={onSelect} />
+      <TowerGroup label="Support" bots={support} all={bots} now={now} readAt={readAt} expanded={expanded} cardsOpen={cardsOpen} onSelect={onSelect} />
+      {!query && lot.length > 0 && (
+        <details className="tower-menu-group tower-lot">
+          <summary className="tower-menu-heading">
+            <span>Hidden lot</span>
+            <span className="tower-menu-live">{lot.length} waiting to trade</span>
+          </summary>
+          <ul className="tower-menu-list">
+            {lot.map((bot) => (
+              <li key={bot.id} className="tower-lot-row">
+                {bot.name} · not in the city until it trades
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </>
+  )
+}
+
+/** Hash that opens the full-screen tower page, so the browser Back button closes it. */
+export const TOWER_PAGE_HASH = '#towers'
+
+/**
+ * Full-screen tower page: every tower in the same groups as the list, cards open,
+ * laid out in columns. Esc, the Close button or Back returns to the city.
+ */
+function TowerPage({
+  allBots,
+  now,
+  readAt,
+  onSelect,
+  onClose,
+}: {
+  allBots: BotRow[]
+  now: Date
+  readAt?: number | null
+  onSelect: (id: string) => void
+  onClose: () => void
+}) {
+  const [query, setQuery] = useState('')
+  const [allOpen, setAllOpen] = useState(true)
+  const closeRef = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    closeRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prev
+    }
+  }, [onClose])
+  const lot = hiddenLot(allBots)
+  const lotIds = new Set(lot.map((b) => b.id))
+  const bots = searchTowers(query ? allBots : allBots.filter((b) => !lotIds.has(b.id)), query)
+  const live = bots.filter((b) => !towerClosed(b) && !(marketSession(b.id, now) && !marketSession(b.id, now)?.open)).length
+  return createPortal(
+    <div className="tower-page" role="dialog" aria-modal="true" aria-label="All towers">
+      <header className="tower-page-head">
+        <div className="tower-page-title">
+          <strong>Towers</strong>
+          <em>
+            {live}/{bots.length} live · paper only
+          </em>
+        </div>
+        <label className="tower-search tower-page-search">
+          <span className="sr-only">Find a tower by name</span>
+          <input
+            type="search"
+            placeholder="Find a tower"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label="Find a tower by name"
+          />
+        </label>
+        <button type="button" className="tower-page-btn" onClick={() => setAllOpen((v) => !v)}>
+          {allOpen ? 'Fold cards' : 'Open cards'}
+        </button>
+        <button type="button" className="tower-page-btn tower-page-close" ref={closeRef} onClick={onClose}>
+          Close ✕
+        </button>
+      </header>
+      <div className="tower-page-body" key={allOpen ? 'open' : 'folded'}>
+        <TowerSections
+          bots={bots}
+          lot={lot}
+          query={query}
+          now={now}
+          readAt={readAt}
+          expanded
+          cardsOpen={allOpen}
+          onSelect={(id) => {
+            onClose()
+            onSelect(id)
+          }}
+        />
+        {query && !bots.length && <p className="tower-search-none">No tower matches that name.</p>}
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 /**
  * Compact tower dropdown — keeps the plaza clear.
  * World holograms stay as quiet name tags; this menu is the accessible hit target.
@@ -309,8 +484,10 @@ function TowerCard({ bot, now, readAt }: { bot: BotRow; now: Date; readAt?: numb
 export function TowerRail({ bots: allBots, onSelect, readAt }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const [page, setPage] = useState(() => typeof window !== 'undefined' && window.location.hash === TOWER_PAGE_HASH)
   const now = useMarketNow()
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const pushedRef = useRef(false)
   const listId = useId()
 
   useEffect(() => {
@@ -330,6 +507,31 @@ export function TowerRail({ bots: allBots, onSelect, readAt }: Props) {
     }
   }, [open])
 
+  useEffect(() => {
+    const onHash = () => setPage(window.location.hash === TOWER_PAGE_HASH)
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
+  const openPage = () => {
+    setOpen(false)
+    if (window.location.hash !== TOWER_PAGE_HASH) {
+      pushedRef.current = true
+      window.location.hash = TOWER_PAGE_HASH
+    }
+    setPage(true)
+  }
+  const closePage = () => {
+    setPage(false)
+    if (window.location.hash !== TOWER_PAGE_HASH) return
+    if (pushedRef.current) {
+      pushedRef.current = false
+      history.back()
+    } else {
+      history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+  }
+
   if (!allBots.length) return null
 
   // Hidden lot: practice towers that have not traded yet. They stay off the
@@ -342,13 +544,6 @@ export function TowerRail({ bots: allBots, onSelect, readAt }: Props) {
   )
 
   const live = bots.filter((b) => !towerClosed(b) && !(marketSession(b.id, now) && !marketSession(b.id, now)?.open)).length
-  const research = bots.filter((bot) => isSupportTower(bot.id))
-  const support = bots.filter((bot) => isStaffSupport(bot.id))
-  const trading = bots.filter((bot) => !isResearchTower(bot.id) && !isStaffSupport(bot.id))
-  const deskBots = trading.filter((bot) => !bot.shadow_only)
-  const practiceBots = trading.filter((bot) => bot.shadow_only)
-  const liveTrades = trading.reduce((n, bot) => n + Math.max(0, Number(bot.open_count) || 0), 0)
-
   return (
     <div className={`tower-menu ${open ? 'open' : ''}`} ref={rootRef}>
       <button
@@ -390,6 +585,9 @@ export function TowerRail({ bots: allBots, onSelect, readAt }: Props) {
 
       {open && (
         <nav className="tower-menu-panel" aria-label="Paper towers" id={listId}>
+          <button type="button" className="tower-menu-full" onClick={openPage} title="Open every tower on one page">
+            ⛶ Full screen
+          </button>
           <label className="tower-search">
             <span className="sr-only">Find a tower by name</span>
             <input
@@ -400,26 +598,10 @@ export function TowerRail({ bots: allBots, onSelect, readAt }: Props) {
               aria-label="Find a tower by name"
             />
           </label>
-          <TowerGroup
-            label="Trading"
-            bots={trading}
-            all={bots}
-            now={now}
-            readAt={readAt}
-            liveTrades={liveTrades}
-            subgroups={[
-              { label: 'Desk · spends vault cash', bots: deskBots },
-              { label: 'Practice · own $500 book', bots: practiceBots },
-            ]}
-            onSelect={(id) => {
-              setOpen(false)
-              onSelect(id)
-            }}
-          />
-          <TowerGroup
-            label="Research"
-            bots={research}
-            all={bots}
+          <TowerSections
+            bots={bots}
+            lot={lot}
+            query={query}
             now={now}
             readAt={readAt}
             onSelect={(id) => {
@@ -427,34 +609,11 @@ export function TowerRail({ bots: allBots, onSelect, readAt }: Props) {
               onSelect(id)
             }}
           />
-          <TowerGroup
-            label="Support"
-            bots={support}
-            all={bots}
-            now={now}
-            readAt={readAt}
-            onSelect={(id) => {
-              setOpen(false)
-              onSelect(id)
-            }}
-          />
-          {!query && lot.length > 0 && (
-            <details className="tower-menu-group tower-lot">
-              <summary className="tower-menu-heading">
-                <span>Hidden lot</span>
-                <span className="tower-menu-live">{lot.length} waiting to trade</span>
-              </summary>
-              <ul className="tower-menu-list">
-                {lot.map((bot) => (
-                  <li key={bot.id} className="tower-lot-row">
-                    {bot.name} · not in the city until it trades
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
           {query && !bots.length && <p className="tower-search-none">No tower matches that name.</p>}
         </nav>
+      )}
+      {page && (
+        <TowerPage allBots={allBots} now={now} readAt={readAt} onSelect={onSelect} onClose={closePage} />
       )}
     </div>
   )
