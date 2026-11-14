@@ -137,8 +137,35 @@ def reserve(url: str = "", clock=time.time) -> float:
         if rate > 0:
             data["next_free"] = start + 1.0 / rate
         data["sent"] = int(data.get("sent") or 0) + 1
+        _note_wait(data, max(0.0, wait))
         _save(data)
     return max(0.0, wait)
+
+
+def _who() -> str:
+    """The tower asking: the desk runs each tower with its own folder as the working directory."""
+    try:
+        return os.path.basename(os.getcwd()) or "?"
+    except OSError:
+        return "?"
+
+
+def _note_wait(data: dict, wait: float) -> None:
+    """Speed: add up how long each tower waited for its turn (measured only, never changes a turn)."""
+    waits = data.get("waits") if isinstance(data.get("waits"), dict) else {}
+    row = waits.get(_who()) if isinstance(waits.get(_who()), dict) else {}
+    row = {"n": int(row.get("n") or 0) + 1, "sec": round(float(row.get("sec") or 0) + wait, 3),
+           "max": round(max(float(row.get("max") or 0), wait), 3)}
+    waits[_who()] = row
+    data["waits"] = waits
+
+
+def waits() -> dict:
+    """Per tower folder: reads, total seconds waited for a turn, longest single wait."""
+    data = _load()
+    out = data.get("waits") if isinstance(data.get("waits"), dict) else {}
+    return {k: dict(v, avg=round(float(v.get("sec") or 0) / max(1, int(v.get("n") or 0)), 3))
+            for k, v in sorted(out.items()) if isinstance(v, dict)}
 
 
 def note_429(retry_after: float | None = None, clock=time.time) -> float:

@@ -41523,6 +41523,8 @@ function paintPimp(d){d=d||{}; const desk=d.desk||{}; const lim=d.limits||{}; co
   h('div',{class:'legend'},h('span',{text:'Gap: '+(legend.gap||'')}),h('span',{text:'Fee: '+(legend.fee||'')}),h('span',{text:'Fair: '+(legend.fair||'')})),
   h('h2',{text:'Security checklist',style:'margin-top:14px'}),
   (d.checklist||[]).map(row=>h('div',{class:'row'},h('span',{text:row.label}),h('b',{text:(row.ok?'ok':'check')+' · '+(row.detail||'')}))),
+  ((d.speed&&d.speed.rows)||[]).length?h('h2',{text:'Speed against targets',style:'margin-top:14px'}):null,
+  ((d.speed&&d.speed.rows)||[]).slice(0,12).map(row=>h('div',{class:'row'},h('span',{text:row.name||row.bot}),h('b',{class:row.over?'warn':'',text:row.text||''}))),
   h('h2',{text:'Who changed a limit',style:'margin-top:14px'}),
   (d.audit||[]).length?(d.audit||[]).map(row=>h('div',{class:'row'},h('span',{text:(row.who||'unknown')+' · '+(row.what||'')}),h('span',{class:'muted',text:row.at||''}))):
    h('p',{class:'muted',text:'No limit changes yet.'}),
@@ -42076,7 +42078,10 @@ async def dash_api_pimp(request):
     except Exception:
         log.exception("pimp snapshot")
         return web.json_response({"ok": False, "error": "Could not read the paper desk."}, status=500)
-    return web.json_response(_pimp_public(body, uid, gid, desk))
+    resp = web.json_response(_pimp_public(body, uid, gid, desk))
+    if "gzip" in str(request.headers.get("Accept-Encoding") or "").lower():
+        resp.enable_compression()  # speed: the snapshot is large JSON; gzip cuts it several times over
+    return resp
 
 
 async def dash_api_pimp_post(request):

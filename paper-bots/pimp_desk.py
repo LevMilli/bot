@@ -35,6 +35,7 @@ if _ROOT_DIR not in sys.path:
     sys.path.insert(0, _ROOT_DIR)
 import desk_profit
 from snapshot_schema import SCHEMA_VERSION as SNAPSHOT_SCHEMA_VERSION
+import desk_speed
 
 log = logging.getLogger("pimpdesk")
 
@@ -219,6 +220,7 @@ SETTLEMENT_FILES = (
     "pimp-ops.json",
     "pimp-audit.json",
     "pimp-runs.json",
+    "run_speed.json",  # check times per tower (speed vs targets), measured only
     # Lifetime record. Books cleared by the midnight refill or a staff reset
     # keep their closed P/L here, so a lost bankroll still counts.
     "pimp-lifetime.json",
@@ -3851,6 +3853,7 @@ def snapshot(root: str | None = None, q: str = "", filt: str = "all", page: int 
         "changes": changes,
         "timer": timer_text(),
         "health": timer_health(root),
+        "speed": speed_view(root),
         "quiet": in_quiet(cfg=cfg),
         "checklist": security_checklist(root),
         "live_switch": live_switch_status(),
@@ -4021,7 +4024,7 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
         cwd = _under(root, folder)
         script = os.path.join(cwd, spec["argv"][0])
         timed_out = False
-        started = time.monotonic()
+        started = time.monotonic()  # speed: start-to-decision time, measured only
         try:
             proc = subprocess.Popen(
                 [sys.executable, script, *spec["argv"][1:]],
@@ -4045,6 +4048,9 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
                 timed_out = True
         except OSError as exc:
             return {"ok": False, "error": f"Could not start the paper script ({exc.__class__.__name__})."}
+        if not shadow_profile:
+            desk_speed.record(root, bot_id, action, time.monotonic() - started,
+                              (not timed_out) and proc.returncode == 0, _now())
         summary = _clip_out(out or "")
         if timed_out:
             summary = _clip_out(f"Stopped after {spec['timeout']}s.\n{summary}")
@@ -4091,6 +4097,24 @@ def run_bot(bot_id: str, action: str = "run", root: str | None = None, manual: b
         }
     finally:
         lock.release()
+
+
+def speed_view(root: str) -> dict:
+    """Check times per tower against the speed targets (read-only, never gates a tower)."""
+    try:
+        names = {b["id"]: b.get("name") or b["id"] for b in BOTS}
+        cats = {b["id"]: b.get("category") or "" for b in BOTS}
+        waits = {}
+        try:
+            import kalshi_gateway
+
+            by_folder = kalshi_gateway.waits()
+            waits = {b["id"]: by_folder[b["folder"]] for b in BOTS if b.get("folder") in by_folder}
+        except Exception:  # noqa: BLE001
+            waits = {}
+        return desk_speed.summary(root, names, cats, waits)
+    except Exception:  # noqa: BLE001
+        return {"paper_only": True, "rows": [], "over": [], "slowest": None, "targets": dict(desk_speed.TARGETS)}
 
 
 def timer_text() -> str:
