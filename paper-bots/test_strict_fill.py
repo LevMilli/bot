@@ -128,7 +128,8 @@ class Btc15mStrictBuy(btc_buy.Btc15mBuy):
         self.assertEqual(pos["ask"], 0.81)
         self.assertEqual(pos["contracts"], 6)
         self.assertEqual(pos["fee"], strict_fill.kalshi_fee(0.81))
-        self.assertEqual(pos["cost"], round(6 * (0.81 + strict_fill.kalshi_fee(0.81)), 2))
+        # Nov 13: fee once per order (0.07 x 6 x 0.81 x 0.19 = 0.0646 -> 0.07).
+        self.assertEqual(pos["cost"], round(6 * 0.81 + 0.07, 2))
         self.assertTrue(pos["fill_check"]["capped"])
         self.assertEqual(pos["fill_check"]["decided_ask"], 0.80)
 

@@ -44,7 +44,10 @@ SPEC = {"id": "more-15m", "name": "More 15m", "floor": 0.05, "max_open": 4, "max
         # Nov 13 fill audit: buy only when Kalshi's tape shows real trading at our price,
         # and Kalshi's fee once per order. After an early sale the tower may buy again
         # (either side) when the edge clears the floor.
-        "tape_check": True, "fee_per_order": True}
+        "tape_check": True, "fee_per_order": True,
+        # Nov 13 (Levi approved): every early sale re-reads the bid 3 seconds after the
+        # decision and books the lower of the two. The sale decision itself is unchanged.
+        "sell_recheck_sec": 3}
 
 # series -> (label, spot kind, spot symbol, Hyperliquid candle coin, sigma floor per minute)
 SERIES = {

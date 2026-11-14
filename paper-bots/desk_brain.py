@@ -6,10 +6,19 @@ Paper only. No live orders.
 """
 from __future__ import annotations
 
+import contextlib
+import functools
 import json
 import os
+import threading
 import time
+import uuid
 from typing import Any, Iterable
+
+try:  # file locks keep towers that share the journal from colliding
+    import fcntl
+except ImportError:  # pragma: no cover - not on Linux
+    fcntl = None
 
 JOURNAL_NAME = "desk_brain_journal.json"
 MAX_DECISIONS = 800
@@ -19,6 +28,44 @@ MAX_SUMMARY = 40
 def journal_path(root: str | None = None) -> str:
     base = root or os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base, JOURNAL_NAME)
+
+
+_THREAD_LOCK = threading.RLock()
+
+
+@contextlib.contextmanager
+def journal_lock(root: str | None = None):
+    """Hold the journal for one read-change-save, across threads and processes.
+
+    Several towers write desk_brain_journal.json. Without this, two saves could
+    run at once and one would lose its temp file (FileNotFoundError, Nov 13).
+    """
+    with _THREAD_LOCK:
+        handle = None
+        try:
+            if fcntl is not None:
+                lock_path = journal_path(root) + ".lock"
+                os.makedirs(os.path.dirname(lock_path) or ".", exist_ok=True)
+                handle = open(lock_path, "a+")
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        except OSError:
+            handle = None
+        try:
+            yield
+        finally:
+            if handle is not None:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                finally:
+                    handle.close()
+
+
+def _locked(func):
+    @functools.wraps(func)
+    def wrapper(root=None, *args, **kwargs):
+        with journal_lock(root):
+            return func(root, *args, **kwargs)
+    return wrapper
 
 
 def _empty() -> dict:
@@ -63,11 +110,16 @@ def save_journal(state: dict, root: str | None = None) -> None:
     state = dict(state)
     state["decisions"] = decisions
     state["paper_only"] = True
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as handle:
-        json.dump(state, handle, indent=2)
-        handle.write("\n")
-    os.replace(tmp, path)
+    # A temp name of its own, so two saves can never share (and lose) one file.
+    tmp = f"{path}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(state, handle, indent=2)
+            handle.write("\n")
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
 def opportunity_score(
@@ -178,6 +230,7 @@ def allocate_risk(ranked: Iterable[dict], remaining_risk: float) -> list[dict]:
     return out
 
 
+@_locked
 def remember_queue(root: str | None, ranked: list[dict], *, note: str = "") -> None:
     """Persist latest global queue snapshot into the brain journal."""
     state = load_journal(root)
@@ -241,6 +294,7 @@ def _journal_number(value, places, *, positive=False):
     return round(number, places)
 
 
+@_locked
 def record_decision(
     root: str | None,
     *,

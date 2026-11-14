@@ -38,6 +38,7 @@ import json
 import math
 import os
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -463,9 +464,53 @@ def _strict_recheck(d: dict, contracts: int, cfg: dict, per_order_fee: bool):
     return n, cost_fee, cost, stamp, ""
 
 
+def _sale_proceeds(contracts: int, bid: float, per_order_fee: bool) -> float:
+    if per_order_fee:
+        return round(contracts * bid - order_fee(contracts, bid), 2)
+    return round(contracts * (bid - fee(bid)), 2)
+
+
+def recheck_sales(state: dict, sold: list[dict], wait_sec: float, per_order_fee: bool,
+                  market=None, sleep=None) -> None:
+    """Re-read the bid a few seconds after each early-sale decision and book the worse one.
+
+    The sale itself is already decided; this only makes its price honest. If the
+    bid dropped in those seconds, the sale books at the lower bid. If it rose, it
+    keeps the decided bid (we never take the better of two). If the re-read fails,
+    the decided bid stays and the row says so.
+    """
+    if not sold or wait_sec <= 0:
+        return
+    (sleep or time.sleep)(wait_sec)
+    market = market or kalshi_market
+    for row in sold:
+        decided = num(row.get("exit_bid"))
+        row["exit_bid_decided"] = decided
+        try:
+            again = next((q for q in sides(market(row["ticker"]) or {}) if q.get("side") == row.get("side")), {})
+            bid2 = num(again.get("bid"))
+        except Exception as exc:  # noqa: BLE001 - a failed re-read keeps the decided bid
+            bid2 = None
+            row["exit_recheck"] = f"re-read failed ({type(exc).__name__}); kept decided bid"
+        row["exit_quote_at"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+        if bid2 is None or decided is None:
+            row.setdefault("exit_recheck", "no bid on re-read; kept decided bid")
+            continue
+        row["exit_bid_recheck"] = bid2
+        if bid2 + 1e-12 >= decided:
+            row["exit_recheck"] = f"bid held at {decided:.2f} after {wait_sec:g}s"
+            continue
+        contracts = int(row.get("contracts") or 0)
+        old = float(row.get("payout") or 0)
+        new = _sale_proceeds(contracts, max(bid2, 0.0), per_order_fee)
+        row.update(exit_bid=bid2, payout=new, pnl=round(new - float(row.get("cost") or 0), 2),
+                   exit_recheck=f"bid fell {decided:.2f} -> {bid2:.2f} in {wait_sec:g}s; booked the lower bid")
+        state["cash"] = round(float(state.get("cash") or 0) - old + new, 4)
+
+
 # ------------------------------------------------------------------ one check
 def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
-              fetch=None, quotes: list | None = None, tape=None) -> int:
+              fetch=None, quotes: list | None = None, tape=None, market=None, sleep=None) -> int:
     """One check. ``model(cfg, now) -> (quotes, note)``. Returns 0 (a skip is not a failure)."""
     os.makedirs(tower, exist_ok=True)
     cfg = locked_cfg(spec, read_json(os.path.join(tower, "config.json")))
@@ -480,11 +525,17 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
     state.update({"paper_only": True, "shadow_only": True, "live_orders": False})
     settled = settle_open(state, now, fetch=fetch)
     note = ""
+    quote_from = dt.datetime.now(dt.timezone.utc)
+    offline = quotes is not None  # quotes handed in (tests/replay): no live wait
     if quotes is None:
         try:
             quotes, note = model(cfg, now)
         except Exception as exc:  # noqa: BLE001 - a failed read is a skip, never a guess
             quotes, note = [], f"read failed ({type(exc).__name__}); waiting"
+    quote_to = dt.datetime.now(dt.timezone.utc)
+    # When this check's Kalshi prices were read: between these two times.
+    quote_stamp = {"quote_read_from": quote_from.isoformat(timespec="seconds"),
+                   "quote_read_to": quote_to.isoformat(timespec="seconds")}
     quotes = list(quotes or [])
     per_order_fee = bool(spec.get("fee_per_order"))
     early = []
@@ -494,6 +545,12 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
     if any(q.get("exit_now") for q in quotes):
         early += side_flips(state, quotes, now, per_order_fee)
     flipped = early + model_flips(state, quotes, now, cfg["flip_margin"], per_order_fee)
+    for row in flipped:
+        row.setdefault("exit_quote_read_to", quote_stamp["quote_read_to"])
+    if spec.get("sell_recheck_sec"):
+        recheck_sales(state, flipped, float(spec["sell_recheck_sec"]), per_order_fee,
+                      market=market or fetch,
+                      sleep=sleep or ((lambda _s: None) if offline else None))
     tape_check = bool(spec.get("tape_check"))
     tape = tape or kalshi_tape
     tape_reads = 0
@@ -566,6 +623,7 @@ def run_tower(spec: dict, tower: str, model, *, now: dt.datetime | None = None,
             "fair": d["fair"], "edge": d["edge"], "why": d["why"],
             **({"group": d["group"]} if d.get("group") else {}),
             "opened": now.isoformat(timespec="seconds"),
+            **quote_stamp,
             "paper_only": True, "shadow_only": True,
             "exit_plan": ({"kind": "model-flip+settle", "flip_margin": cfg["flip_margin"]}
                           if not spec.get("take_profit") else

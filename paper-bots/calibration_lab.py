@@ -41,12 +41,30 @@ import kalshi_shadow_tower as engine  # noqa: E402
 LAB_DIR = os.path.join(HERE, "calibration-lab-paper")
 ROWS = "calibration_rows.jsonl"
 TABLE = "calibration.json"
+# Nov 13: the markets behind the new practice towers, so they get recorded and graded.
+CRYPTO_HOURLY = ("KXSOLD", "KXXRPD", "KXDOGED", "KXBNBD", "KXSOL", "KXXRP", "KXDOGE", "KXBNB")
+WEATHER_LOWS = tuple(f"KXLOWT{c}" for c in (
+    "NYC", "CHI", "MIA", "AUS", "DEN", "PHIL", "LAX", "ATL", "BOS", "DAL", "DC", "EWR",
+    "HOU", "LV", "MIN", "NOLA", "OKC", "PHX", "SAN", "SATX", "SDF", "SEA", "SFO", "TTN"))
+WEATHER_CITY_HIGHS = tuple(f"KXHIGHT{c}" for c in (
+    "ATL", "BOS", "DAL", "DC", "EWR", "HOU", "LV", "MIN", "NOLA", "OKC", "PHX",
+    "SAN", "SATX", "SDF", "SEA", "SFO", "TTN"))
+MONTHLY_PRECIP = tuple(f"KXRAIN{c}M" for c in (
+    "NYC", "ABQ", "CHI", "EWR", "IND", "MIN", "NOLA", "LAX", "HOU", "MIA", "SEA", "SFO",
+    "AUS", "DEN", "ATL", "BOS", "DC", "PHIL")) + tuple(f"KX{c}SNOWM" for c in (
+    "BOS", "CHI", "DEN", "DET", "SEA", "NYC", "DC", "PHIL", "MSP"))
+GAS_MONTHLY = ("KXAAAGASM",)
 FAMILIES = {
     "weather": ("KXHIGHNY", "KXHIGHCHI", "KXHIGHMIA", "KXHIGHAUS", "KXHIGHDEN", "KXHIGHPHIL", "KXHIGHLAX"),
     "gas": ("KXAAAGASW",),
     "crypto_daily": ("KXBTCD", "KXETHD"),
     "nasdaq": ("KXNASDAQ100U", "KXNASDAQ100"),
     "sp": ("KXINXU", "KXINX"),
+    "weather_low": WEATHER_LOWS,
+    "weather_cities": WEATHER_CITY_HIGHS,
+    "precip_monthly": MONTHLY_PRECIP,
+    "gas_monthly": GAS_MONTHLY,
+    "crypto_hourly": CRYPTO_HOURLY,
 }
 HORIZONS = (1, 3, 6)
 # B13: 15-minute families. Separate from FAMILIES so nothing that reads the daily
@@ -68,7 +86,7 @@ BAND = 0.05
 Z = 1.96
 LOOKBACK_DAYS = 14
 KEEP_DAYS = 120
-MAX_BATCHES = 25          # candlestick calls per run (up to 100 markets each)
+MAX_BATCHES = 50          # candlestick calls per run (up to 100 markets each); 10 families x 5
 FAMILY_BATCHES = 5        # per family per run, so one busy family cannot starve the rest
 MAX_SCORE_LOOKUPS = 40    # market reads per run for the scorecard
 

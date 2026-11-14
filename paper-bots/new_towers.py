@@ -18,7 +18,7 @@ TOWERS = (
         "floor": 0.05,
         "kind": "weather",
         "every_sec": 300,
-        "timeout": 75,
+        "timeout": 150,  # Nov 13: was 75s; slow weather reads hit it 65 times on Nov 13
         "max_open": 7,
         "blurb": (
             "Shadow Kalshi daily-high brackets for seven cities. Prices each bracket from the "
@@ -946,7 +946,8 @@ TOWERS = (
         ),
         "buy": [
             "Never buys. Zero cash, zero stake, no tower risk share",
-            "23 series: weather, gas, crypto daily, Nasdaq, S&P, Treasury, CPI, GDP and game winners",
+            "100 series: weather highs and lows, monthly rain and snow, gas, crypto daily and hourly, "
+            "Nasdaq, S&P, Treasury, CPI, GDP and game winners",
             "One public Kalshi read per series per full run (every 15 minutes), through the shared gateway",
             "15-minute windows every minute in their last 14 minutes: one batched read, plus one listing when a window rolls over",
         ],

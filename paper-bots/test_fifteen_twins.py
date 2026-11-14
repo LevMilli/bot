@@ -82,7 +82,8 @@ def test_twins_are_installed_as_shadow_towers_with_25_dollar_tickets():
 
 def test_more_15m_original_spec_is_unchanged():
     assert _more_spec() == {"id": "more-15m", "name": "More 15m", "floor": 0.05, "max_open": 4, "max_edge": 0.20,
-                            "group_cap": 2, "tape_check": True, "fee_per_order": True}
+                            "group_cap": 2, "tape_check": True, "fee_per_order": True,
+                            "sell_recheck_sec": 3}  # Levi approved, Nov 13
 
 
 def test_each_twin_changes_one_rule_against_its_control():

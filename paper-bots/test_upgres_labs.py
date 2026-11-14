@@ -61,7 +61,12 @@ def test_research_rows_still_pass_the_desk_check():
 
 # ------------------------------------------------------------------ B13 calibration 15m
 def test_daily_families_unchanged_and_15m_kept_apart():
-    assert set(lab.FAMILIES) == {"weather", "gas", "crypto_daily", "nasdaq", "sp"}
+    # The original five keep their members; Nov 13 added five more for the new towers.
+    assert set(lab.FAMILIES) == {"weather", "gas", "crypto_daily", "nasdaq", "sp", "weather_low",
+                                 "weather_cities", "precip_monthly", "gas_monthly", "crypto_hourly"}
+    assert lab.FAMILIES["weather"] == ("KXHIGHNY", "KXHIGHCHI", "KXHIGHMIA", "KXHIGHAUS", "KXHIGHDEN",
+                                       "KXHIGHPHIL", "KXHIGHLAX")
+    assert lab.FAMILIES["gas"] == ("KXAAAGASW",) and lab.FAMILIES["crypto_daily"] == ("KXBTCD", "KXETHD")
     assert lab.HORIZONS == (1, 3, 6)
     assert set(lab.FAMILIES_15M) == {"crypto_15m", "commodity_15m", "fx_15m", "index_15m"}
     every = [s for m in lab.FAMILIES_15M.values() for s in m]
