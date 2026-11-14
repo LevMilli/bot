@@ -115,6 +115,10 @@ def _one_run(tmp_path, monkeypatch, label, speed_on):
         else:
             engine.run_tower(bot.SPEC, str(tower), bot.model, now=NOW)
     account = json.loads((tower / "paper_account.json").read_text())
+    # Wall-clock read times (added Nov 13) differ run to run; everything else must match.
+    for row in account.get("open", []) + account.get("closed", []):
+        for key in ("quote_read_from", "quote_read_to", "exit_quote_read_to", "exit_quote_at"):
+            row.pop(key, None)
     research = [json.loads(line) for line in (tower / "research.jsonl").read_text().splitlines()]
     return account, research, out.getvalue(), seen
 
